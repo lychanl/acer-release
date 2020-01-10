@@ -194,7 +194,6 @@ class GaussianActor(Actor):
             beta_penalty: penalty for too confident actions coefficient
             actions_bound: upper (lower == '-actions_bound') bound for allowed actions,
              required in case of continuous actions
-
         """
         super().__init__(observations_dim, actions_dim, layers, beta_penalty, *args, **kwargs)
         self._actions_bound = actions_bound
@@ -228,7 +227,8 @@ class GaussianActor(Actor):
         mean = self._call_mean(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
-            scale_diag=[1.0])
+            scale_diag=[self._std]
+        )
 
         return dist.prob(actions)
 
@@ -237,7 +237,8 @@ class GaussianActor(Actor):
         mean = self._call_mean(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
-            scale_diag=[1.0])
+            scale_diag=[self._std]
+        )
 
         return dist.log_prob(actions)
 
@@ -247,7 +248,7 @@ class GaussianActor(Actor):
 
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
-            scale_diag=[1.0]
+            scale_diag=[self._std]
         )
 
         actions = dist.sample(dtype=tf.dtypes.float32)
@@ -380,7 +381,6 @@ class ACER:
                     z_t += (self._alpha * (1 - self._p)) ** i \
                              * (reward + next_state_future_reward - future_reward) \
                              * densities[i]
-                # print(z_t)
             z.append(z_t)
         observations = tf.convert_to_tensor(np.array([batch['observations'][0] for batch in buffers_batches]), dtype=tf.dtypes.float32)
         actions = tf.convert_to_tensor(np.array([batch['actions'][0] for batch in buffers_batches]), dtype=tf.dtypes.float32)
