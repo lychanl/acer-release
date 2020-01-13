@@ -423,7 +423,7 @@ class ACER:
 
         Args:
             experience_batches: batches [num_parallel_envs, trajectory_length] of experience from the buffers.
-                Each bach origins from different replay buffer. See ReplayBuffer specification for detailed
+                each batch origins from different replay buffer. See ReplayBuffer specification for detailed
                 experience batch description.
         """
 
@@ -469,7 +469,7 @@ class ACER:
         """Computes value approximation and policy for samples from the replay buffers.
 
         experience_batches: batches [num_parallel_envs, trajectory_length] of experience from the buffers.
-            Each bach origins from different replay buffer. See ReplayBuffer specification for detailed
+            each batch origins from different replay buffer. See ReplayBuffer specification for detailed
             experience batch description.
 
         Returns:
