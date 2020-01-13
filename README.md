@@ -5,28 +5,29 @@ This repository contains original implementation of **Actor-Critic with
 ## Installation
 
 ### Prerequisites
-**Python3** is required. Note that, steps bellow won't install 
+**Python3** is required.  
+Note that, steps bellow won't install 
 all of the OpenAI Gym environments. Visit
 [OpenAI Gym repository](https://github.com/openai/gym) for more details.
 
 ### Installation steps
-2. Create new virtual environment:
+1. Create new virtual environment:
 ```shell script
 python3.7 -m venv {name}
 ```
 Note: it will create the environment folder in your current directory.
 
-3. Activate the virtual environment (should be run from the same directory as above
+2. Activate the virtual environment (should be run from the same directory as above
 or full path should be passed):
 ```shell script
 source {name}/bin/activate 
 ```
-4. While in the repository's root directory, install the requirements:
+3. While in the repository's root directory, install the requirements:
 ```shell script
 pip install -r requirements.txt
 ``` 
 
-5. Run the agent:
+4. Run the agent:
 ```shell script
 python run.py {args...}
 ``` 
@@ -41,7 +42,7 @@ python run.py --env_name CartPole-v0 --gamma 0.95 --alpha 0.9 \
     --critic_epsilon 0.00001 --actor_beta_penalty 0.001
 ```
 ```shell script
-python3 run.py --env_name Pendulum-v0 --gamma 0.95 --alpha 0.9 \
+python run.py --env_name Pendulum-v0 --gamma 0.95 --alpha 0.9 \
     --p 0.1 --b 5 --c0 0.3 --c 50 --actor_lr 0.001 --critic_lr 0.002  \
     --actor_layers 20 --critic_layers 50 --memory_size 1000000 \
     --num_parallel_envs 10 --actor_beta1 0.9 --actor_beta2 0.999 \
