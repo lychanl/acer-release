@@ -190,7 +190,7 @@ class CategoricalActor(Actor):
             keepdims=True
         )
         total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, z) + penalty)
-    
+
         # entropy maximization penalty
         # penalty = self._beta_penalty * (-tf.reduce_sum(tf.math.multiply(probs, log_probs), axis=1))
 
@@ -334,7 +334,8 @@ class ACER:
         TODO: refactor converting to tensor
         """
 
-        assert is_discrete or actions_bound, "For continuous actions, 'actions_bound' argument should be specified"
+        assert is_discrete or actions_bound is not None, "For continuous actions, " \
+                                                         "'actions_bound' argument should be specified"
         assert is_discrete or std, "For continuous actions, 'std' argument should be specified"
 
         self._tf_time_step = tf.Variable(name='tf_time_step', initial_value=1, dtype=tf.dtypes.int64)
