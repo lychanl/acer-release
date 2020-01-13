@@ -1,6 +1,9 @@
 import argparse
+import datetime
 
 import numpy as np
+import tensorflow as tf
+
 from acer import ACER
 from environment import SequentialEnv
 from utils import get_env_variables, reset_env_and_agent
@@ -8,41 +11,45 @@ from utils import get_env_variables, reset_env_and_agent
 # handle command line arguments
 parser = argparse.ArgumentParser(description='Actor-Critic with experience replay.')
 parser.add_argument('--env_name', type=str, help='OpenAI Gym environment name', default="CartPole-v0")
-parser.add_argument('--runs_number', type=int, help='Number of independent agent\'s runs', default=1)
-parser.add_argument('--max_episodes', type=int, help='Maximum number of episodes in each run.', default=None)
-parser.add_argument('--output_dir', type=str, help='Output directory for rewards files', default="./")
-# parser.add_argument('--use_gpu', help="Specify to use GPU", action='store_true')
-parser.add_argument('--render', help="Specify to render frames", action='store_true')
+# parser.add_argument('--runs_number', type=int, help='number of independent agent\'s runs', default=1)
+# parser.add_argument('--max_episodes', type=int, help='maximum number of episodes in a single run', default=None)
+# parser.add_argument('--output_dir', type=str, help='rewards log output directory', default="./")
+# parser.add_argument('--render', help="true if frames should be rendered", action='store_true')
 parser.add_argument('--gamma', type=float, help='discount factor', required=False)
-parser.add_argument('--alpha', type=float, help='alpha value (see from Actor-Critic(lambda) algorithm)', required=False)
-parser.add_argument('--p', type=float, help='geometric probability distribution parameter (prob. of failure)',
+parser.add_argument('--alpha', type=float, help='alpha value coefficient', required=False)
+parser.add_argument('--p', type=float, help='prob. of success in geometric probability distribution, used to'
+                                            'sample trajectory length while sampling from the buffer',
                     required=False)
-parser.add_argument('--b', type=float, help='probability density truncation parameter', required=False)
-parser.add_argument('--actor_epsilon', type=float, help='ADAM optimizer epsilon parameter for Actor',
+parser.add_argument('--b', type=float, help='probability density truncation coefficient', required=False)
+parser.add_argument('--actor_epsilon', type=float, help='ADAM optimizer epsilon parameter (Actor)',
                     required=False)
-parser.add_argument('--actor_beta1', type=float, help='ADAM optimizer beta1 parameter for Actor', required=False)
-parser.add_argument('--actor_beta2', type=float, help='ADAM optimizer beta2 parameter for Actor', required=False)
-parser.add_argument('--critic_epsilon', type=float, help='ADAM optimizer epsilon parameter for Critic',
+parser.add_argument('--actor_beta1', type=float, help='ADAM optimizer beta1 (Actor)', required=False)
+parser.add_argument('--actor_beta2', type=float, help='ADAM optimizer beta2 (Actor)', required=False)
+parser.add_argument('--critic_epsilon', type=float, help='ADAM optimizer epsilon (Critic)',
                     required=False)
-parser.add_argument('--critic_beta1', type=float, help='ADAM optimizer beta1 parameter for Critic', required=False)
-parser.add_argument('--critic_beta2', type=float, help='ADAM optimizer beta2 parameter for Critic', required=False)
+parser.add_argument('--critic_beta1', type=float, help='ADAM optimizer beta1 (Critic)', required=False)
+parser.add_argument('--critic_beta2', type=float, help='ADAM optimizer beta2 (Critic)', required=False)
 parser.add_argument('--actor_lr', type=float, help='Actor learning rate', required=False)
 parser.add_argument('--critic_lr', type=float, help='Critic learning rate', required=False)
-parser.add_argument('--actor_beta_penalty', type=float, help='Actor penalty factor', required=False)
+parser.add_argument('--actor_beta_penalty', type=float, help='Actor penalty coefficient', default=0.1)
 parser.add_argument('--c', type=int, help='experience replay intensity', required=False)
-parser.add_argument('--memory_size', type=int, help='Memory buffer size', required=False)
-parser.add_argument('--min_steps_learn', type=float, help='initial experience replay intensity factor', required=False)
-parser.add_argument('--actor_layers', nargs='+', type=int, help='Sizes of Actor\'s network hidden layers',
+parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=0.3)
+parser.add_argument('--memory_size', type=int, help='memory buffer size', required=False)
+parser.add_argument('--actor_layers', nargs='+', type=int, help='List of Actor\'s neural network hidden layers sizes',
                     required=False)
-parser.add_argument('--critic_layers', nargs='+', type=int, help='Sizes of Critic\'s network hidden layers',
+parser.add_argument('--critic_layers', nargs='+', type=int, help='List of Critic\'s neural network hidden layers sizes',
                     required=False)
-parser.add_argument('--std', nargs='+', type=float, help='Covariance diagonal',
+parser.add_argument('--std', nargs='+', type=float, help='Actor\'s covariance diagonal (Gaussian policy)',
                     required=False, default=[1.0])
-parser.add_argument('--num_parallel_envs', type=int, default=4,
+parser.add_argument('--num_parallel_envs', type=int, help='Number of environments to be run in a parallel', default=4,
                     required=True)
 
 
-def run_acer(env, parameters, runs_number=10, max_episodes=200, max_steps_in_episode=None):
+def run_acer(env, parameters, max_steps_in_episode=None):
+    log_dir = "logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    tensorboard_writer = tf.summary.create_file_writer(log_dir)
+    tensorboard_writer.set_as_default()
+
     agent = ACER(
         observations_dim=parameters['observations_dim'],
         actions_dim=parameters['actions_dim'],
@@ -57,7 +64,7 @@ def run_acer(env, parameters, runs_number=10, max_episodes=200, max_steps_in_epi
         p=parameters['p'],
         b=parameters['b'],
         c=parameters['c'],
-        min_steps_learn=parameters['min_steps_learn'],
+        c0=parameters['c0'],
         actor_lr=parameters['actor_lr'],
         actor_beta_penalty=parameters['actor_beta_penalty'],
         actor_adam_beta1=parameters['actor_beta1'],
@@ -72,48 +79,46 @@ def run_acer(env, parameters, runs_number=10, max_episodes=200, max_steps_in_epi
 
     n_steps = 0
 
-    for current_run_number in range(0, runs_number):
+    cumulated_rewards = [0] * parameters['num_parallel_envs']
+    episode_num = 1
+    done_steps_in_episode = [0] * parameters['num_parallel_envs']
 
-        print("STARTED RUN {}".format(current_run_number))
+    current_states = reset_env_and_agent(agent, env)
+    while True:
+        for i in range(0, len(current_states)):
+            done_steps_in_episode[i] += 1
+        actions, policies = agent.predict_action(current_states)
+        steps = env.step(actions)
+        n_steps += parameters['num_parallel_envs']
 
-        cumulated_rewards = [0] * parameters['num_parallel_envs']
-        episode_num = 1
-        done_steps_in_episode = [0] * parameters['num_parallel_envs']
+        exp = []
+        for i, step in enumerate(steps):
+            is_done = step[2] and (not max_steps_in_episode or max_steps_in_episode != done_steps_in_episode[i])
+            exp.append((actions[i], current_states[i], step[1], step[0], policies[i], is_done,
+                        step[2] or max_steps_in_episode == done_steps_in_episode[i]))
 
-        current_states = reset_env_and_agent(agent, env)
-        while True:
-            for i in range(0, len(current_states)):
-                done_steps_in_episode[i] += 1
+        agent.save_experience(exp)
+        agent.learn()
 
-            actions, policies = agent.predict_action(current_states)
-            steps = env.step(actions)
-            n_steps += parameters['num_parallel_envs']
+        next_states = np.array([step[0] for step in steps])
+        current_states = next_states
+        rewards = [step[1] for step in steps]
 
-            exp = []
-            for i, step in enumerate(steps):
-                is_done = step[2] and (not max_steps_in_episode or max_steps_in_episode != done_steps_in_episode[i])
-                exp.append((actions[i], current_states[i], step[1], step[0], policies[i], is_done,
-                            step[2] or max_steps_in_episode == done_steps_in_episode[i]))
+        for i in range(0, len(current_states)):
+            cumulated_rewards[i] += rewards[i]
+            if steps[i][2] or (max_steps_in_episode and max_steps_in_episode == done_steps_in_episode[i]):
+                current_states[i] = env.reset(i)
 
-            agent.save_experience(exp)
-            agent.learn()
+                print(
+                    "episode {}; return: {}, time step: {}".format(episode_num, cumulated_rewards[i], n_steps)
+                )
 
-            next_states = np.array([step[0] for step in steps])
-            current_states = next_states
-            rewards = [step[1] for step in steps]
+                with tensorboard_writer.as_default():
+                    tf.summary.scalar('episode_return', cumulated_rewards[i], episode_num)
+                cumulated_rewards[i] = 0
+                done_steps_in_episode[i] = 0
 
-            for i in range(0, len(current_states)):
-                cumulated_rewards[i] += rewards[i]
-                if steps[i][2] or (max_steps_in_episode and max_steps_in_episode == done_steps_in_episode[i]):
-                    current_states[i] = env.reset(i)
-
-                    print("episode {}/{}; cumulated reward: {}, timestep: {}".format(episode_num, max_episodes,
-                                                                                     cumulated_rewards[i], n_steps))
-
-                    cumulated_rewards[i] = 0
-                    done_steps_in_episode[i] = 0
-
-                    episode_num += 1
+                episode_num += 1
 
 
 def main():
@@ -137,7 +142,7 @@ def main():
     # remove empty values
     parameters = {k: v for k, v in parameters.items() if v is not None}
     print(parameters)
-    run_acer(env, parameters, args.runs_number, args.max_episodes, max_steps_in_episode)
+    run_acer(env, parameters, max_steps_in_episode)
 
 
 if __name__ == "__main__":
