@@ -61,7 +61,7 @@ class Critic(tf.keras.Model):
         value = self.hidden_value(x)
 
         with tf.name_scope('critic'):
-            tf.summary.scalar('value_mean', tf.reduce_mean(value), step=self._tf_time_step)
+            tf.summary.scalar('batch_value_mean', tf.reduce_mean(value), step=self._tf_time_step)
 
         return value
 
@@ -77,7 +77,7 @@ class Critic(tf.keras.Model):
         loss = tf.reduce_mean(-tf.math.multiply(self.call(observations), z))
 
         with tf.name_scope('critic'):
-            tf.summary.scalar('loss', loss, step=self._tf_time_step)
+            tf.summary.scalar('batch_loss', loss, step=self._tf_time_step)
         return loss
 
 
@@ -195,8 +195,8 @@ class CategoricalActor(Actor):
         # penalty = self._beta_penalty * (-tf.reduce_sum(tf.math.multiply(probs, log_probs), axis=1))
 
         with tf.name_scope('actor'):
-            tf.summary.scalar('loss', total_loss, step=self._tf_time_step)
-            tf.summary.scalar('penalty_mean', tf.reduce_mean(penalty), step=self._tf_time_step)
+            tf.summary.scalar('batch_loss', total_loss, step=self._tf_time_step)
+            tf.summary.scalar('batch_penalty_mean', tf.reduce_mean(penalty), step=self._tf_time_step)
 
         return total_loss
 
@@ -220,8 +220,8 @@ class CategoricalActor(Actor):
         actions_probs = tf.gather_nd(probs, actions, batch_dims=1)
 
         with tf.name_scope('actor'):
+            # TODO: refactor
             tf.summary.histogram('action', actions, step=self._tf_time_step)
-            tf.summary.scalar('prob_mean', tf.reduce_mean(actions_probs), step=self._tf_time_step)
 
         return tf.squeeze(actions, axis=[1]), actions_probs
 
@@ -248,7 +248,7 @@ class GaussianActor(Actor):
 
         self._actions_bound = actions_bound
         self._std = std
-        # self._log_std = tf.Variable(tf.zeros(shape=1), name="actor_std")
+        self._log_std = tf.Variable(tf.zeros(shape=(actions_dim, )) - 0.5, name="actor_std")
 
     @property
     def action_dtype(self):
@@ -258,8 +258,8 @@ class GaussianActor(Actor):
         mean = self._call_mean(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
-            # scale_diag=tf.exp(self._log_std)
-            scale_diag=self._std
+            scale_diag=tf.exp(self._log_std)
+            # scale_diag=self._std
         )
 
         action_log_probs = tf.expand_dims(dist.log_prob(actions), axis=1)
@@ -272,14 +272,17 @@ class GaussianActor(Actor):
             axis=1,
             keepdims=True
         )
-        # entropy_penalty = dist.entropy() * 0.1
+        entropy = dist.entropy()
+        entropy_penalty = 0.001 * entropy
 
-        total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, z) + bounds_penalty)
+        total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, z) + bounds_penalty - entropy_penalty)
 
         with tf.name_scope('actor'):
-            # tf.summary.scalar('std', tf.exp(tf.squeeze(self._log_std)), step=self._tf_time_step)
-            tf.summary.scalar('loss', total_loss, step=self._tf_time_step)
-            tf.summary.scalar('bounds_penalty_mean', tf.reduce_mean(bounds_penalty), step=self._tf_time_step)
+            for i in range(self._actions_dim):
+                tf.summary.scalar(f'std_{i}', tf.exp(self._log_std[i]), step=self._tf_time_step)
+            tf.summary.scalar('batch_loss', total_loss, step=self._tf_time_step)
+            tf.summary.scalar('batch_bounds_penalty_mean', tf.reduce_mean(bounds_penalty), step=self._tf_time_step)
+            tf.summary.scalar('batch_entropy_mean', tf.reduce_mean(entropy), step=self._tf_time_step)
 
         return total_loss
 
@@ -294,8 +297,8 @@ class GaussianActor(Actor):
         mean = self._call_mean(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
-            # scale_diag=tf.exp(self._log_std)
-            scale_diag=self._std
+            scale_diag=tf.exp(self._log_std)
+            # scale_diag=self._std
         )
 
         return dist.prob(actions)
@@ -306,16 +309,16 @@ class GaussianActor(Actor):
 
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
-            # scale_diag=tf.exp(self._log_std)
-            scale_diag=self._std
+            scale_diag=tf.exp(self._log_std)
+            # scale_diag=self._std
         )
 
         actions = dist.sample(dtype=tf.dtypes.float32)
         actions_probs = dist.prob(actions)
 
         with tf.name_scope('actor'):
-            # TODO: handle multidimensional actions
-            tf.summary.scalar('action_mean', tf.reduce_mean(actions), step=self._tf_time_step)
+            for i in range(self._actions_dim):
+                tf.summary.scalar(f'batch_action_{i}_mean', tf.reduce_mean(actions[:, i]), step=self._tf_time_step)
 
         return actions, actions_probs
 

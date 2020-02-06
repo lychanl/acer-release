@@ -89,6 +89,13 @@ def run_acer(env, parameters, max_steps_in_episode=None):
             done_steps_in_episode[i] += 1
         actions, policies = agent.predict_action(current_states)
         steps = env.step(actions)
+
+        with tf.name_scope('env'):
+            rewards = [step[1] for step in steps]
+            tf.summary.scalar('mean_reward', np.mean(rewards), n_steps)
+            tf.summary.scalar('max_reward', np.max(rewards), n_steps)
+            tf.summary.scalar('min_reward', np.min(rewards), n_steps)
+
         n_steps += parameters['num_parallel_envs']
 
         exp = []
@@ -113,8 +120,8 @@ def run_acer(env, parameters, max_steps_in_episode=None):
                     "episode {}; return: {}, time step: {}".format(episode_num, cumulated_rewards[i], n_steps)
                 )
 
-                with tensorboard_writer.as_default():
-                    tf.summary.scalar('episode_return', cumulated_rewards[i], episode_num)
+                with tf.name_scope('env'):
+                    tf.summary.scalar('return', cumulated_rewards[i], episode_num)
                 cumulated_rewards[i] = 0
                 done_steps_in_episode[i] = 0
 
