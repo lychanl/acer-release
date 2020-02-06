@@ -4,8 +4,8 @@ import datetime
 import numpy as np
 import tensorflow as tf
 
-from acer import ACER
 from environment import SequentialEnv
+from models import ACER
 from utils import get_env_variables, reset_env_and_agent
 
 # handle command line arguments
