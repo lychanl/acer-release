@@ -156,7 +156,7 @@ class Actor(ABC, tf.keras.Model):
 
     @abstractmethod
     def act_deterministic(self, observations: np.array, **kwargs) -> tf.Tensor:
-        """Samples actions without randomness.
+        """Samples actions without exploration noise.
 
         Args:
             observations: batch [batch_size, observations_dim] of observations vectors
@@ -436,11 +436,11 @@ class ACER(Agent):
 
         Args:
             observations: batch [batch_size, observations_dim] of observations vectors
-            is_deterministic: True if mean actions should be returned
+            is_deterministic: True if mean actions (without exploration noise) should be returned
 
         Returns:
             Tuple of sampled actions and corresponding probabilities (probability densities) if action was sampled
-            from the distribution, None otherwise
+                from the distribution, None otherwise
         """
         processed_obs = self._standardize_observations_if_turned_on(observations)
         if is_deterministic:
