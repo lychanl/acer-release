@@ -99,11 +99,7 @@ class ReplayBuffer:
         }
 
     def _sample_random_index(self) -> int:
-        """Uniformly samples one index from the buffer
-
-        Returns:
-            sampled index
-        """
+        """Uniformly samples one index from the buffer"""
         return np.random.randint(low=0, high=self._current_size)
 
     @property

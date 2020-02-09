@@ -13,15 +13,15 @@ class BaseMultiEnv(ABC):
     TODO: write tests
     """
 
-    def __init__(self, env_id: str, nenvs: int):
+    def __init__(self, env_id: str, n_envs: int):
         """Creates 'n_envs' gym environments.
 
         Args:
             env_id: Name of environment to instantiate
-            nenvs: Number of environments to instantiate
+            n_envs: Number of environments to instantiate
         """
         self._env_id = env_id
-        self._nenvs = nenvs
+        self._nenvs = n_envs
         self._envs = [gym.make(self._env_id) for _ in range(self._nenvs)]
 
     def step(self, actions: list) -> List[Tuple[np.array, float, bool, dict]]:

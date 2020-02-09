@@ -34,20 +34,20 @@ python run.py {args...}
 
 ## Example runs
 ```shell script
-python run.py --env_name CartPole-v0 --gamma 0.95 --alpha 0.9 \
-    --p 0.1 --b 10 --c0 0.3 --c 50 --actor_lr 0.001 --critic_lr 0.001 \
-    --actor_layers 10 --critic_layers 20 --memory_size 1000000 \
-    --num_parallel_envs 1 --actor_beta1 0.9 --actor_beta2 0.999 \
-    --actor_epsilon 0.00001 --critic_beta1 0.9 --critic_beta2 0.999 \
-    --critic_epsilon 0.00001 --actor_beta_penalty 0.001
+python3 acer/run.py --env_name LunarLander-v2 --gamma 0.99 --alpha 0.9 --p 0.1 --b 3 --c0 0.3 \
+    --c 50 --actor_lr 0.001 --critic_lr 0.002  --actor_layers 60 --critic_layers 100 \
+    --memory_size 1000000 --num_parallel_envs 10 --actor_adam_beta1 0.9 --actor_adam_beta2 0.999 \
+    --actor_adam_epsilon 0.1 --critic_adam_beta1 0.9 --critic_adam_beta2 0.999 \
+    --critic_adam_epsilon 0.1 --actor_beta_penalty 0.001 --standardize_obs \
+    --evaluate_time_steps_interval 1500 --num_evaluation_runs 10 \
 ```
 ```shell script
 python run.py --env_name Pendulum-v0 --gamma 0.95 --alpha 0.9 \
     --p 0.1 --b 5 --c0 0.3 --c 50 --actor_lr 0.001 --critic_lr 0.002  \
     --actor_layers 20 --critic_layers 50 --memory_size 1000000 \
-    --num_parallel_envs 10 --actor_beta1 0.9 --actor_beta2 0.999 \
-    --actor_epsilon 0.1 --critic_beta1 0.9 --critic_beta2 0.999 \
-    --critic_epsilon 0.1 --actor_beta_penalty 0.1 --std 0.4
+    --num_parallel_envs 10 --actor_adam_beta1 0.9 --actor_adam_beta2 0.999 \
+    --actor_adam_epsilon 0.1 --critic_adam_beta1 0.9 --critic_adam_beta2 0.999 \
+    --critic_adam_epsilon 0.1 --actor_beta_penalty 0.1
 ```
 
 ## Parameters
@@ -80,14 +80,10 @@ Asynchronous workers will be required to handle more complex environments
     further in no exploration and learning at all. 
     Maybe with entropy penalty the mechanism can work.
  * more meaningful statistics for TensorBoard
- * reward scaling
- * observations standardization
- * gradient clipping
+ * reward clipping / scaling
  * sampling more trajectories per environment
  * weights initialization (*normalized column* initialization from the OpenAI Baselines
  is used right now, some sources propose Orthogonal initialization)
- * RMSProp instead of Adam (Adam can be unstable with non-stationary data)
- * refactor *run.py* script, add new *runners* to handle more environments
  * probably, some optimizations around *@tf.function* usage can be done
  
  

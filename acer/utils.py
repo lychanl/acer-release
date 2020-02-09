@@ -38,7 +38,6 @@ def flatten_experience(buffers_batches: List[Dict[str, Union[np.array, list]]]) 
             * batch [batch_size, observations_dim] of observations
             * batch [batch_size, observations_dim] of 'next' observations
             * batch [batch_size, actions_dim] of actions
-
     """
     observations = np.concatenate([batch['observations'] for batch in buffers_batches], axis=0)
     next_observations = np.concatenate([batch['next_observations'] for batch in buffers_batches], axis=0)
@@ -66,7 +65,7 @@ def unflatten_batches(
             * batch [batch_size, 1] of value function approximation for "next" observations
     """
 
-    actions_idx, observations_idx = _get_flatten_experience_indices(buffers_batches)
+    actions_idx, observations_idx = get_flatten_experience_indices(buffers_batches)
 
     policies_batches = []
     values_next_batches = []
@@ -80,7 +79,7 @@ def unflatten_batches(
     return policies_batches, values_batches, values_next_batches
 
 
-def _get_flatten_experience_indices(buffers_batches) -> Tuple[List[int], List[int]]:
+def get_flatten_experience_indices(buffers_batches) -> Tuple[List[int], List[int]]:
     """Restores indices of the original division from the experience sampled from the buffers.
 
     Args:
@@ -129,8 +128,31 @@ def reset_env_and_agent(agent, env: BaseMultiEnv) -> List[np.array]:
 
     Returns:
         initial states of the environments
-
     """
     agent.reset()
     current_states = env.reset_all()
     return current_states
+
+
+class RunningMeanVariance:
+    def __init__(self, epsilon: float = 1e-4, shape: Tuple = ()):
+        """Computes running mean and variance with Welford's online algorithm
+
+        Reference:
+            https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+
+        Args:
+            epsilon: small value for numerical stability
+            shape: shape of the normalized vector
+        """
+        self.mean = np.zeros(shape=shape)
+        self.var = np.ones(shape=shape)
+        self.count = np.full(fill_value=epsilon, shape=shape)
+
+    def update(self, x: np.array):
+        self.count = self.count + 1
+        delta = x - self.mean
+        self.mean = self.mean + delta / self.count
+        delta2 = x - self.mean
+        m2 = self.var * self.count + delta * delta2
+        self.var = m2 / self.count

@@ -20,7 +20,9 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 import numpy as np
 
-from utils import flatten_experience, unflatten_batches, normc_initializer
+from algos.base import Agent
+from environment import BaseMultiEnv
+from utils import flatten_experience, unflatten_batches, normc_initializer, RunningMeanVariance
 from replay_buffer import MultiReplayBuffer
 
 
@@ -152,6 +154,17 @@ class Actor(ABC, tf.keras.Model):
                 * probabilities/densities [batch_size, 1]
         """
 
+    @abstractmethod
+    def act_deterministic(self, observations: np.array, **kwargs) -> tf.Tensor:
+        """Samples actions without randomness.
+
+        Args:
+            observations: batch [batch_size, observations_dim] of observations vectors
+
+        Returns:
+            Tensor of actions [batch_size, actions_dim]
+        """
+
 
 class CategoricalActor(Actor):
 
@@ -225,15 +238,21 @@ class CategoricalActor(Actor):
 
         return tf.squeeze(actions, axis=[1]), actions_probs
 
+    def act_deterministic(self, observations: np.array, **kwargs) -> tf.Tensor:
+        """Performs most probable action"""
+        logits = self._call_logits(observations)
+
+        actions = tf.argmax(logits, axis=1)
+        return actions
+
 
 class GaussianActor(Actor):
 
     def __init__(self, observations_dim: int, actions_dim: int, layers: Optional[List[int]], beta_penalty: float,
-                 actions_bound: float, std: List[float], *args, **kwargs):
+                 actions_bound: float, *args, **kwargs):
         """Actor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
 
         TODO: introduce [a, b] intervals as allowed actions bounds
-        TODO: std as learned parameter
 
         Args:
             observations_dim: dimension of observations space
@@ -243,12 +262,14 @@ class GaussianActor(Actor):
              required in case of continuous actions
         """
         super().__init__(observations_dim, actions_dim, layers, beta_penalty, *args, **kwargs)
-        assert len(std) == actions_dim,\
-            f"Gaussian covariance diagonal ('std') should have {actions_dim} values, found: {len(std)}"
 
         self._actions_bound = actions_bound
-        self._std = std
-        self._log_std = tf.Variable(tf.zeros(shape=(actions_dim, )) - 0.5, name="actor_std")
+
+        # change constant to Variable to make std a learned parameter
+        self._log_std = tf.constant(
+            tf.ones(shape=(actions_dim, )) * tf.math.log(0.25 * actions_bound),
+            name="actor_std"
+        )
 
     @property
     def action_dtype(self):
@@ -259,7 +280,6 @@ class GaussianActor(Actor):
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
             scale_diag=tf.exp(self._log_std)
-            # scale_diag=self._std
         )
 
         action_log_probs = tf.expand_dims(dist.log_prob(actions), axis=1)
@@ -273,9 +293,9 @@ class GaussianActor(Actor):
             keepdims=True
         )
         entropy = dist.entropy()
-        entropy_penalty = 0.001 * entropy
+        # entropy_penalty = 0.01 * entropy
 
-        total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, z) + bounds_penalty - entropy_penalty)
+        total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, z) + bounds_penalty)
 
         with tf.name_scope('actor'):
             for i in range(self._actions_dim):
@@ -298,7 +318,6 @@ class GaussianActor(Actor):
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
             scale_diag=tf.exp(self._log_std)
-            # scale_diag=self._std
         )
 
         return dist.prob(actions)
@@ -310,7 +329,6 @@ class GaussianActor(Actor):
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
             scale_diag=tf.exp(self._log_std)
-            # scale_diag=self._std
         )
 
         actions = dist.sample(dtype=tf.dtypes.float32)
@@ -322,24 +340,27 @@ class GaussianActor(Actor):
 
         return actions, actions_probs
 
+    def act_deterministic(self, observations: np.array, **kwargs) -> tf.Tensor:
+        """Returns mean of the Gaussian"""
+        mean = self._call_mean(observations)
+        return mean
 
-class ACER:
-    def __init__(self, observations_dim: int, actions_dim: int, actor_layers: List[int],
-                 critic_layers: List[int], num_parallel_envs: int, is_discrete: bool, gamma: int,
-                 memory_size: int, alpha: float, p: float, b: float, c: int, c0: float,
-                 std: Optional[List[float]], actor_lr: float, actor_beta_penalty: float, actor_adam_beta1: float,
-                 actor_adam_beta2: float, actor_adam_epsilon: float, critic_lr: float, critic_adam_beta1: float,
-                 critic_adam_beta2: float, critic_adam_epsilon: float, actions_bound: Optional[float]):
+
+class ACER(Agent):
+    def __init__(self, observations_dim: int, actions_dim: int, actor_layers: List[int], critic_layers: List[int],
+                 num_parallel_envs: int, is_discrete: bool, gamma: int, memory_size: int, alpha: float, p: float,
+                 b: float, c: int, c0: float, actor_lr: float, actor_beta_penalty: float,
+                 actor_adam_beta1: float, actor_adam_beta2: float, actor_adam_epsilon: float, critic_lr: float,
+                 critic_adam_beta1: float, critic_adam_beta2: float, critic_adam_epsilon: float,
+                 actions_bound: Optional[float], standardize_obs: bool = True):
         """Actor-Critic with Experience Replay
 
-        TODO: normalizing observations
         TODO: finish docstrings
         TODO: refactor converting to tensor
         """
 
         assert is_discrete or actions_bound is not None, "For continuous actions, " \
                                                          "'actions_bound' argument should be specified"
-        assert is_discrete or std, "For continuous actions, 'std' argument should be specified"
 
         self._tf_time_step = tf.Variable(name='tf_time_step', initial_value=1, dtype=tf.dtypes.int64)
 
@@ -350,7 +371,7 @@ class ACER:
                                            actor_beta_penalty, self._tf_time_step)
         else:
             self._actor = GaussianActor(observations_dim, actions_dim, actor_layers,
-                                        actor_beta_penalty, actions_bound, std, self._tf_time_step)
+                                        actor_beta_penalty, actions_bound, self._tf_time_step)
 
         self._memory = MultiReplayBuffer(max_size=memory_size, num_buffers=num_parallel_envs)
         self._p = p
@@ -376,6 +397,11 @@ class ACER:
             epsilon=critic_adam_epsilon
         )
 
+        if standardize_obs:
+            self._running_mean_obs = RunningMeanVariance(shape=(observations_dim, ))
+        else:
+            self._running_mean_obs = None
+
     def save_experience(self, steps: List[
         Tuple[Union[int, float, list], np.array, float, np.array, np.array, bool, bool]
     ]):
@@ -387,22 +413,41 @@ class ACER:
         self._time_step += len(steps)
         self._tf_time_step.assign_add(len(steps))
         self._memory.put(steps)
+        if self._running_mean_obs:
+            for step in steps:
+                self._running_mean_obs.update(step[1])
+
+            with tf.name_scope('acer'):
+                for i in range(self._running_mean_obs.mean.shape[0]):
+                    tf.summary.scalar(
+                        f'obs_{i}_running_mean', self._running_mean_obs.mean[i], step=self._tf_time_step
+                    )
+                    tf.summary.scalar(
+                        f'obs_{i}_running_std', np.sqrt(self._running_mean_obs.var[i]), step=self._tf_time_step
+                    )
 
     def reset(self):
         """Resets environments and neural network weights"""
         return NotImplementedError
 
-    def predict_action(self, observations: np.array) -> Tuple[list, np.array]:
+    def predict_action(self, observations: np.array, is_deterministic: bool = False) \
+            -> Tuple[np.array, Optional[np.array]]:
         """Predicts actions for given observations. Performs forward pass with Actor network.
 
         Args:
             observations: batch [batch_size, observations_dim] of observations vectors
+            is_deterministic: True if mean actions should be returned
 
         Returns:
-            Tuple of sampled actions and corresponding probabilities (probability densities)
+            Tuple of sampled actions and corresponding probabilities (probability densities) if action was sampled
+            from the distribution, None otherwise
         """
-        actions, policies = self._actor(tf.convert_to_tensor(observations, dtype=tf.dtypes.float32))
-        return actions.numpy(), policies.numpy()
+        processed_obs = self._standardize_observations_if_turned_on(observations)
+        if is_deterministic:
+            return self._actor.act_deterministic(processed_obs).numpy(), None
+        else:
+            actions, policies = self._actor(tf.convert_to_tensor(processed_obs, dtype=tf.dtypes.float32))
+            return actions.numpy(), policies.numpy()
 
     def learn(self):
         """
@@ -412,7 +457,6 @@ class ACER:
         Every call executes N of backwards passes, where: N = min(c0 * time_step / num_parallel_envs, c).
         That means at the beginning experience replay intensity increases linearly with number of samples
         collected till c value is reached.
-
         """
         experience_replay_iterations = min([round(self._c0 * self._time_step / self._num_parallel_envs), self._c])
 
@@ -424,11 +468,6 @@ class ACER:
         """Backward pass with single batch of experience.
 
         See Equation (8) and Equation (9) in the paper (1).
-
-        Args:
-            experience_batches: batches [num_parallel_envs, trajectory_length] of experience from the buffers.
-                each batch origins from different replay buffer. See ReplayBuffer specification for detailed
-                experience batch description.
         """
 
         policies_batches, values_batches, values_next_batches = self._get_processed_experience_batches(
@@ -460,6 +499,7 @@ class ACER:
             np.array([batch['observations'][0] for batch in experience_batches]),
             dtype=tf.dtypes.float32
         )
+        observations = self._standardize_observations_if_turned_on(observations)
         actions = tf.convert_to_tensor(
             np.array([batch['actions'][0] for batch in experience_batches]),
             dtype=self._actor.action_dtype
@@ -484,6 +524,8 @@ class ACER:
         """
 
         observations_flatten, next_observations_flatten, actions_flatten = flatten_experience(experience_batches)
+        observations_flatten = self._standardize_observations_if_turned_on(observations_flatten)
+        next_observations_flatten = self._standardize_observations_if_turned_on(next_observations_flatten)
         # concatenate here to perform one single batch calculation
         values_flatten = self._critic(
             tf.convert_to_tensor(
@@ -531,16 +573,8 @@ class ACER:
         self._critic_optimizer.apply_gradients(gradients)
 
     def _compute_truncated_ratios(self, policies: np.array, old_policies: np.array) -> List[float]:
-        """Computes truncated probability ratios (probability densities ratios) for the summation
-        in the Equations (8) and (9) from the paper (1).
-        
-        Args:
-            policies: current probabilities (probability densities) of actions in a single trajectory
-            old_policies: probabilities (probability densities) of actions in a single trajectory from the buffer
-
-        Returns:
-            list of truncated probability ratios
-        """
+        """Computes truncated probability ratios (probability densities ratios) for the summation terms
+        in Equations (8) and (9) from the paper (1)."""
         truncated_densities = []
         current_product = 1
         for policy, old_policy in zip(policies, old_policies):
@@ -551,13 +585,15 @@ class ACER:
         return truncated_densities
 
     def _fetch_offline_batch(self) -> List[Dict[str, Union[np.array, list]]]:
-        """Fetches trajectories from replay buffers.
-
-        Returns:
-            fetched trajectories
-        """
         trajectory_lens = [np.random.geometric(self._p) for _ in range(self._num_parallel_envs)]
         return self._memory.get(trajectory_lens)
+
+    def _standardize_observations_if_turned_on(self, observations: np.array) -> np.array:
+        """If standardization is turned on, observations are being standardized with running mean and variance."""
+        if self._running_mean_obs:
+            return (observations - self._running_mean_obs.mean) / np.sqrt(self._running_mean_obs.var)
+        else:
+            return observations
 
 
 
