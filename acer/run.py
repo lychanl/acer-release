@@ -31,11 +31,18 @@ parser.add_argument('--critic_layers', nargs='+', type=int, help='List of Critic
                     required=False)
 parser.add_argument('--num_parallel_envs', type=int, help='Number of environments to be run in a parallel', default=4,
                     required=True)
-parser.add_argument('--standardize_obs', help='True, if observations should be standarized online',
+parser.add_argument('--batches_per_env', type=int, help='Number of batches sampled from one environment buffer in one'
+                                                        'backward pass',
+                    default=5)
+parser.add_argument('--standardize_obs', help='True, if observations should be standarized online'
+                                              ' (and clipped between -5, 5)',
+                    action='store_true')
+parser.add_argument('--rescale_rewards', help='True, if rewards should be rescaled by dividing them with standard'
+                                              'deviation (and clipping between -5, 5)',
                     action='store_true')
 parser.add_argument('--evaluate_time_steps_interval', type=int, help='Number of time steps between evaluations. '
                                                                      '-1 to turn evaluation off',
-                    default=-1)
+                    default=3000)
 parser.add_argument('--num_evaluation_runs', type=int, help='Number of evaluation runs in a single evaluation',
                     default=10)
 parser.add_argument('--max_time_steps', type=int, help='Maximum number of time steps of agent learning. -1 means no '

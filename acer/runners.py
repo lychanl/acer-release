@@ -76,7 +76,6 @@ class Runner:
         """Performs training. If 'evaluate' is True, evaluation of the policy is performed. The evaluation
         uses optimized policy, not the one used in training (i.e. randomness is turned off)
         """
-
         while self._max_time_steps == -1 or self._time_step <= self._max_time_steps:
 
             if self._is_time_to_evaluate():
@@ -123,7 +122,7 @@ class Runner:
                              f"return: {self._returns[i]}, "
                              f"total time steps done: {self._time_step}")
 
-                with tf.name_scope('env'):
+                with tf.name_scope('rewards'):
                     tf.summary.scalar('return', self._returns[i], self._done_episodes)
                     tf.summary.scalar('episode length', self._done_steps_in_a_episode[i], self._done_episodes)
 
@@ -132,7 +131,7 @@ class Runner:
 
         self._current_obs = np.array(self._current_obs)
 
-        with tf.name_scope('env'):
+        with tf.name_scope('rewards'):
             tf.summary.scalar('mean_reward', np.mean(rewards), self._time_step)
             tf.summary.scalar('max_reward', np.max(rewards), self._time_step)
             tf.summary.scalar('min_reward', np.min(rewards), self._time_step)
@@ -165,7 +164,7 @@ class Runner:
                          f"return: {evaluation_return}")
             returns.append(evaluation_return)
 
-        with tf.name_scope('env'):
+        with tf.name_scope('rewards'):
             tf.summary.scalar('evaluation_return_mean', np.mean(returns), self._time_step)
             tf.summary.scalar('evaluation_return_std', np.std(returns), self._time_step)
 

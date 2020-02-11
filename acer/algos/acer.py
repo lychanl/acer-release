@@ -15,13 +15,13 @@ and experience replay." Neural Networks 22.10 (2009): 1484-1497.
 
 from abc import ABC, abstractmethod
 from typing import Optional, List, Tuple, Union, Dict
-
+# import os
+# os.environ["CUDA_VISIBLE_DEVICES"]="-1"
 import tensorflow as tf
 import tensorflow_probability as tfp
 import numpy as np
 
 from algos.base import Agent
-from environment import BaseMultiEnv
 from utils import flatten_experience, unflatten_batches, normc_initializer, RunningMeanVariance
 from replay_buffer import MultiReplayBuffer
 
@@ -193,7 +193,6 @@ class CategoricalActor(Actor):
             axis=1
         )
 
-        # penalty for making actions out of the allowed bounds
         penalty = tf.reduce_sum(
             tf.scalar_mul(
                 self._beta_penalty,
@@ -240,9 +239,10 @@ class CategoricalActor(Actor):
 
     def act_deterministic(self, observations: np.array, **kwargs) -> tf.Tensor:
         """Performs most probable action"""
-        logits = self._call_logits(observations)
+        logits = tf.divide(self._call_logits(observations), 10)
+        probs = tf.nn.softmax(logits)
 
-        actions = tf.argmax(logits, axis=1)
+        actions = tf.argmax(probs, axis=1)
         return actions
 
 
@@ -267,7 +267,7 @@ class GaussianActor(Actor):
 
         # change constant to Variable to make std a learned parameter
         self._log_std = tf.constant(
-            tf.ones(shape=(actions_dim, )) * tf.math.log(0.25 * actions_bound),
+            tf.ones(shape=(actions_dim, )) * tf.math.log(0.4 * actions_bound),
             name="actor_std"
         )
 
@@ -352,7 +352,8 @@ class ACER(Agent):
                  b: float, c: int, c0: float, actor_lr: float, actor_beta_penalty: float,
                  actor_adam_beta1: float, actor_adam_beta2: float, actor_adam_epsilon: float, critic_lr: float,
                  critic_adam_beta1: float, critic_adam_beta2: float, critic_adam_epsilon: float,
-                 actions_bound: Optional[float], standardize_obs: bool = True):
+                 actions_bound: Optional[float], standardize_obs: bool = False, rescale_rewards: bool = True,
+                 batches_per_env: int = 5):
         """Actor-Critic with Experience Replay
 
         TODO: finish docstrings
@@ -378,6 +379,7 @@ class ACER(Agent):
         self._alpha = alpha
         self._b = b
         self._gamma = gamma
+        self._batches_per_env = batches_per_env
         self._time_step = 0
         self._c = c
         self._c0 = c0
@@ -402,6 +404,11 @@ class ACER(Agent):
         else:
             self._running_mean_obs = None
 
+        if rescale_rewards:
+            self._running_mean_rewards = RunningMeanVariance(shape=(1, ))
+        else:
+            self._running_mean_rewards = None
+
     def save_experience(self, steps: List[
         Tuple[Union[int, float, list], np.array, float, np.array, np.array, bool, bool]
     ]):
@@ -414,10 +421,8 @@ class ACER(Agent):
         self._tf_time_step.assign_add(len(steps))
         self._memory.put(steps)
         if self._running_mean_obs:
-            for step in steps:
-                self._running_mean_obs.update(step[1])
-
-            with tf.name_scope('acer'):
+            self._running_mean_obs.update(np.array([step[1] for step in steps]))
+            with tf.name_scope('observations'):
                 for i in range(self._running_mean_obs.mean.shape[0]):
                     tf.summary.scalar(
                         f'obs_{i}_running_mean', self._running_mean_obs.mean[i], step=self._tf_time_step
@@ -425,6 +430,12 @@ class ACER(Agent):
                     tf.summary.scalar(
                         f'obs_{i}_running_std', np.sqrt(self._running_mean_obs.var[i]), step=self._tf_time_step
                     )
+        if self._running_mean_rewards:
+            with tf.name_scope('rewards'):
+                self._running_mean_rewards.update(np.expand_dims([step[2] for step in steps], axis=1))
+                tf.summary.scalar(
+                    f'rewards_running_std', np.sqrt(self._running_mean_rewards.var[0]), step=self._tf_time_step
+                )
 
     def reset(self):
         """Resets environments and neural network weights"""
@@ -442,7 +453,7 @@ class ACER(Agent):
             Tuple of sampled actions and corresponding probabilities (probability densities) if action was sampled
                 from the distribution, None otherwise
         """
-        processed_obs = self._standardize_observations_if_turned_on(observations)
+        processed_obs = self._process_observations(observations)
         if is_deterministic:
             return self._actor.act_deterministic(processed_obs).numpy(), None
         else:
@@ -485,7 +496,7 @@ class ACER(Agent):
             z_t = 0
 
             for i in range(len(old_policies)):
-                reward = buffer_batch['rewards'][i]
+                reward = np.squeeze(self._process_rewards(buffer_batch['rewards'][i]))
                 next_state_value = values_next[i]
                 value = values[i]
                 coeff = (self._alpha * (1 - self._p)) ** i
@@ -496,10 +507,11 @@ class ACER(Agent):
             z.append(z_t)
 
         observations = tf.convert_to_tensor(
-            np.array([batch['observations'][0] for batch in experience_batches]),
+            np.array(self._process_observations(
+                [batch['observations'][0] for batch in experience_batches]
+            )),
             dtype=tf.dtypes.float32
         )
-        observations = self._standardize_observations_if_turned_on(observations)
         actions = tf.convert_to_tensor(
             np.array([batch['actions'][0] for batch in experience_batches]),
             dtype=self._actor.action_dtype
@@ -524,8 +536,8 @@ class ACER(Agent):
         """
 
         observations_flatten, next_observations_flatten, actions_flatten = flatten_experience(experience_batches)
-        observations_flatten = self._standardize_observations_if_turned_on(observations_flatten)
-        next_observations_flatten = self._standardize_observations_if_turned_on(next_observations_flatten)
+        observations_flatten = self._process_observations(observations_flatten)
+        next_observations_flatten = self._process_observations(next_observations_flatten)
         # concatenate here to perform one single batch calculation
         values_flatten = self._critic(
             tf.convert_to_tensor(
@@ -586,14 +598,32 @@ class ACER(Agent):
 
     def _fetch_offline_batch(self) -> List[Dict[str, Union[np.array, list]]]:
         trajectory_lens = [np.random.geometric(self._p) for _ in range(self._num_parallel_envs)]
-        return self._memory.get(trajectory_lens)
+        batch = []
+        [batch.extend(self._memory.get(trajectory_lens)) for _ in range(self._batches_per_env)]
+        return batch
 
-    def _standardize_observations_if_turned_on(self, observations: np.array) -> np.array:
-        """If standardization is turned on, observations are being standardized with running mean and variance."""
+    def _process_observations(self, observations: np.array) -> np.array:
+        """If standardization is turned on, observations are being standardized with running mean and variance.
+        Additional clipping is used to prevent performance spikes."""
         if self._running_mean_obs:
-            return (observations - self._running_mean_obs.mean) / np.sqrt(self._running_mean_obs.var)
+            return np.clip(
+                (observations - self._running_mean_obs.mean) / np.sqrt(self._running_mean_obs.var + 1e-8),
+                -10.0,
+                10.0
+            )
         else:
             return observations
+
+    def _process_rewards(self, rewards: np.array) -> np.array:
+        """Rescales returns with standard deviation. Additional clipping is used to prevent performance spikes."""
+        if self._running_mean_rewards:
+            return np.clip(
+                rewards / np.sqrt(self._running_mean_rewards.var + 1e-8),
+                -5.0,
+                5.0
+            )
+        else:
+            return rewards
 
 
 

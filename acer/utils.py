@@ -136,7 +136,7 @@ def reset_env_and_agent(agent, env: BaseMultiEnv) -> List[np.array]:
 
 class RunningMeanVariance:
     def __init__(self, epsilon: float = 1e-4, shape: Tuple = ()):
-        """Computes running mean and variance with Welford's online algorithm
+        """Computes running mean and variance with Welford's online algorithm (Parallel algorithm)
 
         Reference:
             https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
@@ -147,12 +147,27 @@ class RunningMeanVariance:
         """
         self.mean = np.zeros(shape=shape)
         self.var = np.ones(shape=shape)
-        self.count = np.full(fill_value=epsilon, shape=shape)
+        self.count = epsilon
 
     def update(self, x: np.array):
-        self.count = self.count + 1
-        delta = x - self.mean
-        self.mean = self.mean + delta / self.count
-        delta2 = x - self.mean
-        m2 = self.var * self.count + delta * delta2
-        self.var = m2 / self.count
+        """Updates statistics with given batch [batch_size, vector_size] of samples
+
+        Args:
+            x: batch of samples
+        """
+        batch_mean = np.mean(x, axis=0)
+        batch_var = np.var(x, axis=0)
+        batch_count = x.shape[0]
+
+        if self.count < 1:
+            self.count, self.mean, self.var = batch_count, batch_mean, batch_var
+        else:
+            new_count = self.count + batch_count
+            delta = batch_mean - self.mean
+            new_mean = self.mean + delta * batch_count / new_count
+
+            m_a = self.var * (self.count - 1)
+            m_b = batch_var * (batch_count - 1)
+            m_2 = m_a + m_b + np.square(delta) * self.count * batch_count / new_count
+            new_var = m_2 / (new_count - 1)
+            self.count, self.mean, self.var = new_count, new_mean, new_var
