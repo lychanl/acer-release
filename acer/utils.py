@@ -1,3 +1,5 @@
+from functools import wraps
+from time import time
 from typing import Tuple, List, Union, Dict
 
 import gym
@@ -7,26 +9,18 @@ import tensorflow as tf
 from environment import BaseMultiEnv
 
 
+
 def normc_initializer():
     """Normalized column initializer from the OpenAI baselines"""
     def _initializer(shape, dtype=None, partition_info=None):
-        out = np.random.randn(*shape).astype(np.float32)
+        out = np.random.randn(*shape)
         out *= 1 / np.sqrt(np.square(out).sum(axis=0, keepdims=True))
-        return tf.constant(out)
+        return tf.constant(out, dtype=dtype)
     return _initializer
 
 
-def tf_function_with_spec_from_object(dimension_attrs: List[str]):
-    """Creates tf.function abstraction with dynamic TypeSpec and autograph off"""
-    def tf_function_wrapper(f):
-        def wrapper(self, *args, **kwargs):
-            spec = [tf.TensorSpec(shape=(None, getattr(self, attr))) for attr in dimension_attrs]
-            return tf.function(input_signature=spec)(f)(self, *args, **kwargs)
-        return wrapper
-    return tf_function_wrapper
-
-
-def flatten_experience(buffers_batches: List[Dict[str, Union[np.array, list]]]) -> Tuple[np.array, np.array, np.array]:
+def flatten_experience(buffers_batches: List[Dict[str, Union[np.array, list]]])\
+        -> Tuple[np.array, np.array, np.array, np.array, np.array, np.array]:
     """Parses experience from the buffers (from dictionaries) into matrices that can be feed into
     neural network in a single pass.
 
@@ -42,63 +36,11 @@ def flatten_experience(buffers_batches: List[Dict[str, Union[np.array, list]]]) 
     observations = np.concatenate([batch['observations'] for batch in buffers_batches], axis=0)
     next_observations = np.concatenate([batch['next_observations'] for batch in buffers_batches], axis=0)
     actions = np.concatenate([batch['actions'] for batch in buffers_batches], axis=0)
+    policies = np.concatenate([batch['policies'] for batch in buffers_batches], axis=0)
+    rewards = np.concatenate([batch['rewards'] for batch in buffers_batches], axis=0)
+    dones = np.concatenate([batch['dones'] for batch in buffers_batches], axis=0)
 
-    return observations, next_observations, actions
-
-
-def unflatten_batches(
-        values: np.array, values_next: np.array,
-        policies: np.array, buffers_batches: List[Dict[str, Union[np.array, list]]]
-) -> Tuple[List[np.array], List[np.array], List[np.array]]:
-    """Parses flat experience into separate batches per buffer - restores original division.
-
-    Args:
-        values: batch [batch_size, 1] of value approximations
-        values_next: batch [batch_size, 1] of value approximations of the 'next' states
-        policies: batch [batch_size, 1] of probabilities (probability densities)
-        buffers_batches: original trajectories sampled sampled from the buffers
-
-    Returns:
-        Tuple with matrices:
-            * batch [batch_size, 1] of policy function values (probabilities or probability densities)
-            * batch [batch_size, 1] of value function approximation for "current" observations
-            * batch [batch_size, 1] of value function approximation for "next" observations
-    """
-
-    actions_idx, observations_idx = get_flatten_experience_indices(buffers_batches)
-
-    policies_batches = []
-    values_next_batches = []
-    values_batches = []
-
-    for i in range(len(buffers_batches)):
-        policies_batches.append(policies[actions_idx[i]:actions_idx[i + 1]])
-        values_batches.append(values[observations_idx[i]:observations_idx[i + 1]])
-        values_next_batches.append(values_next[observations_idx[i]:observations_idx[i + 1]])
-
-    return policies_batches, values_batches, values_next_batches
-
-
-def get_flatten_experience_indices(buffers_batches) -> Tuple[List[int], List[int]]:
-    """Restores indices of the original division from the experience sampled from the buffers.
-
-    Args:
-        buffers_batches: original trajectories sampled sampled from the buffers
-
-    Returns:
-        restored indices
-    """
-    actions_idx = [0]
-    states_idx = [0]
-
-    for i in range(1, len(buffers_batches)):
-        actions_idx.append(actions_idx[i - 1] + len(buffers_batches[i - 1]['actions']))
-        states_idx.append(states_idx[i - 1] + len(buffers_batches[i - 1]['observations']))
-
-    actions_idx.append(actions_idx[-1] + len(buffers_batches[-1]['actions']))
-    states_idx.append(actions_idx[-1] + len(buffers_batches[-1]['observations']))
-
-    return actions_idx, states_idx
+    return observations, next_observations, actions, policies, rewards, dones
 
 
 def get_env_variables(env):
@@ -171,3 +113,56 @@ class RunningMeanVariance:
             m_2 = m_a + m_b + np.square(delta) * self.count * batch_count / new_count
             new_var = m_2 / (new_count - 1)
             self.count, self.mean, self.var = new_count, new_mean, new_var
+
+
+class RunningMeanVarianceTf:
+    def __init__(self, epsilon: float = 1e-4, shape: Tuple = ()):
+        """TensorFlow version of RunningMeanVariance
+
+        Args:
+            epsilon: small value for numerical stability
+            shape: shape of the normalized vector
+        """
+        self.mean = tf.zeros(shape=shape)
+        self.var = tf.ones(shape=shape)
+        self.count = tf.Variable(initial_value=epsilon)
+
+    def update(self, x: tf.Tensor):
+        """Updates statistics with given batch [batch_size, vector_size] of samples
+
+        Args:
+            x: batch of samples
+        """
+        batch_mean = tf.reduce_mean(x, axis=0)
+        batch_var = tf.math.reduce_variance(x, axis=0)
+        batch_count = x.shape[0]
+
+        if tf.math.less(self.count, 1):
+            self._assign_new_values(batch_count, batch_mean, batch_var)
+        else:
+            new_count = self.count + batch_count
+            delta = batch_mean - self.mean
+            new_mean = self.mean + delta * batch_count / new_count
+
+            m_a = self.var * (self.count - tf.constant(1))
+            m_b = batch_var * (batch_count - tf.constant(1))
+            m_2 = m_a + m_b + np.square(delta) * self.count * batch_count / new_count
+            new_var = m_2 / (new_count - tf.constant(1))
+            self._assign_new_values(new_count, new_mean, new_var)
+
+    def _assign_new_values(self, count: tf.Tensor, mean: tf.Tensor, var: tf.Tensor):
+        self.count.assign(count)
+        self.mean.assign(mean)
+        self.var.assign(var)
+
+
+def timing(f):
+    """Function decorator that measures time elapsed while executing a function."""
+    @wraps(f)
+    def wrap(*args, **kw):
+        ts = time()
+        result = f(*args, **kw)
+        te = time()
+        print('func:%r took: %2.4f sec' % (f.__name__, te-ts))
+        return result
+    return wrap

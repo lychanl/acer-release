@@ -11,8 +11,6 @@ Neural Networks : the Official Journal of the International Neural Network Socie
 Wawrzyński, Paweł. "Real-time reinforcement learning by sequential actor–critics
 and experience replay." Neural Networks 22.10 (2009): 1484-1497.
 """
-
-
 from abc import ABC, abstractmethod
 from typing import Optional, List, Tuple, Union, Dict
 # import os
@@ -21,8 +19,9 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 import numpy as np
 
+import utils
 from algos.base import Agent
-from utils import flatten_experience, unflatten_batches, normc_initializer, RunningMeanVariance
+from utils import normc_initializer, RunningMeanVariance
 from replay_buffer import MultiReplayBuffer
 
 
@@ -38,14 +37,17 @@ class Critic(tf.keras.Model):
             tf_time_step: time step as TensorFlow variable, required for TensorBoard summaries
         """
         super().__init__(*args, **kwargs)
-        self.hidden_1 = tf.keras.layers.Dense(observations_dim, activation='tanh', kernel_initializer=normc_initializer())
+        self.hidden_1 = tf.keras.layers.Dense(
+            observations_dim,
+            activation='tanh',
+            kernel_initializer=normc_initializer()
+        )
         self.hidden_body = [tf.keras.layers.Dense(
             units, activation='tanh', kernel_initializer=normc_initializer()
         ) for units in layers]
         self.hidden_value = tf.keras.layers.Dense(1, kernel_initializer=normc_initializer())
         self._tf_time_step = tf_time_step
 
-    # @tf.function
     def call(self, observations: tf.Tensor,  **kwargs) -> tf.Tensor:
         """Calculates value function given observations batch
 
@@ -192,6 +194,7 @@ class CategoricalActor(Actor):
             tf.gather_nd(log_probs, tf.expand_dims(actions, axis=1), batch_dims=1),
             axis=1
         )
+        dist = tfp.distributions.Categorical(logits_div)
 
         penalty = tf.reduce_sum(
             tf.scalar_mul(
@@ -204,15 +207,16 @@ class CategoricalActor(Actor):
         total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, z) + penalty)
 
         # entropy maximization penalty
+        # entropy = -tf.reduce_sum(tf.math.multiply(probs, log_probs), axis=1)
         # penalty = self._beta_penalty * (-tf.reduce_sum(tf.math.multiply(probs, log_probs), axis=1))
 
         with tf.name_scope('actor'):
+            tf.summary.scalar('batch_entropy_mean', tf.reduce_mean(dist.entropy()), step=self._tf_time_step)
             tf.summary.scalar('batch_loss', total_loss, step=self._tf_time_step)
             tf.summary.scalar('batch_penalty_mean', tf.reduce_mean(penalty), step=self._tf_time_step)
 
         return total_loss
 
-    # @tf.function
     def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> tf.Tensor:
         # TODO: remove hardcoded '10' and '20'
         logits = tf.divide(self._call_logits(observations), 10)
@@ -220,7 +224,6 @@ class CategoricalActor(Actor):
         action_probs = tf.gather_nd(probs, tf.expand_dims(actions, axis=1), batch_dims=1)
         return action_probs
 
-    # @tf.function
     def call(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
 
         # TODO: remove hardcoded '10' and '20'
@@ -267,8 +270,8 @@ class GaussianActor(Actor):
 
         # change constant to Variable to make std a learned parameter
         self._log_std = tf.constant(
-            tf.ones(shape=(actions_dim, )) * tf.math.log(0.4 * actions_bound),
-            name="actor_std"
+            tf.math.log(0.4 * actions_bound),
+            name="actor_std",
         )
 
     @property
@@ -312,7 +315,6 @@ class GaussianActor(Actor):
             x = layer(x)
         return self.hidden_logits(x)
 
-    # @tf.function
     def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> tf.Tensor:
         mean = self._call_mean(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
@@ -322,7 +324,6 @@ class GaussianActor(Actor):
 
         return dist.prob(actions)
 
-    # @tf.function
     def call(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
         mean = self._call_mean(observations)
 
@@ -331,7 +332,7 @@ class GaussianActor(Actor):
             scale_diag=tf.exp(self._log_std)
         )
 
-        actions = dist.sample(dtype=tf.dtypes.float32)
+        actions = dist.sample(dtype=self.dtype)
         actions_probs = dist.prob(actions)
 
         with tf.name_scope('actor'):
@@ -352,7 +353,7 @@ class ACER(Agent):
                  b: float, c: int, c0: float, actor_lr: float, actor_beta_penalty: float,
                  actor_adam_beta1: float, actor_adam_beta2: float, actor_adam_epsilon: float, critic_lr: float,
                  critic_adam_beta1: float, critic_adam_beta2: float, critic_adam_epsilon: float,
-                 actions_bound: Optional[float], standardize_obs: bool = False, rescale_rewards: bool = True,
+                 actions_bound: Optional[float], standardize_obs: bool = False, rescale_rewards: bool = False,
                  batches_per_env: int = 5):
         """Actor-Critic with Experience Replay
 
@@ -363,7 +364,7 @@ class ACER(Agent):
         assert is_discrete or actions_bound is not None, "For continuous actions, " \
                                                          "'actions_bound' argument should be specified"
 
-        self._tf_time_step = tf.Variable(name='tf_time_step', initial_value=1, dtype=tf.dtypes.int64)
+        self._tf_time_step = tf.Variable(initial_value=1, name='tf_time_step', dtype=tf.dtypes.int64, trainable=False)
 
         self._critic = Critic(observations_dim, critic_layers, self._tf_time_step)
 
@@ -457,7 +458,7 @@ class ACER(Agent):
         if is_deterministic:
             return self._actor.act_deterministic(processed_obs).numpy(), None
         else:
-            actions, policies = self._actor(tf.convert_to_tensor(processed_obs, dtype=tf.dtypes.float32))
+            actions, policies = self._actor(tf.convert_to_tensor(processed_obs))
             return actions.numpy(), policies.numpy()
 
     def learn(self):
@@ -473,96 +474,76 @@ class ACER(Agent):
 
         for _ in range(experience_replay_iterations):
             offline_batch = self._fetch_offline_batch()
-            self._learn_from_experience_batch(offline_batch)
 
-    def _learn_from_experience_batch(self, experience_batches: List[Dict[str, Union[np.array, list]]]):
+            obs_flatten, obs_next_flatten, actions_flatten, policies_flatten, rewards_flatten, dones_flatten \
+                = utils.flatten_experience(offline_batch)
+            lengths = [len(batch['observations']) for batch in offline_batch]
+            indices = tf.RaggedTensor.from_row_lengths(values=list(range(0, obs_flatten.shape[0])), row_lengths=lengths)
+
+            obs_flatten = tf.convert_to_tensor(self._process_observations(obs_flatten))
+            obs_next_flatten = tf.convert_to_tensor(self._process_observations(obs_next_flatten))
+            actions_flatten = tf.convert_to_tensor(actions_flatten)
+            policies_flatten = tf.convert_to_tensor(policies_flatten)
+            rewards_flatten = tf.convert_to_tensor(self._process_rewards(rewards_flatten))
+            dones_flatten = tf.convert_to_tensor(dones_flatten)
+
+            first_obs = tf.convert_to_tensor(
+                self._process_observations([batch['observations'][0] for batch in offline_batch])
+            )
+            first_actions = tf.convert_to_tensor([batch['actions'][0] for batch in offline_batch])
+            self._learn_from_experience_batch(
+                obs_flatten,
+                obs_next_flatten,
+                actions_flatten,
+                policies_flatten,
+                rewards_flatten,
+                first_obs,
+                first_actions,
+                dones_flatten,
+                indices
+            )
+
+    @tf.function(experimental_relax_shapes=True)
+    def _learn_from_experience_batch(self, obs, obs_next, actions, old_policies,
+                                     rewards, first_obs, first_actions, dones, batches_indices):
         """Backward pass with single batch of experience.
 
         See Equation (8) and Equation (9) in the paper (1).
         """
+        values = tf.squeeze(self._critic(obs))
+        values_next = self._gamma * tf.squeeze(self._critic(obs_next)) * (1.0 - tf.cast(dones, tf.dtypes.float32))
+        policies = tf.squeeze(self._actor.prob(obs, actions))
+        indices = tf.expand_dims(batches_indices, axis=2)
 
-        policies_batches, values_batches, values_next_batches = self._get_processed_experience_batches(
-            experience_batches
+        policies_ratio = tf.math.divide(policies, old_policies)
+        policies_ratio_batches = tf.squeeze(tf.gather(policies_ratio, indices), axis=2)
+
+        batch_mask = tf.sequence_mask(policies_ratio_batches.row_lengths())
+
+        policies_ratio_product = tf.ragged.boolean_mask(
+            tf.math.cumprod(policies_ratio_batches.to_tensor(), axis=1),
+            batch_mask
         )
 
-        z = []
-        # summation from the Equations (8) and (9) in the paper (1)
-        for buffer_batch, policies, values, values_next in zip(experience_batches, policies_batches,
-                                                               values_batches, values_next_batches):
+        truncated_densities = tf.ragged.boolean_mask(
+            tf.minimum(policies_ratio_product.to_tensor(), self._b),
+            batch_mask
+        ).flat_values
 
-            old_policies = buffer_batch['policies']
-            densities = self._compute_truncated_ratios(policies, old_policies)
+        coeffs_batches = tf.ones_like(policies_ratio_product).to_tensor() * (self._alpha * (1 - self._p))
+        coeffs = tf.ragged.boolean_mask(
+            tf.math.cumprod(coeffs_batches, axis=1, exclusive=True),
+            batch_mask
+        ).flat_values
 
-            z_t = 0
+        z_batches = coeffs * (rewards + values_next - values) * truncated_densities
+        z_batches = tf.gather_nd(z_batches, tf.expand_dims(indices, axis=2))
+        z_batches = tf.stop_gradient(tf.reduce_sum(z_batches, axis=1))
 
-            for i in range(len(old_policies)):
-                reward = np.squeeze(self._process_rewards(buffer_batch['rewards'][i]))
-                next_state_value = values_next[i]
-                value = values[i]
-                coeff = (self._alpha * (1 - self._p)) ** i
-                if buffer_batch['dones'][i]:
-                    z_t += coeff * (reward - value) * densities[i]
-                else:
-                    z_t += coeff * (reward + next_state_value - value) * densities[i]
-            z.append(z_t)
+        self._backward_pass(first_obs, first_actions, z_batches)
 
-        observations = tf.convert_to_tensor(
-            np.array(self._process_observations(
-                [batch['observations'][0] for batch in experience_batches]
-            )),
-            dtype=tf.dtypes.float32
-        )
-        actions = tf.convert_to_tensor(
-            np.array([batch['actions'][0] for batch in experience_batches]),
-            dtype=self._actor.action_dtype
-        )
-
-        self._backward_pass(observations, actions, tf.convert_to_tensor(z))
-
-    def _get_processed_experience_batches(
-            self, experience_batches: List[Dict[str, Union[np.array, list]]]
-    ) -> Tuple[np.array, np.array, np.array]:
-        """Computes value approximation and policy for samples from the replay buffers.
-
-        experience_batches: batches [num_parallel_envs, trajectory_length] of experience from the buffers.
-            each batch origins from different replay buffer. See ReplayBuffer specification for detailed
-            experience batch description.
-
-        Returns:
-            Tuple with matrices:
-                * batch [batch_size, 1] of policy function values (probabilities or probability densities)
-                * batch [batch_size, 1] of value function approximation for "current" observations
-                * batch [batch_size, 1] of value function approximation for "next" observations
-        """
-
-        observations_flatten, next_observations_flatten, actions_flatten = flatten_experience(experience_batches)
-        observations_flatten = self._process_observations(observations_flatten)
-        next_observations_flatten = self._process_observations(next_observations_flatten)
-        # concatenate here to perform one single batch calculation
-        values_flatten = self._critic(
-            tf.convert_to_tensor(
-                np.concatenate([observations_flatten, next_observations_flatten], axis=0),
-                dtype=tf.dtypes.float32
-            )
-        )
-        policies_flatten = self._actor.prob(
-            tf.convert_to_tensor(observations_flatten, dtype=tf.dtypes.float32),
-            tf.convert_to_tensor(actions_flatten, dtype=self._actor.action_dtype)
-        ).numpy()
-        values_next_flatten = values_flatten[len(observations_flatten):].numpy() * self._gamma
-        values_flatten = values_flatten[:len(observations_flatten)].numpy()
-
-        # back to the initial format
-        policies_batches, values_batches, values_next_batches = unflatten_batches(
-            values_flatten, values_next_flatten, policies_flatten, experience_batches
-        )
-        return policies_batches, values_batches, values_next_batches
-
-    @tf.function
     def _backward_pass(self, observations: tf.Tensor, actions: tf.Tensor, z: tf.Tensor):
         """Performs backward pass in Actor's and Critic's networks
-
-        TODO: computations bellow can be optimized, probably
 
         Args:
             observations: batch [batch_size, observations_dim] of observations vectors
@@ -583,18 +564,6 @@ class ACER(Agent):
         gradients = zip(grads, self._critic.trainable_variables)
 
         self._critic_optimizer.apply_gradients(gradients)
-
-    def _compute_truncated_ratios(self, policies: np.array, old_policies: np.array) -> List[float]:
-        """Computes truncated probability ratios (probability densities ratios) for the summation terms
-        in Equations (8) and (9) from the paper (1)."""
-        truncated_densities = []
-        current_product = 1
-        for policy, old_policy in zip(policies, old_policies):
-            density = policy / old_policy
-            current_product = current_product * density
-            truncated_densities.append(min([current_product, self._b]))
-
-        return truncated_densities
 
     def _fetch_offline_batch(self) -> List[Dict[str, Union[np.array, list]]]:
         trajectory_lens = [np.random.geometric(self._p) for _ in range(self._num_parallel_envs)]
@@ -624,16 +593,5 @@ class ACER(Agent):
             )
         else:
             return rewards
-
-
-
-
-
-
-
-
-
-
-
 
 

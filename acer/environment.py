@@ -13,16 +13,18 @@ class BaseMultiEnv(ABC):
     TODO: write tests
     """
 
-    def __init__(self, env_id: str, n_envs: int):
+    def __init__(self, env_id: str, n_envs: int, dtype: np.dtype = np.float32):
         """Creates 'n_envs' gym environments.
 
         Args:
             env_id: Name of environment to instantiate
             n_envs: Number of environments to instantiate
+            dtype: type of returned observations
         """
         self._env_id = env_id
         self._nenvs = n_envs
         self._envs = [gym.make(self._env_id) for _ in range(self._nenvs)]
+        self.dtype = dtype
 
     def step(self, actions: list) -> List[Tuple[np.array, float, bool, dict]]:
         """Performs one step in all of the created environments.
@@ -57,7 +59,7 @@ class BaseMultiEnv(ABC):
             vectors of initial states
         """
 
-        return self._envs[env_idx].reset()
+        return self._envs[env_idx].reset().astype(self.dtype)
 
     def reset_all(self, seeds: Optional[List[int]] = None) -> np.array:
         """Resets all of the environments.
@@ -81,7 +83,7 @@ class BaseMultiEnv(ABC):
             for env in self._envs:
                 states.append(env.reset())
 
-        return np.array(states)
+        return np.array(states).astype(self.dtype)
 
     @property
     def observation_space(self) -> gym.spaces.Space:
@@ -118,8 +120,12 @@ class SequentialEnv(BaseMultiEnv):
     def _multi_step(self, actions: list) -> List[Tuple[np.array, float, bool, dict]]:
         results = []
         for env, action in zip(self._envs, actions):
-            results.append(env.step(action))
+            step_results = env.step(action)
+            results.append((
+                step_results[0].astype(self.dtype),
+                self.dtype(step_results[1]),
+                step_results[2],
+                step_results[3]
+            ))
 
         return results
-
-
