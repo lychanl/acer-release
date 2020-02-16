@@ -11,7 +11,8 @@ Neural Networks : the Official Journal of the International Neural Network Socie
 Wawrzyński, Paweł. "Real-time reinforcement learning by sequential actor–critics
 and experience replay." Neural Networks 22.10 (2009): 1484-1497.
 """
-
+import sys
+import time
 from abc import ABC, abstractmethod
 from typing import Optional, List, Tuple, Union, Dict
 # import os
@@ -390,6 +391,12 @@ class ACER(Agent):
                                         actor_beta_penalty, actions_bound, self._tf_time_step)
 
         self._init_replay_buffer(actions_dim, observations_dim, is_discrete, memory_size, num_parallel_envs)
+        self._data_loader = tf.data.Dataset.from_generator(
+            self._experience_replay_generator,
+            (tf.dtypes.float32, tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.float32, tf.dtypes.float32,
+             tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.bool, tf.dtypes.int32)
+        ).prefetch(10)
+
         self._p = p
         self._alpha = alpha
         self._b = b
@@ -500,41 +507,12 @@ class ACER(Agent):
         """
         experience_replay_iterations = min([round(self._c0 * self._time_step / self._num_parallel_envs), self._c])
 
-        for _ in range(experience_replay_iterations):
-            offline_batch = self._fetch_offline_batch()
-
-            obs_flatten, obs_next_flatten, actions_flatten, policies_flatten, rewards_flatten, dones_flatten \
-                = utils.flatten_experience(offline_batch)
-            lengths = [len(batch['observations']) for batch in offline_batch]
-            indices = tf.RaggedTensor.from_row_lengths(values=list(range(0, obs_flatten.shape[0])), row_lengths=lengths)
-
-            obs_flatten = tf.convert_to_tensor(self._process_observations(obs_flatten))
-            obs_next_flatten = tf.convert_to_tensor(self._process_observations(obs_next_flatten))
-            actions_flatten = tf.convert_to_tensor(actions_flatten)
-            policies_flatten = tf.convert_to_tensor(policies_flatten)
-            rewards_flatten = tf.convert_to_tensor(self._process_rewards(rewards_flatten))
-            dones_flatten = tf.convert_to_tensor(dones_flatten)
-
-            first_obs = tf.convert_to_tensor(
-                self._process_observations([batch['observations'][0] for batch in offline_batch])
-            )
-            first_actions = tf.convert_to_tensor([batch['actions'][0] for batch in offline_batch])
-
-            self._learn_from_experience_batch(
-                obs_flatten,
-                obs_next_flatten,
-                actions_flatten,
-                policies_flatten,
-                rewards_flatten,
-                first_obs,
-                first_actions,
-                dones_flatten,
-                indices
-            )
+        for batch in self._data_loader.take(experience_replay_iterations):
+            self._learn_from_experience_batch(*batch)
 
     @tf.function(experimental_relax_shapes=True)
     def _learn_from_experience_batch(self, obs, obs_next, actions, old_policies,
-                                     rewards, first_obs, first_actions, dones, batches_indices):
+                                     rewards, first_obs, first_actions, dones, lengths):
         """Backward pass with single batch of experience.
 
         Every experience replay requires sequence of experiences with random length, thus we have to use
@@ -542,6 +520,7 @@ class ACER(Agent):
 
         See Equation (8) and Equation (9) in the paper (1).
         """
+        batches_indices = tf.RaggedTensor.from_row_lengths(values=tf.range(tf.reduce_sum(lengths)), row_lengths=lengths)
         values = tf.squeeze(self._critic(obs))
         values_next = self._gamma * tf.squeeze(self._critic(obs_next)) * (1.0 - tf.cast(dones, tf.dtypes.float32))
         policies = tf.squeeze(self._actor.prob(obs, actions))
@@ -604,6 +583,33 @@ class ACER(Agent):
         batch = []
         [batch.extend(self._memory.get(trajectory_lens)) for _ in range(self._batches_per_env)]
         return batch
+
+    def _experience_replay_generator(self):
+        while True:
+            offline_batch = self._fetch_offline_batch()
+            obs_flatten, obs_next_flatten, actions_flatten, policies_flatten, rewards_flatten, dones_flatten \
+                = utils.flatten_experience(offline_batch)
+
+            lengths = [len(batch['observations']) for batch in offline_batch]
+
+            obs_flatten = self._process_observations(obs_flatten)
+            obs_next_flatten = self._process_observations(obs_next_flatten)
+            rewards_flatten = self._process_rewards(rewards_flatten)
+
+            first_obs = self._process_observations([batch['observations'][0] for batch in offline_batch])
+            first_actions = [batch['actions'][0] for batch in offline_batch]
+
+            yield (
+                obs_flatten,
+                obs_next_flatten,
+                actions_flatten,
+                policies_flatten,
+                rewards_flatten,
+                first_obs,
+                first_actions,
+                dones_flatten,
+                lengths
+            )
 
     def _process_observations(self, observations: np.array) -> np.array:
         """If standardization is turned on, observations are being standardized with running mean and variance.
