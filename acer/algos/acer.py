@@ -395,7 +395,7 @@ class ACER(Agent):
             self._experience_replay_generator,
             (tf.dtypes.float32, tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.float32, tf.dtypes.float32,
              tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.bool, tf.dtypes.int32)
-        ).prefetch(10)
+        ).prefetch(2)
 
         self._p = p
         self._alpha = alpha
