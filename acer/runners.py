@@ -1,5 +1,6 @@
 import datetime
 import logging
+import time
 from typing import Optional, List, Union, Tuple
 
 import numpy as np
@@ -29,6 +30,9 @@ def _get_agent(algorithm: str, parameters: Optional[dict], is_continuous: bool,
 
 
 class Runner:
+
+    MEASURE_TIME_TIME_STEPS = 1000
+
     def __init__(self, environment_name: str, algorithm: str = 'acer', algorithm_parameters: Optional[dict] = None,
                  num_parallel_envs: int = 5, evaluate_time_steps_interval: int = 1500,
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1):
@@ -48,6 +52,7 @@ class Runner:
             log_dir: TensorBoard logging directory
             max_time_steps: maximum number of training time steps
         """
+        self._elapsed_time_measure = 0
         self._time_step = 0
         self._done_episodes = 0
         self._n_envs = num_parallel_envs
@@ -81,9 +86,11 @@ class Runner:
             if self._is_time_to_evaluate():
                 self._evaluate()
 
+            start_time = time.time()
             experience = self._step()
             self._agent.save_experience(experience)
             self._agent.learn()
+            self._elapsed_time_measure += time.time() - start_time
 
     def _step(self) -> List[Tuple[Union[int, float], np.array, float, np.array, float, bool, bool]]:
         actions, policies = self._agent.predict_action(self._current_obs)
@@ -96,6 +103,9 @@ class Runner:
         for i, step in enumerate(steps):
             # 'is_done' from Gym does not take into account maximum number of steps in a single episode constraint
             self._time_step += 1
+            if self._time_step % Runner.MEASURE_TIME_TIME_STEPS == 0:
+                self._measure_time()
+
             rewards.append(step[1])
             self._done_steps_in_a_episode[i] += 1
             is_done_gym = step[2]
@@ -170,3 +180,12 @@ class Runner:
 
     def _is_time_to_evaluate(self):
         return self._evaluate_time_steps_interval != -1 and self._time_step >= self._next_evaluation_timestamp
+
+    def _measure_time(self):
+        with tf.name_scope('acer'):
+            tf.summary.scalar(
+                'time steps per second',
+                Runner.MEASURE_TIME_TIME_STEPS / self._elapsed_time_measure,
+                self._time_step
+            )
+        self._elapsed_time_measure = 0

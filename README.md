@@ -34,20 +34,20 @@ python run.py {args...}
 
 ## Example runs
 ```shell script
-python3 acer/run.py --env_name LunarLander-v2 --gamma 0.99 --alpha 0.9 --p 0.1 --b 3 --c0 0.3 \
-    --c 50 --actor_lr 0.001 --critic_lr 0.002  --actor_layers 60 --critic_layers 100 \
+python3 acer/run.py --env_name LunarLander-v2 --gamma 0.99 --alpha 0.9 --p 0.1 --b 5 --c0 0.3 \
+    --c 10 --actor_lr 0.001 --critic_lr 0.002  --actor_layers 60 --critic_layers 100 \
     --memory_size 1000000 --num_parallel_envs 10 --actor_adam_beta1 0.9 --actor_adam_beta2 0.999 \
-    --actor_adam_epsilon 0.1 --critic_adam_beta1 0.9 --critic_adam_beta2 0.999 \
-    --critic_adam_epsilon 0.1 --actor_beta_penalty 0.001 --standardize_obs \
-    --evaluate_time_steps_interval 1500 --num_evaluation_runs 10 \
+    --actor_adam_epsilon 0.00001 --critic_adam_beta1 0.9 --critic_adam_beta2 0.999 \
+    --critic_adam_epsilon 0.00001 --actor_beta_penalty 0.001 \
+    --num_evaluation_runs 5 --batches_per_env 10
 ```
 ```shell script
 python acer/run.py --env_name Pendulum-v0 --gamma 0.95 --alpha 0.9 \
-    --p 0.1 --b 5 --c0 0.3 --c 50 --actor_lr 0.001 --critic_lr 0.002  \
+    --p 0.1 --b 3 --c0 0.3 --c 10 --actor_lr 0.001 --critic_lr 0.002  \
     --actor_layers 20 --critic_layers 50 --memory_size 1000000 \
     --num_parallel_envs 10 --actor_adam_beta1 0.9 --actor_adam_beta2 0.999 \
-    --actor_adam_epsilon 0.1 --critic_adam_beta1 0.9 --critic_adam_beta2 0.999 \
-    --critic_adam_epsilon 0.1 --actor_beta_penalty 0.1
+    --actor_adam_epsilon 0.000001 --critic_adam_beta1 0.9 --critic_adam_beta2 0.999 \
+    --critic_adam_epsilon 0.00001 --actor_beta_penalty 0.1 --batches_per_env 10
 ```
 
 ```shell script

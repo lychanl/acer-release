@@ -1,12 +1,21 @@
-from collections import deque
-from itertools import islice
-from typing import Optional, Union, Tuple, List, Dict
+
+from dataclasses import dataclass
+from typing import Optional, Union, Tuple, List, Dict, Type
 
 import numpy as np
 
+from utils import timing
+
+
+@dataclass
+class BufferFieldSpec:
+    """Specification of the replay buffer's data"""
+    shape: tuple
+    dtype: Union[Type, np.dtype] = np.float32
+
 
 class ReplayBuffer:
-    def __init__(self, max_size: int):
+    def __init__(self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
         """Stores trajectories.
 
         Each of the sample stored in the buffer has the same probability of being drawn.
@@ -16,14 +25,19 @@ class ReplayBuffer:
         """
         self._max_size = max_size
         self._current_size = 0
+        self._pointer = 0
 
-        self._actions = deque(maxlen=max_size)
-        self._observations = deque(maxlen=max_size)
-        self._next_observations = deque(maxlen=max_size)
-        self._policies = deque(maxlen=max_size)
-        self._rewards = deque(maxlen=max_size)
-        self._done = deque(maxlen=max_size)
-        self._end = deque(maxlen=max_size)
+        self._actions = self._init_field(action_spec)
+        self._obs = self._init_field(obs_spec)
+        self._next_obs = self._init_field(obs_spec)
+        self._rewards = self._init_field(BufferFieldSpec((), np.float32))
+        self._policies = self._init_field(BufferFieldSpec((), np.float32))
+        self._dones = self._init_field(BufferFieldSpec((), bool))
+        self._ends = self._init_field(BufferFieldSpec((), bool))
+
+    def _init_field(self, field_spec: BufferFieldSpec):
+        shape = (self._max_size, *field_spec.shape)
+        return np.ndarray(shape=shape, dtype=field_spec.dtype)
 
     def put(self, action: Union[int, float, list], observation: np.array,
             reward: float, next_observation: np.ndarray,
@@ -42,17 +56,27 @@ class ReplayBuffer:
             end: True if episode ended
 
         """
-        self._actions.append(action)
-        self._observations.append(observation)
-        self._rewards.append(reward)
-        self._next_observations.append(next_observation)
-        self._policies.append(policy)
-        self._done.append(is_done)
-        self._end.append(end)
+        self._actions[self._pointer] = action
+        self._obs[self._pointer] = observation
+        self._rewards[self._pointer] = reward
+        self._next_obs[self._pointer] = next_observation
+        self._policies[self._pointer] = policy
+        self._dones[self._pointer] = is_done
+        self._ends[self._pointer] = end
 
+        self._move_pointer()
+        self._update_size()
+
+    def _move_pointer(self):
+        if self._pointer + 1 == self._max_size:
+            self._pointer = 0
+        else:
+            self._pointer += 1
+
+    def _update_size(self):
         self._current_size = np.min([self._current_size + 1, self._max_size])
 
-    def get(self, trajectory_len: Optional[int] = None) -> Dict[str, Union[np.array, list]]:
+    def get(self, trajectory_len: Optional[int] = None) -> Dict[str, np.array]:
         """Samples random trajectory. Trajectory length is truncated to the 'trajectory_len' value.
         If trajectory length is not provided, whole episode is fetched. If trajectory is shorter than
         'trajectory_len', trajectory is truncated to one episode only.
@@ -64,29 +88,43 @@ class ReplayBuffer:
             # empty buffer
             return {
                 "actions": np.array([]),
-                "observations": [],
-                "rewards": [],
+                "observations": np.array([]),
+                "rewards": np.array([]),
                 "next_observations": np.array([]),
                 "policies": np.array([]),
-                "dones": [],
-                "ends": []
+                "dones": np.array([]),
+                "ends": np.array([])
             }
-
         start_index = self._sample_random_index()
-        end_index = self._current_size
+        end_index = start_index + 1
 
-        for i, end in enumerate(islice(self._end, start_index, self._current_size)):
-            if end or (trajectory_len and i == trajectory_len - 1):
-                end_index = start_index + i + 1
+        current_length = 1
+        while True:
+            if end_index == self._max_size:
+                if self._pointer == 0:
+                    break
+                else:
+                    end_index = 0
+                    continue
+            if end_index == self._pointer \
+                    or self._ends[end_index - 1] \
+                    or (trajectory_len and current_length == trajectory_len):
                 break
+            end_index += 1
+            current_length += 1
 
-        actions = list(islice(self._actions, start_index, end_index))
-        observations = np.array(list(islice(self._observations, start_index, end_index)))
-        rewards = list(islice(self._rewards, start_index, end_index))
-        next_observations = np.array(list(islice(self._next_observations, start_index, end_index)))
-        policies = np.array(list(islice(self._policies, start_index, end_index)))
-        done = list(islice(self._done, start_index, end_index))
-        end = list(islice(self._end, start_index, end_index))
+        if start_index > end_index:
+            buffer_slice = np.r_[0: end_index, start_index: self._max_size]
+        else:
+            buffer_slice = np.r_[start_index: end_index]
+
+        actions = self._actions[buffer_slice]
+        observations = self._obs[buffer_slice]
+        rewards = self._rewards[buffer_slice]
+        next_observations = self._next_obs[buffer_slice]
+        policies = self._policies[buffer_slice]
+        done = self._dones[buffer_slice]
+        end = self._ends[buffer_slice]
 
         return {
             "actions": actions,
@@ -117,7 +155,7 @@ class ReplayBuffer:
 
 class MultiReplayBuffer:
 
-    def __init__(self, max_size: int, num_buffers: int):
+    def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
         """Encapsulates ReplayBuffers from multiple environments.
 
         Args:
@@ -126,7 +164,7 @@ class MultiReplayBuffer:
         """
         self._n_buffers = num_buffers
         self._max_size = max_size
-        self._buffers = [ReplayBuffer(max_size) for _ in range(num_buffers)]
+        self._buffers = [ReplayBuffer(max_size, action_spec, obs_spec) for _ in range(num_buffers)]
 
     def put(self, steps: List[Tuple[Union[int, float, list], np.array, float, np.array, np.array, bool, bool]]):
         """Stores gathered experiences in the buffers. Accepts list of steps.
