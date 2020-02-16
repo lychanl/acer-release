@@ -519,6 +519,7 @@ class ACER(Agent):
                 self._process_observations([batch['observations'][0] for batch in offline_batch])
             )
             first_actions = tf.convert_to_tensor([batch['actions'][0] for batch in offline_batch])
+
             self._learn_from_experience_batch(
                 obs_flatten,
                 obs_next_flatten,
@@ -536,6 +537,9 @@ class ACER(Agent):
                                      rewards, first_obs, first_actions, dones, batches_indices):
         """Backward pass with single batch of experience.
 
+        Every experience replay requires sequence of experiences with random length, thus we have to use
+        ragged tensors here.
+
         See Equation (8) and Equation (9) in the paper (1).
         """
         values = tf.squeeze(self._critic(obs))
@@ -543,28 +547,31 @@ class ACER(Agent):
         policies = tf.squeeze(self._actor.prob(obs, actions))
         indices = tf.expand_dims(batches_indices, axis=2)
 
+        # flat tensor
         policies_ratio = tf.math.divide(policies, old_policies)
+        # ragged tensor divided into batches
         policies_ratio_batches = tf.squeeze(tf.gather(policies_ratio, indices), axis=2)
 
+        # cumprod and cumsum do not work on ragged tensors, we transform them into tensors
+        # padded with 0 and then apply boolean mask to retrieve original ragged tensor
         batch_mask = tf.sequence_mask(policies_ratio_batches.row_lengths())
-
-        policies_ratio_product = tf.ragged.boolean_mask(
-            tf.math.cumprod(policies_ratio_batches.to_tensor(), axis=1),
-            batch_mask
-        )
+        policies_ratio_product = tf.math.cumprod(policies_ratio_batches.to_tensor(), axis=1)
 
         truncated_densities = tf.ragged.boolean_mask(
-            tf.minimum(policies_ratio_product.to_tensor(), self._b),
+            tf.minimum(policies_ratio_product, self._b),
             batch_mask
-        ).flat_values
-
-        coeffs_batches = tf.ones_like(policies_ratio_product).to_tensor() * (self._alpha * (1 - self._p))
+        )
+        coeffs_batches = tf.ones_like(truncated_densities).to_tensor() * (self._alpha * (1 - self._p))
         coeffs = tf.ragged.boolean_mask(
             tf.math.cumprod(coeffs_batches, axis=1, exclusive=True),
             batch_mask
         ).flat_values
-        z_batches = coeffs * (rewards + values_next - values) * truncated_densities
+
+        # flat tensors
+        z_batches = coeffs * (rewards + values_next - values) * truncated_densities.flat_values
+        # ragged
         z_batches = tf.gather_nd(z_batches, tf.expand_dims(indices, axis=2))
+        # final summation over original batches
         z_batches = tf.stop_gradient(tf.reduce_sum(z_batches, axis=1))
 
         self._backward_pass(first_obs, first_actions, z_batches)
