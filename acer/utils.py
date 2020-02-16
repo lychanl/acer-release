@@ -9,7 +9,6 @@ import tensorflow as tf
 from environment import BaseMultiEnv
 
 
-
 def normc_initializer():
     """Normalized column initializer from the OpenAI baselines"""
     def _initializer(shape, dtype=None, partition_info=None):
@@ -87,8 +86,8 @@ class RunningMeanVariance:
             epsilon: small value for numerical stability
             shape: shape of the normalized vector
         """
-        self.mean = np.zeros(shape=shape)
-        self.var = np.ones(shape=shape)
+        self.mean = np.zeros(shape=shape, dtype=np.float32)
+        self.var = np.ones(shape=shape, dtype=np.float32)
         self.count = epsilon
 
     def update(self, x: np.array):
@@ -97,8 +96,8 @@ class RunningMeanVariance:
         Args:
             x: batch of samples
         """
-        batch_mean = np.mean(x, axis=0)
-        batch_var = np.var(x, axis=0)
+        batch_mean = np.mean(x, axis=0, dtype=np.float32)
+        batch_var = np.var(x, axis=0, dtype=np.float32)
         batch_count = x.shape[0]
 
         if self.count < 1:

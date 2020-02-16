@@ -11,6 +11,7 @@ Neural Networks : the Official Journal of the International Neural Network Socie
 Wawrzyński, Paweł. "Real-time reinforcement learning by sequential actor–critics
 and experience replay." Neural Networks 22.10 (2009): 1484-1497.
 """
+
 from abc import ABC, abstractmethod
 from typing import Optional, List, Tuple, Union, Dict
 # import os
@@ -22,7 +23,7 @@ import numpy as np
 import utils
 from algos.base import Agent
 from utils import normc_initializer, RunningMeanVariance
-from replay_buffer import MultiReplayBuffer
+from replay_buffer import MultiReplayBuffer, BufferFieldSpec
 
 
 class Critic(tf.keras.Model):
@@ -40,7 +41,7 @@ class Critic(tf.keras.Model):
         self.hidden_1 = tf.keras.layers.Dense(
             observations_dim,
             activation='tanh',
-            kernel_initializer=normc_initializer()
+            kernel_initializer=normc_initializer(),
         )
         self.hidden_body = [tf.keras.layers.Dense(
             units, activation='tanh', kernel_initializer=normc_initializer()
@@ -118,7 +119,12 @@ class Actor(ABC, tf.keras.Model):
     @property
     @abstractmethod
     def action_dtype(self):
-        """Returns data type of the Actor's actions"""
+        """Returns data type of the Actor's actions (TensorFlow)"""
+
+    @property
+    @abstractmethod
+    def action_dtype_np(self):
+        """Returns data type of the Actor's actions (Numpy)"""
 
     @abstractmethod
     def loss(self, observations: np.array, actions: np.array, z: np.array) -> tf.Tensor:
@@ -184,6 +190,10 @@ class CategoricalActor(Actor):
     def action_dtype(self):
         return tf.dtypes.int32
 
+    @property
+    def action_dtype_np(self):
+        return np.int32
+
     def loss(self, observations: tf.Tensor, actions: tf.Tensor, z: tf.Tensor) -> tf.Tensor:
         logits = self._call_logits(observations)
 
@@ -191,7 +201,7 @@ class CategoricalActor(Actor):
         logits_div = tf.divide(logits, 10)
         log_probs = tf.nn.log_softmax(logits_div)
         action_log_probs = tf.expand_dims(
-            tf.gather_nd(log_probs, tf.expand_dims(actions, axis=1), batch_dims=1),
+            tf.gather_nd(log_probs, actions, batch_dims=1),
             axis=1
         )
         dist = tfp.distributions.Categorical(logits_div)
@@ -221,7 +231,7 @@ class CategoricalActor(Actor):
         # TODO: remove hardcoded '10' and '20'
         logits = tf.divide(self._call_logits(observations), 10)
         probs = tf.nn.softmax(logits)
-        action_probs = tf.gather_nd(probs, tf.expand_dims(actions, axis=1), batch_dims=1)
+        action_probs = tf.gather_nd(probs, actions, batch_dims=1)
         return action_probs
 
     def call(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
@@ -277,6 +287,10 @@ class GaussianActor(Actor):
     @property
     def action_dtype(self):
         return tf.dtypes.float32
+
+    @property
+    def action_dtype_np(self):
+        return np.float32
 
     def loss(self, observations: np.array, actions: np.array, z: np.array) -> tf.Tensor:
         mean = self._call_mean(observations)
@@ -375,7 +389,7 @@ class ACER(Agent):
             self._actor = GaussianActor(observations_dim, actions_dim, actor_layers,
                                         actor_beta_penalty, actions_bound, self._tf_time_step)
 
-        self._memory = MultiReplayBuffer(max_size=memory_size, num_buffers=num_parallel_envs)
+        self._init_replay_buffer(actions_dim, observations_dim, is_discrete, memory_size, num_parallel_envs)
         self._p = p
         self._alpha = alpha
         self._b = b
@@ -409,6 +423,20 @@ class ACER(Agent):
             self._running_mean_rewards = RunningMeanVariance(shape=(1, ))
         else:
             self._running_mean_rewards = None
+
+    def _init_replay_buffer(self, actions_dim: int, observations_dim: int, is_discrete: bool,
+                            memory_size: int, num_parallel_envs: int):
+        if is_discrete:
+            action_shape = (1, )
+        else:
+            action_shape = (actions_dim, )
+
+        self._memory = MultiReplayBuffer(
+            action_spec=BufferFieldSpec(shape=action_shape, dtype=self._actor.action_dtype_np),
+            obs_spec=BufferFieldSpec(shape=(observations_dim,), dtype=np.float32),
+            max_size=memory_size,
+            num_buffers=num_parallel_envs
+        )
 
     def save_experience(self, steps: List[
         Tuple[Union[int, float, list], np.array, float, np.array, np.array, bool, bool]
@@ -535,7 +563,6 @@ class ACER(Agent):
             tf.math.cumprod(coeffs_batches, axis=1, exclusive=True),
             batch_mask
         ).flat_values
-
         z_batches = coeffs * (rewards + values_next - values) * truncated_densities
         z_batches = tf.gather_nd(z_batches, tf.expand_dims(indices, axis=2))
         z_batches = tf.stop_gradient(tf.reduce_sum(z_batches, axis=1))
