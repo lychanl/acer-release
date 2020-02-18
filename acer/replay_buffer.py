@@ -164,7 +164,7 @@ class MultiReplayBuffer:
         """
         self._n_buffers = num_buffers
         self._max_size = max_size
-        self._buffers = [ReplayBuffer(max_size, action_spec, obs_spec) for _ in range(num_buffers)]
+        self._buffers = [ReplayBuffer(int(max_size / num_buffers), action_spec, obs_spec) for _ in range(num_buffers)]
 
     def put(self, steps: List[Tuple[Union[int, float, list], np.array, float, np.array, np.array, bool, bool]]):
         """Stores gathered experiences in the buffers. Accepts list of steps.
