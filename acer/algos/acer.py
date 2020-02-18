@@ -41,11 +41,11 @@ class Critic(tf.keras.Model):
         super().__init__(*args, **kwargs)
         self.hidden_1 = tf.keras.layers.Dense(
             observations_dim,
-            activation='tanh',
+            activation='relu',
             kernel_initializer=normc_initializer(),
         )
         self.hidden_body = [tf.keras.layers.Dense(
-            units, activation='tanh', kernel_initializer=normc_initializer()
+            units, activation='relu', kernel_initializer=normc_initializer()
         ) for units in layers]
         self.hidden_value = tf.keras.layers.Dense(1, kernel_initializer=normc_initializer())
         self._tf_time_step = tf_time_step
@@ -105,11 +105,11 @@ class Actor(ABC, tf.keras.Model):
         super().__init__(*args, **kwargs)
 
         self.hidden_1 = tf.keras.layers.Dense(
-            observations_dim, activation='tanh', kernel_initializer=normc_initializer()
+            observations_dim, activation='relu', kernel_initializer=normc_initializer()
         )
 
         self.hidden_body = [tf.keras.layers.Dense(
-            units, activation='tanh', kernel_initializer=normc_initializer()
+            units, activation='relu', kernel_initializer=normc_initializer()
         ) for units in layers]
         self.hidden_logits = tf.keras.layers.Dense(actions_dim, kernel_initializer=normc_initializer())
 
@@ -281,7 +281,7 @@ class GaussianActor(Actor):
 
         # change constant to Variable to make std a learned parameter
         self._log_std = tf.constant(
-            tf.math.log(0.4 * actions_bound),
+            tf.math.log(0.25 * actions_bound),
             name="actor_std",
         )
 
@@ -368,7 +368,7 @@ class ACER(Agent):
                  b: float, c: int, c0: float, actor_lr: float, actor_beta_penalty: float,
                  actor_adam_beta1: float, actor_adam_beta2: float, actor_adam_epsilon: float, critic_lr: float,
                  critic_adam_beta1: float, critic_adam_beta2: float, critic_adam_epsilon: float,
-                 actions_bound: Optional[float], standardize_obs: bool = False, rescale_rewards: bool = False,
+                 actions_bound: Optional[float], standardize_obs: bool = False, rescale_rewards: int = -1,
                  batches_per_env: int = 5):
         """Actor-Critic with Experience Replay
 
@@ -426,7 +426,8 @@ class ACER(Agent):
         else:
             self._running_mean_obs = None
 
-        if rescale_rewards:
+        self._rescale_rewards = rescale_rewards
+        if rescale_rewards == 0:
             self._running_mean_rewards = RunningMeanVariance(shape=(1, ))
         else:
             self._running_mean_rewards = None
@@ -625,12 +626,14 @@ class ACER(Agent):
 
     def _process_rewards(self, rewards: np.array) -> np.array:
         """Rescales returns with standard deviation. Additional clipping is used to prevent performance spikes."""
-        if self._running_mean_rewards:
+        if self._rescale_rewards == 0:
             return np.clip(
                 rewards / np.sqrt(self._running_mean_rewards.var + 1e-8),
                 -5.0,
                 5.0
             )
+        elif self._rescale_rewards >= 0:
+            return rewards / self._rescale_rewards
         else:
             return rewards
 
