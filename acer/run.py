@@ -24,6 +24,9 @@ parser.add_argument('--critic_lr', type=float, help='Critic learning rate', requ
 parser.add_argument('--actor_beta_penalty', type=float, help='Actor penalty coefficient', default=0.1)
 parser.add_argument('--c', type=int, help='experience replay intensity', required=False)
 parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=0.3)
+parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
+                                              '0.4 * actions_bound is set.',
+                    required=False)
 parser.add_argument('--memory_size', type=int, help='memory buffer size (sum of all of the buffers from every env',
                     required=False)
 parser.add_argument('--actor_layers', nargs='+', type=int, help='List of Actor\'s neural network hidden layers sizes',

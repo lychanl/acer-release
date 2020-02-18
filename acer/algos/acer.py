@@ -263,7 +263,7 @@ class CategoricalActor(Actor):
 class GaussianActor(Actor):
 
     def __init__(self, observations_dim: int, actions_dim: int, layers: Optional[List[int]], beta_penalty: float,
-                 actions_bound: float, *args, **kwargs):
+                 actions_bound: float, std: float = None, *args, **kwargs):
         """Actor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
 
         TODO: introduce [a, b] intervals as allowed actions bounds
@@ -279,11 +279,17 @@ class GaussianActor(Actor):
 
         self._actions_bound = actions_bound
 
-        # change constant to Variable to make std a learned parameter
-        self._log_std = tf.constant(
-            tf.math.log(0.25 * actions_bound),
-            name="actor_std",
-        )
+        if std:
+            # change constant to Variable to make std a learned parameter
+            self._log_std = tf.constant(
+                tf.math.log(std * actions_bound),
+                name="actor_std",
+            )
+        else:
+            self._log_std = tf.constant(
+                tf.math.log(0.4 * actions_bound),
+                name="actor_std",
+            )
 
     @property
     def action_dtype(self):
@@ -369,7 +375,7 @@ class ACER(Agent):
                  actor_adam_beta1: float, actor_adam_beta2: float, actor_adam_epsilon: float, critic_lr: float,
                  critic_adam_beta1: float, critic_adam_beta2: float, critic_adam_epsilon: float,
                  actions_bound: Optional[float], standardize_obs: bool = False, rescale_rewards: int = -1,
-                 batches_per_env: int = 5):
+                 batches_per_env: int = 5, std: float = None):
         """Actor-Critic with Experience Replay
 
         TODO: finish docstrings
@@ -388,7 +394,7 @@ class ACER(Agent):
                                            actor_beta_penalty, self._tf_time_step)
         else:
             self._actor = GaussianActor(observations_dim, actions_dim, actor_layers,
-                                        actor_beta_penalty, actions_bound, self._tf_time_step)
+                                        actor_beta_penalty, actions_bound, std, self._tf_time_step)
 
         self._init_replay_buffer(actions_dim, observations_dim, is_discrete, memory_size, num_parallel_envs)
         self._data_loader = tf.data.Dataset.from_generator(
