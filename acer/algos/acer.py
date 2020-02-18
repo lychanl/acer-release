@@ -41,11 +41,11 @@ class Critic(tf.keras.Model):
         super().__init__(*args, **kwargs)
         self.hidden_1 = tf.keras.layers.Dense(
             observations_dim,
-            activation='relu',
+            activation='tanh',
             kernel_initializer=normc_initializer(),
         )
         self.hidden_body = [tf.keras.layers.Dense(
-            units, activation='relu', kernel_initializer=normc_initializer()
+            units, activation='tanh', kernel_initializer=normc_initializer()
         ) for units in layers]
         self.hidden_value = tf.keras.layers.Dense(1, kernel_initializer=normc_initializer())
         self._tf_time_step = tf_time_step
@@ -105,11 +105,11 @@ class Actor(ABC, tf.keras.Model):
         super().__init__(*args, **kwargs)
 
         self.hidden_1 = tf.keras.layers.Dense(
-            observations_dim, activation='relu', kernel_initializer=normc_initializer()
+            observations_dim, activation='tanh', kernel_initializer=normc_initializer()
         )
 
         self.hidden_body = [tf.keras.layers.Dense(
-            units, activation='relu', kernel_initializer=normc_initializer()
+            units, activation='tanh', kernel_initializer=normc_initializer()
         ) for units in layers]
         self.hidden_logits = tf.keras.layers.Dense(actions_dim, kernel_initializer=normc_initializer())
 
