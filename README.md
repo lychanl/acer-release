@@ -89,8 +89,6 @@ Asynchronous workers will be required to handle more complex environments
     further in no exploration and learning at all. 
     Maybe with entropy penalty the mechanism can work.
  * more meaningful statistics for TensorBoard
- * reward clipping / scaling
- * sampling more trajectories per environment
  * weights initialization (*normalized column* initialization from the OpenAI Baselines
  is used right now, some sources propose Orthogonal initialization)
  * probably, some optimizations around *@tf.function* usage can be done
