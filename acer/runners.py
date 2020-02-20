@@ -124,10 +124,9 @@ class Runner:
             is_done = is_done_gym and not is_maximum_number_of_steps_reached
             is_end = is_done or is_maximum_number_of_steps_reached
 
-            # reward_clipped = float(np.clip(step[1], -5, 5))
-            reward_clipped = step[1]
+            reward = step[1]
             experience.append(
-                (actions[i], old_obs[i], reward_clipped, step[0], policies[i], is_done, is_end)
+                (actions[i], old_obs[i], reward, step[0], policies[i], is_done, is_end)
             )
 
             self._current_obs.append(step[0])
