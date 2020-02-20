@@ -1,4 +1,6 @@
 import datetime
+import json
+
 import logging
 import time
 from typing import Optional, List, Union, Tuple
@@ -10,6 +12,7 @@ from algos.acer import ACER
 from algos.base import Agent
 from environment import SequentialEnv
 import utils
+from logger import CSVLogger
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,33 +52,37 @@ class Runner:
             evaluate_time_steps_interval: number of time steps between evaluation runs, -1 if
                 no evaluation should be done
             num_evaluation_runs: number of runs per one evaluation
-            log_dir: TensorBoard logging directory
+            log_dir: logging directory
             max_time_steps: maximum number of training time steps
         """
         self._elapsed_time_measure = 0
         self._time_step = 0
         self._done_episodes = 0
+        self._next_evaluation_timestamp = 0
         self._n_envs = num_parallel_envs
         self._evaluate_time_steps_interval = evaluate_time_steps_interval
         self._num_evaluation_runs = num_evaluation_runs
         self._max_time_steps = max_time_steps
         self._env_name = environment_name
         self._env = SequentialEnv(environment_name, num_parallel_envs)
+        self._done_steps_in_a_episode = [0] * self._n_envs
+        self._returns = [0] * self._n_envs
 
-        self._log_dir = log_dir + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        self._log_dir = f"{log_dir}/{environment_name}" \
+                        f"_{algorithm}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
         tensor_board_writer = tf.summary.create_file_writer(self._log_dir)
         tensor_board_writer.set_as_default()
+
+        self._csv_logger = CSVLogger(self._log_dir + '/results.csv', ['time_step', 'eval_return_mean', 'eval_std_mean'])
+
+        self._save_parameters(algorithm_parameters)
 
         self._action_scale, self._actions_dim, self._observations_dim,\
             self._is_continuous, self._max_steps_in_episode = utils.get_env_variables(self._env)
 
-        self._done_steps_in_a_episode = [0] * self._n_envs
-        self._returns = [0] * self._n_envs
         self._agent = _get_agent(algorithm, algorithm_parameters, self._is_continuous,
                                  self._observations_dim, self._actions_dim, self._action_scale)
         self._current_obs = utils.reset_env_and_agent(self._agent, self._env)
-
-        self._next_evaluation_timestamp = 0
 
     def run(self):
         """Performs training. If 'evaluate' is True, evaluation of the policy is performed. The evaluation
@@ -91,6 +98,8 @@ class Runner:
             self._agent.save_experience(experience)
             self._agent.learn()
             self._elapsed_time_measure += time.time() - start_time
+
+        self._csv_logger.close()
 
     def _step(self) -> List[Tuple[Union[int, float], np.array, float, np.array, float, bool, bool]]:
         actions, policies = self._agent.predict_action(self._current_obs)
@@ -174,9 +183,16 @@ class Runner:
                          f"return: {evaluation_return}")
             returns.append(evaluation_return)
 
+        mean_returns = np.mean(returns)
+        std_returns = np.std(returns)
+
         with tf.name_scope('rewards'):
-            tf.summary.scalar('evaluation_return_mean', np.mean(returns), self._time_step)
-            tf.summary.scalar('evaluation_return_std', np.std(returns), self._time_step)
+            tf.summary.scalar('evaluation_return_mean', mean_returns, self._time_step)
+            tf.summary.scalar('evaluation_return_std', std_returns, self._time_step)
+
+        self._csv_logger.log_values(
+            {'time_step': self._time_step, 'eval_return_mean': mean_returns, 'eval_std_mean': std_returns}
+        )
 
     def _is_time_to_evaluate(self):
         return self._evaluate_time_steps_interval != -1 and self._time_step >= self._next_evaluation_timestamp
@@ -189,3 +205,7 @@ class Runner:
                 self._time_step
             )
         self._elapsed_time_measure = 0
+
+    def _save_parameters(self, algorithm_parameters: dict):
+        with open(self._log_dir + '/parameters.json', 'wt') as f:
+            json.dump(algorithm_parameters, f)

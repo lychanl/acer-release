@@ -15,8 +15,8 @@ import sys
 import time
 from abc import ABC, abstractmethod
 from typing import Optional, List, Tuple, Union, Dict
-# import os
-# os.environ["CUDA_VISIBLE_DEVICES"]="-1"
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="-1"
 import tensorflow as tf
 import tensorflow_probability as tfp
 import numpy as np
