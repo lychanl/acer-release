@@ -6,10 +6,10 @@ from runners import Runner
 parser = argparse.ArgumentParser(description='Actor-Critic with experience replay.')
 parser.add_argument('--env_name', type=str, help='OpenAI Gym environment name', default="CartPole-v0")
 parser.add_argument('--gamma', type=float, help='discount factor', required=False, default=0.99)
-parser.add_argument('--alpha', type=float, help='alpha value coefficient', required=False, default=0.1)
+parser.add_argument('--alpha', type=float, help='alpha value coefficient', required=False, default=0.99)
 parser.add_argument('--p', type=float, help='prob. of success in geometric probability distribution, used to'
                                             'sample trajectory length while sampling from the buffer',
-                    required=False, default=0.9)
+                    required=False, default=0.1)
 parser.add_argument('--b', type=float, help='probability density truncation coefficient',
                     required=False, default=3)
 parser.add_argument('--actor_adam_epsilon', type=float, help='ADAM optimizer epsilon parameter (Actor)',

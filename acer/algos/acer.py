@@ -371,7 +371,7 @@ class GaussianActor(Actor):
 class ACER(Agent):
     def __init__(self, observations_dim: int, actions_dim: int, actor_layers: List[int], critic_layers: List[int],
                  is_discrete: bool, actions_bound: Optional[float], gamma: int = 0.99, memory_size: int = 1e6,
-                 num_parallel_envs: int = 10, alpha: float = 0.9, p: float = 0.1, b: float = 3, c: int = 10,
+                 num_parallel_envs: int = 10, alpha: float = 0.99, p: float = 0.1, b: float = 3, c: int = 10,
                  c0: float = 0.3, actor_lr: float = 0.001, actor_beta_penalty: float = 0.001,
                  actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999,
                  actor_adam_epsilon: float = 1e-5, critic_lr: float = 0.001, critic_adam_beta1: float = 0.9,
