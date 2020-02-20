@@ -5,35 +5,40 @@ from runners import Runner
 
 parser = argparse.ArgumentParser(description='Actor-Critic with experience replay.')
 parser.add_argument('--env_name', type=str, help='OpenAI Gym environment name', default="CartPole-v0")
-parser.add_argument('--gamma', type=float, help='discount factor', required=False)
-parser.add_argument('--alpha', type=float, help='alpha value coefficient', required=False)
+parser.add_argument('--gamma', type=float, help='discount factor', required=False, default=0.99)
+parser.add_argument('--alpha', type=float, help='alpha value coefficient', required=False, default=0.1)
 parser.add_argument('--p', type=float, help='prob. of success in geometric probability distribution, used to'
                                             'sample trajectory length while sampling from the buffer',
-                    required=False)
-parser.add_argument('--b', type=float, help='probability density truncation coefficient', required=False)
+                    required=False, default=0.9)
+parser.add_argument('--b', type=float, help='probability density truncation coefficient',
+                    required=False, default=3)
 parser.add_argument('--actor_adam_epsilon', type=float, help='ADAM optimizer epsilon parameter (Actor)',
-                    required=False)
-parser.add_argument('--actor_adam_beta1', type=float, help='ADAM optimizer beta1 (Actor)', required=False)
-parser.add_argument('--actor_adam_beta2', type=float, help='ADAM optimizer beta2 (Actor)', required=False)
+                    required=False, default=1e-5)
+parser.add_argument('--actor_adam_beta1', type=float, help='ADAM optimizer beta1 (Actor)',
+                    required=False, default=0.9)
+parser.add_argument('--actor_adam_beta2', type=float, help='ADAM optimizer beta2 (Actor)',
+                    required=False, default=0.999)
 parser.add_argument('--critic_adam_epsilon', type=float, help='ADAM optimizer epsilon (Critic)',
-                    required=False)
-parser.add_argument('--critic_adam_beta1', type=float, help='ADAM optimizer beta1 (Critic)', required=False)
-parser.add_argument('--critic_adam_beta2', type=float, help='ADAM optimizer beta2 (Critic)', required=False)
-parser.add_argument('--actor_lr', type=float, help='Actor learning rate', required=False)
-parser.add_argument('--critic_lr', type=float, help='Critic learning rate', required=False)
-parser.add_argument('--actor_beta_penalty', type=float, help='Actor penalty coefficient', default=0.1)
-parser.add_argument('--c', type=int, help='experience replay intensity', required=False)
+                    required=False, default=1e-5)
+parser.add_argument('--critic_adam_beta1', type=float, help='ADAM optimizer beta1 (Critic)',
+                    required=False, default=0.9)
+parser.add_argument('--critic_adam_beta2', type=float, help='ADAM optimizer beta2 (Critic)',
+                    required=False, default=0.999)
+parser.add_argument('--actor_lr', type=float, help='Actor learning rate', required=False, default=0.001)
+parser.add_argument('--critic_lr', type=float, help='Critic learning rate', required=False, default=0.001)
+parser.add_argument('--actor_beta_penalty', type=float, help='Actor penalty coefficient', default=0.001)
+parser.add_argument('--c', type=int, help='experience replay intensity', required=False, default=10)
 parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=0.3)
 parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
                                               '0.4 * actions_bound is set.',
-                    required=False)
+                    required=False, default=None)
 parser.add_argument('--memory_size', type=int, help='memory buffer size (sum of all of the buffers from every env',
-                    required=False)
+                    required=False, default=1e6)
 parser.add_argument('--actor_layers', nargs='+', type=int, help='List of Actor\'s neural network hidden layers sizes',
-                    required=False)
+                    required=False, default=[100, 100])
 parser.add_argument('--critic_layers', nargs='+', type=int, help='List of Critic\'s neural network hidden layers sizes',
-                    required=False)
-parser.add_argument('--num_parallel_envs', type=int, help='Number of environments to be run in a parallel', default=4,
+                    required=False, default=[100, 100])
+parser.add_argument('--num_parallel_envs', type=int, help='Number of environments to be run in a parallel', default=10,
                     required=True)
 parser.add_argument('--batches_per_env', type=int, help='Number of batches sampled from one environment buffer in one'
                                                         'backward pass',
@@ -42,12 +47,12 @@ parser.add_argument('--standardize_obs', help='True, if observations should be s
                                               ' (and clipped between -5, 5)',
                     action='store_true')
 parser.add_argument('--rescale_rewards', help='-1 to turn rescaling off, 0 to rescale automatically based on'
-                                              'running variance, value greater than rescales the rewards in the way'
-                                              'that they are divided by that value',
+                                              'running variance; value greater than 0 rescales the rewards by'
+                                              'dividing them by the value',
                     type=int, default=-1)
 parser.add_argument('--evaluate_time_steps_interval', type=int, help='Number of time steps between evaluations. '
                                                                      '-1 to turn evaluation off',
-                    default=3000)
+                    default=10000)
 parser.add_argument('--num_evaluation_runs', type=int, help='Number of evaluation runs in a single evaluation',
                     default=10)
 parser.add_argument('--max_time_steps', type=int, help='Maximum number of time steps of agent learning. -1 means no '

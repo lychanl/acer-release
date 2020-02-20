@@ -370,16 +370,16 @@ class GaussianActor(Actor):
 
 class ACER(Agent):
     def __init__(self, observations_dim: int, actions_dim: int, actor_layers: List[int], critic_layers: List[int],
-                 num_parallel_envs: int, is_discrete: bool, gamma: int, memory_size: int, alpha: float, p: float,
-                 b: float, c: int, c0: float, actor_lr: float, actor_beta_penalty: float,
-                 actor_adam_beta1: float, actor_adam_beta2: float, actor_adam_epsilon: float, critic_lr: float,
-                 critic_adam_beta1: float, critic_adam_beta2: float, critic_adam_epsilon: float,
-                 actions_bound: Optional[float], standardize_obs: bool = False, rescale_rewards: int = -1,
-                 batches_per_env: int = 5, std: float = None):
+                 is_discrete: bool, actions_bound: Optional[float], gamma: int = 0.99, memory_size: int = 1e6,
+                 num_parallel_envs: int = 10, alpha: float = 0.9, p: float = 0.1, b: float = 3, c: int = 10,
+                 c0: float = 0.3, actor_lr: float = 0.001, actor_beta_penalty: float = 0.001,
+                 actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999,
+                 actor_adam_epsilon: float = 1e-5, critic_lr: float = 0.001, critic_adam_beta1: float = 0.9,
+                 critic_adam_beta2: float = 0.999, critic_adam_epsilon: float = 1e-5, standardize_obs: bool = False,
+                 rescale_rewards: int = -1, batches_per_env: int = 5, std: Optional[float] = None):
         """Actor-Critic with Experience Replay
 
         TODO: finish docstrings
-        TODO: refactor converting to tensor
         """
 
         assert is_discrete or actions_bound is not None, "For continuous actions, " \
