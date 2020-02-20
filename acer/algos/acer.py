@@ -547,7 +547,7 @@ class ACER(Agent):
             tf.minimum(policies_ratio_product, self._b),
             batch_mask
         )
-        coeffs_batches = tf.ones_like(truncated_densities).to_tensor() * (self._alpha * (1 - self._p))
+        coeffs_batches = tf.ones_like(truncated_densities).to_tensor() * self._alpha
         coeffs = tf.ragged.boolean_mask(
             tf.math.cumprod(coeffs_batches, axis=1, exclusive=True),
             batch_mask
