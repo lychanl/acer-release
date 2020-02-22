@@ -1,6 +1,6 @@
 from functools import wraps
 from time import time
-from typing import Tuple, List, Union, Dict
+from typing import Tuple, List, Union, Dict, Callable
 
 import gym
 import numpy as np
@@ -42,6 +42,18 @@ def flatten_experience(buffers_batches: List[Dict[str, Union[np.array, list]]])\
     return observations, next_observations, actions, policies, rewards, dones
 
 
+def is_atari(env_id: str) -> bool:
+    """Checks if environments if of Atari type
+    Args:
+        env_id: name of the environment
+    Returns:
+        True if its is Atari env
+    """
+    env_spec = [env for env in gym.envs.registry.all() if env.id == env_id][0]
+    env_type = env_spec.entry_point.split(':')[0].split('.')[-1]
+    return env_type == 'atari'
+
+
 def get_env_variables(env):
     """Returns OpenAI Gym environment specific variables like action space dimension"""
     if type(env.observation_space) == gym.spaces.discrete.Discrete:
@@ -58,21 +70,6 @@ def get_env_variables(env):
         action_scale = np.maximum(env.action_space.high, np.abs(env.action_space.low))
     max_steps_in_episode = env.spec.max_episode_steps
     return action_scale, actions_dim, observations_dim, continuous, max_steps_in_episode
-
-
-def reset_env_and_agent(agent, env: BaseMultiEnv) -> List[np.array]:
-    """Resets environment and the agent
-
-    Args:
-        agent: agent to be reset
-        env: environment to be reset
-
-    Returns:
-        initial states of the environments
-    """
-    agent.reset()
-    current_states = env.reset_all()
-    return current_states
 
 
 class RunningMeanVariance:

@@ -5,13 +5,13 @@ import logging
 import time
 from typing import Optional, List, Union, Tuple
 
+import gym
 import numpy as np
 import tensorflow as tf
 
-from algos.acer import ACER
-from algos.base import Agent
+from algos.classic_acer import ClassicACER
+from algos.base import ACERAgent
 from environment import SequentialEnv
-import utils
 from logger import CSVLogger
 
 logging.basicConfig(
@@ -20,14 +20,13 @@ logging.basicConfig(
 )
 
 
-def _get_agent(algorithm: str, parameters: Optional[dict], is_continuous: bool,
-               observations_dim: int, actions_dim: int, actions_scale: float) -> Agent:
+def _get_agent(algorithm: str, parameters: Optional[dict], observations_space: gym.Space,
+               actions_space: gym.Space) -> ACERAgent:
     """Initializes Agent object"""
     if not parameters:
         parameters = {}
-    if algorithm == 'acer':
-        return ACER(is_discrete=not is_continuous, observations_dim=observations_dim,
-                    actions_dim=actions_dim, actions_bound=actions_scale, **parameters)
+    if algorithm == 'classic':
+        return ClassicACER(observations_space=observations_space, actions_space=actions_space, **parameters)
     else:
         raise NotImplemented
 
@@ -68,6 +67,8 @@ class Runner:
         self._done_steps_in_a_episode = [0] * self._n_envs
         self._returns = [0] * self._n_envs
 
+        self._max_steps_in_episode = self._env.spec.max_episode_steps
+
         self._log_dir = f"{log_dir}/{environment_name}" \
                         f"_{algorithm}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
         tensor_board_writer = tf.summary.create_file_writer(self._log_dir)
@@ -77,16 +78,12 @@ class Runner:
 
         self._save_parameters(algorithm_parameters)
 
-        self._action_scale, self._actions_dim, self._observations_dim,\
-            self._is_continuous, self._max_steps_in_episode = utils.get_env_variables(self._env)
-
-        self._agent = _get_agent(algorithm, algorithm_parameters, self._is_continuous,
-                                 self._observations_dim, self._actions_dim, self._action_scale)
-        self._current_obs = utils.reset_env_and_agent(self._agent, self._env)
+        self._agent = _get_agent(algorithm, algorithm_parameters, self._env.observation_space, self._env.action_space)
+        self._current_obs = self._env.reset_all()
 
     def run(self):
         """Performs training. If 'evaluate' is True, evaluation of the policy is performed. The evaluation
-        uses optimized policy, not the one used in training (i.e. randomness is turned off)
+        uses policy that is being optimized, not the one used in training (i.e. randomness is turned off)
         """
         while self._max_time_steps == -1 or self._time_step <= self._max_time_steps:
 

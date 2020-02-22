@@ -34,36 +34,18 @@ python run.py {args...}
 
 ## Example runs
 ```shell script
-python3 acer/run.py --env_name LunarLander-v2 --gamma 0.99 --alpha 0.9 --p 0.1 --b 5 --c0 0.3 \
+python3 acer/run.py --algo classic --env_name LunarLander-v2 --gamma 0.99 --rho 0.1 --b 5 --c0 0.3 \                                                   SIGINT(2) ↵  7586  23:05:06
     --c 10 --actor_lr 0.001 --critic_lr 0.002  --actor_layers 60 --critic_layers 100 \
-    --memory_size 1000000 --num_parallel_envs 10 --actor_adam_beta1 0.9 --actor_adam_beta2 0.999 \
-    --actor_beta_penalty 0.001 --batches_per_env 10
+    --memory_size 1000000 --num_parallel_envs 10 --actor_beta_penalty 0.001 \
+    --num_evaluation_runs 5 --batches_per_env 10 --rescale_rewards 0
+
 ```
 
 ```shell script
-python acer/run.py --env_name Pendulum-v0 --gamma 0.95 --alpha 0.9 \
-    --p 0.1 --b 3 --c0 0.3 --c 10 --actor_lr 0.001 --critic_lr 0.002  \
+python acer/run.py --algo classic --env_name Pendulum-v0 --gamma 0.95 \                                                                                        1 ↵  7577  22:15:25
+    --rho 0.1 --b 3 --c0 0.3 --c 10 --actor_lr 0.001 --critic_lr 0.002  \
     --actor_layers 20 --critic_layers 50 --memory_size 1000000 \
-    --num_parallel_envs 10 --actor_adam_beta1 0.9 --actor_adam_beta2 0.999 \
-    --actor_beta_penalty 0.1 --batches_per_env 10
-```
-
-```shell script
-python3 acer/run.py --env_name BipedalWalker-v2 --gamma 0.99 --alpha 0.9 \
-        --p 0.1 --b 5 --c0 0.3 --c 10 --actor_lr 0.0001 --critic_lr 0.0002 \
-        --actor_layers 50 80 --critic_layers 100 140 --memory_size 1000000 \
-        --num_parallel_envs 10 --actor_adam_beta1 0.9 --actor_adam_beta2 0.999 \
-        --actor_beta_penalty 0.01 --batches_per_env 20 --rescale_rewards 0
-```
-
-```shell script
-python3 acer/run.py --env_name HalfCheetah-v2 --gamma 0.99 --alpha 0.9 \
-        --p 0.1 --b 3 --c0 0.6 --c 10 --actor_lr 0.00001 --critic_lr 0.00002  \
-        --actor_layers 256 256  --critic_layers 256 256 --memory_size 1000000 \
-        --num_parallel_envs 10 --actor_adam_beta1 0.9 --actor_adam_beta2 0.999 \
-        --actor_beta_penalty 0.001 --batches_per_env 10 --max_time_steps 3000000 \
-        --num_evaluation_runs 10 --evaluate_time_steps_interval 10000 \
-        --rescale_rewards 5 --std 0.5
+    --num_parallel_envs 10  --actor_beta_penalty 0.1 --batches_per_env 10
 ```
 
 ## Parameters

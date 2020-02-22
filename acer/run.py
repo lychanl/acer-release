@@ -4,11 +4,11 @@ import argparse
 from runners import Runner
 
 parser = argparse.ArgumentParser(description='Actor-Critic with experience replay.')
+parser.add_argument('--algo', type=str, help='Algorithm to be used', default="classic", choices=['classic'])
 parser.add_argument('--env_name', type=str, help='OpenAI Gym environment name', default="CartPole-v0")
 parser.add_argument('--gamma', type=float, help='discount factor', required=False, default=0.99)
-parser.add_argument('--alpha', type=float, help='alpha value coefficient', required=False, default=0.99)
-parser.add_argument('--p', type=float, help='prob. of success in geometric probability distribution, used to'
-                                            'sample trajectory length while sampling from the buffer',
+parser.add_argument('--rho', type=float, help='prob. of success in geometric probability distribution, used to'
+                                              'sample trajectory length while sampling from the buffer',
                     required=False, default=0.1)
 parser.add_argument('--b', type=float, help='probability density truncation coefficient',
                     required=False, default=3)
@@ -35,9 +35,9 @@ parser.add_argument('--std', type=float, help='value on diagonal of Normal dist.
 parser.add_argument('--memory_size', type=int, help='memory buffer size (sum of all of the buffers from every env',
                     required=False, default=1e6)
 parser.add_argument('--actor_layers', nargs='+', type=int, help='List of Actor\'s neural network hidden layers sizes',
-                    required=False, default=[100, 100])
+                    required=False, default=(100, 100))
 parser.add_argument('--critic_layers', nargs='+', type=int, help='List of Critic\'s neural network hidden layers sizes',
-                    required=False, default=[100, 100])
+                    required=False, default=(100, 100))
 parser.add_argument('--num_parallel_envs', type=int, help='Number of environments to be run in a parallel', default=10,
                     required=True)
 parser.add_argument('--batches_per_env', type=int, help='Number of batches sampled from one environment buffer in one'
@@ -74,11 +74,12 @@ def main():
     evaluate_time_steps_interval = parameters.pop('evaluate_time_steps_interval')
     num_evaluation_runs = parameters.pop('num_evaluation_runs')
     max_time_steps = parameters.pop('max_time_steps')
+    algorithm = parameters.pop('algo')
     log_dir = parameters.pop('log_dir')
 
     runner = Runner(
         environment_name=cmd_parameters.env_name,
-        algorithm='acer',
+        algorithm=algorithm,
         algorithm_parameters=parameters,
         num_parallel_envs=cmd_parameters.num_parallel_envs,
         log_dir=log_dir,
