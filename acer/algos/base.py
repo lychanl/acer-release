@@ -432,7 +432,7 @@ class ACERAgent(ABC):
 
         self._memory = MultiReplayBuffer(
             action_spec=BufferFieldSpec(shape=actions_shape, dtype=self._actor.action_dtype_np),
-            obs_spec=BufferFieldSpec(shape=self._observations_space.shape, dtype=np.float32),
+            obs_spec=BufferFieldSpec(shape=self._observations_space.shape, dtype=self._observations_space.dtype),
             max_size=memory_size,
             num_buffers=self._num_parallel_envs
         )

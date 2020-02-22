@@ -98,7 +98,7 @@ class Runner:
 
         self._csv_logger.close()
 
-    def _step(self) -> List[Tuple[Union[int, float], np.array, float, np.array, float, bool, bool]]:
+    def _step(self) -> List[Tuple[Union[int, float], np.array, float, float, bool, bool]]:
         actions, policies = self._agent.predict_action(self._current_obs)
         steps = self._env.step(actions)
         rewards = []
