@@ -226,4 +226,3 @@ class MultiReplayBuffer:
 
     def __repr__(self):
         return f"{self.__class__.__name__}(max_size={self._max_size})"
-

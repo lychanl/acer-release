@@ -4,7 +4,7 @@ import argparse
 from runners import Runner
 
 parser = argparse.ArgumentParser(description='Actor-Critic with experience replay.')
-parser.add_argument('--algo', type=str, help='Algorithm to be used', default="classic", choices=['classic'])
+parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer", choices=['acer'])
 parser.add_argument('--env_name', type=str, help='OpenAI Gym environment name', default="CartPole-v0")
 parser.add_argument('--gamma', type=float, help='discount factor', required=False, default=0.99)
 parser.add_argument('--rho', type=float, help='prob. of success in geometric probability distribution, used to'

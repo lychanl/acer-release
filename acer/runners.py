@@ -8,11 +8,12 @@ from typing import Optional, List, Union, Tuple
 import gym
 import numpy as np
 import tensorflow as tf
+from gym import wrappers
 
-from algos.classic_acer import ClassicACER
+from algos.acer import ACER
 from algos.base import ACERAgent
-from environment import SequentialEnv
 from logger import CSVLogger
+from utils import is_atari
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,13 +23,24 @@ logging.basicConfig(
 
 def _get_agent(algorithm: str, parameters: Optional[dict], observations_space: gym.Space,
                actions_space: gym.Space) -> ACERAgent:
-    """Initializes Agent object"""
     if not parameters:
         parameters = {}
-    if algorithm == 'classic':
-        return ClassicACER(observations_space=observations_space, actions_space=actions_space, **parameters)
+    if algorithm == 'acer':
+        return ACER(observations_space=observations_space, actions_space=actions_space, **parameters)
     else:
         raise NotImplemented
+
+
+def _get_env(env_id: str, num_parallel_envs: int) -> gym.vector.AsyncVectorEnv:
+    if is_atari(env_id):
+        def get_env_fn():
+            return wrappers.AtariPreprocessing(
+                gym.make(env_id),
+            )
+        env = gym.vector.AsyncVectorEnv([get_env_fn for _ in range(num_parallel_envs)])
+    else:
+        env = gym.vector.make(env_id, num_envs=num_parallel_envs)
+    return env
 
 
 class Runner:
@@ -63,11 +75,15 @@ class Runner:
         self._num_evaluation_runs = num_evaluation_runs
         self._max_time_steps = max_time_steps
         self._env_name = environment_name
-        self._env = SequentialEnv(environment_name, num_parallel_envs)
+
+        self._env = _get_env(environment_name, num_parallel_envs)
+        self._evaluate_env = _get_env(environment_name, num_evaluation_runs)
+
         self._done_steps_in_a_episode = [0] * self._n_envs
         self._returns = [0] * self._n_envs
 
-        self._max_steps_in_episode = self._env.spec.max_episode_steps
+        dummy_env = self._env.env_fns[0]()
+        self._max_steps_in_episode = dummy_env.spec.max_episode_steps
 
         self._log_dir = f"{log_dir}/{environment_name}" \
                         f"_{algorithm}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
@@ -77,9 +93,8 @@ class Runner:
         self._csv_logger = CSVLogger(self._log_dir + '/results.csv', ['time_step', 'eval_return_mean', 'eval_std_mean'])
 
         self._save_parameters(algorithm_parameters)
-
-        self._agent = _get_agent(algorithm, algorithm_parameters, self._env.observation_space, self._env.action_space)
-        self._current_obs = self._env.reset_all()
+        self._agent = _get_agent(algorithm, algorithm_parameters, dummy_env.observation_space, dummy_env.action_space)
+        self._current_obs = self._env.reset()
 
     def run(self):
         """Performs training. If 'evaluate' is True, evaluation of the policy is performed. The evaluation
@@ -104,33 +119,31 @@ class Runner:
         rewards = []
         experience = []
         old_obs = self._current_obs
-        self._current_obs = []
+        self._current_obs = steps[0]
 
-        for i, step in enumerate(steps):
+        for i in range(self._n_envs):
             # 'is_done' from Gym does not take into account maximum number of steps in a single episode constraint
             self._time_step += 1
             if self._time_step % Runner.MEASURE_TIME_TIME_STEPS == 0:
                 self._measure_time()
 
-            rewards.append(step[1])
+            rewards.append(steps[1][i])
             self._done_steps_in_a_episode[i] += 1
-            is_done_gym = step[2]
+            is_done_gym = steps[2][i]
             is_maximum_number_of_steps_reached = self._max_steps_in_episode is not None \
                 and self._max_steps_in_episode == self._done_steps_in_a_episode[i]
 
             is_done = is_done_gym and not is_maximum_number_of_steps_reached
             is_end = is_done or is_maximum_number_of_steps_reached
 
-            reward = step[1]
+            reward = steps[1][i]
             experience.append(
                 (actions[i], old_obs[i], reward, policies[i], is_done, is_end)
             )
 
-            self._current_obs.append(step[0])
-            self._returns[i] += step[1]
+            self._returns[i] += steps[1][i]
 
             if is_end:
-                self._current_obs[i] = self._env.reset(i)
                 self._done_episodes += 1
 
                 logging.info(f"finished episode {self._done_episodes}, "
@@ -156,28 +169,29 @@ class Runner:
     def _evaluate(self):
         self._next_evaluation_timestamp += self._evaluate_time_steps_interval
 
-        returns = []
-        env = SequentialEnv(self._env_name, 1)
-        for _ in range(self._num_evaluation_runs):
-            time_step = 0
-            current_obs = np.expand_dims(env.reset(0), axis=0)
-            evaluation_return = 0
-            is_end = False
+        returns = [0] * self._num_evaluation_runs
+        envs_finished = [False] * self._num_evaluation_runs
+        time_step = 0
+        current_obs = self._evaluate_env.reset()
 
-            while not is_end:
-                time_step += 1
-                actions, _ = self._agent.predict_action(current_obs, is_deterministic=True)
-                steps = env.step(actions)
-                evaluation_return += steps[0][1]
-                current_obs = np.expand_dims(steps[0][0], axis=0)
-                is_done_gym = steps[0][2]
-                is_maximum_number_of_steps_reached = self._max_steps_in_episode is not None\
-                    and self._max_steps_in_episode == time_step
+        while not all(envs_finished):
+            time_step += 1
+            actions, _ = self._agent.predict_action(current_obs, is_deterministic=True)
+            steps = self._evaluate_env.step(actions)
+            current_obs = steps[0]
+            for i in range(self._num_evaluation_runs):
+                if not envs_finished[i]:
+                    returns[i] += steps[1][i]
 
-                is_end = is_done_gym or is_maximum_number_of_steps_reached
-            logging.info(f"evaluation run, "
-                         f"return: {evaluation_return}")
-            returns.append(evaluation_return)
+                    is_done_gym = steps[2][i]
+                    is_maximum_number_of_steps_reached = self._max_steps_in_episode is not None\
+                        and self._max_steps_in_episode == time_step
+
+                    is_end = is_done_gym or is_maximum_number_of_steps_reached
+                    envs_finished[i] = is_end
+                    if is_end:
+                        logging.info(f"evaluation run, "
+                                     f"return: {returns[i]}")
 
         mean_returns = np.mean(returns)
         std_returns = np.std(returns)

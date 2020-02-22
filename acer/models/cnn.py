@@ -22,8 +22,9 @@ def build_cnn_network(filters: tuple = (32, 64, 64), kernels: tuple = (8, 4, 3),
         created network
     """
     assert len(filters) == len(kernels) == len(strides), "Layers specifications must have the same lengths"
-
-    layers = [
+    expand_layer = tf.keras.layers.Lambda(lambda x: tf.expand_dims(x, axis=1))
+    cast_layer = tf.keras.layers.Lambda(lambda x: tf.cast(x, tf.float32))
+    layers = [expand_layer, cast_layer] + [
         tf.keras.layers.Conv2D(
             cnn_filter,
             kernel,

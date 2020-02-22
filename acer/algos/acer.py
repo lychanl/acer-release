@@ -11,10 +11,9 @@ Neural Networks : the Official Journal of the International Neural Network Socie
 Wawrzyński, Paweł. "Real-time reinforcement learning by sequential actor–critics
 and experience replay." Neural Networks 22.10 (2009): 1484-1497.
 """
-import time
 from typing import Optional, List, Union, Dict, Tuple
-# import os
-# os.environ["CUDA_VISIBLE_DEVICES"]="-1"
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="-1"
 import gym
 import tensorflow as tf
 import numpy as np
@@ -22,7 +21,7 @@ import numpy as np
 from algos.base import ACERAgent, Actor, CategoricalActor, GaussianActor, Critic
 
 
-class ClassicACER(ACERAgent):
+class ACER(ACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Optional[Tuple[int]], rho: float = 0.1, b: float = 3, *args, **kwargs):
         """Actor-Critic with Experience Replay
@@ -136,4 +135,3 @@ class ClassicACER(ACERAgent):
         batch = []
         [batch.extend(self._memory.get(trajectory_lens)) for _ in range(self._batches_per_env)]
         return batch
-

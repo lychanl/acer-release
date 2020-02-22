@@ -1,12 +1,10 @@
 from functools import wraps
 from time import time
-from typing import Tuple, List, Union, Dict, Callable
+from typing import Tuple, List, Union, Dict
 
 import gym
 import numpy as np
 import tensorflow as tf
-
-from environment import BaseMultiEnv
 
 
 def normc_initializer():
