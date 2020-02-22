@@ -49,7 +49,8 @@ class Runner:
 
     def __init__(self, environment_name: str, algorithm: str = 'acer', algorithm_parameters: Optional[dict] = None,
                  num_parallel_envs: int = 5, evaluate_time_steps_interval: int = 1500,
-                 num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1):
+                 num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
+                 record: bool = True):
         """Trains and evaluates the agent.
 
         TODO: frames saving
@@ -65,6 +66,7 @@ class Runner:
             num_evaluation_runs: number of runs per one evaluation
             log_dir: logging directory
             max_time_steps: maximum number of training time steps
+            record: True if video should be recorded after training
         """
         self._elapsed_time_measure = 0
         self._time_step = 0
@@ -75,7 +77,9 @@ class Runner:
         self._num_evaluation_runs = num_evaluation_runs
         self._max_time_steps = max_time_steps
         self._env_name = environment_name
-
+        self._log_dir = f"{log_dir}/{environment_name}" \
+                        f"_{algorithm}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        self._record = record
         self._env = _get_env(environment_name, num_parallel_envs)
         self._evaluate_env = _get_env(environment_name, num_evaluation_runs)
 
@@ -85,8 +89,6 @@ class Runner:
         dummy_env = self._env.env_fns[0]()
         self._max_steps_in_episode = dummy_env.spec.max_episode_steps
 
-        self._log_dir = f"{log_dir}/{environment_name}" \
-                        f"_{algorithm}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
         tensor_board_writer = tf.summary.create_file_writer(self._log_dir)
         tensor_board_writer.set_as_default()
 
@@ -112,6 +114,8 @@ class Runner:
             self._elapsed_time_measure += time.time() - start_time
 
         self._csv_logger.close()
+        if self._record:
+            self._record_video()
 
     def _step(self) -> List[Tuple[Union[int, float], np.array, float, float, bool, bool]]:
         actions, policies = self._agent.predict_action(self._current_obs)
@@ -203,6 +207,25 @@ class Runner:
         self._csv_logger.log_values(
             {'time_step': self._time_step, 'eval_return_mean': mean_returns, 'eval_std_mean': std_returns}
         )
+
+    def _record_video(self):
+        env = wrappers.Monitor(gym.make(self._env_name), self._log_dir, force=True, video_callable=lambda x: True)
+        is_end = False
+        time_step = 0
+        current_obs = np.array([env.reset()])
+
+        while not is_end:
+            time_step += 1
+            actions, _ = self._agent.predict_action(current_obs, is_deterministic=True)
+            steps = env.step(actions[0])
+            current_obs = np.array([steps[0]])
+            is_done_gym = steps[2]
+            is_maximum_number_of_steps_reached = self._max_steps_in_episode is not None\
+                and self._max_steps_in_episode == time_step
+
+            is_end = is_done_gym or is_maximum_number_of_steps_reached
+
+        env.close()
 
     def _is_time_to_evaluate(self):
         return self._evaluate_time_steps_interval != -1 and self._time_step >= self._next_evaluation_timestamp
