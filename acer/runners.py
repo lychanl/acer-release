@@ -123,7 +123,7 @@ class Runner:
 
             reward = step[1]
             experience.append(
-                (actions[i], old_obs[i], reward, step[0], policies[i], is_done, is_end)
+                (actions[i], old_obs[i], reward, policies[i], is_done, is_end)
             )
 
             self._current_obs.append(step[0])

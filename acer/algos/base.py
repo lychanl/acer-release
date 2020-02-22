@@ -438,7 +438,7 @@ class ACERAgent(ABC):
         )
 
     def save_experience(self, steps: List[
-        Tuple[Union[int, float, list], np.array, float, np.array, np.array, bool, bool]
+        Tuple[Union[int, float, list], np.array, float, np.array, bool, bool]
     ]):
         """Stores gathered experiences in a replay buffer. Accepts list of steps.
 

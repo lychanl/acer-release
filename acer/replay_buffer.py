@@ -4,8 +4,6 @@ from typing import Optional, Union, Tuple, List, Dict, Type
 
 import numpy as np
 
-from utils import timing
-
 
 @dataclass
 class BufferFieldSpec:
@@ -29,7 +27,6 @@ class ReplayBuffer:
 
         self._actions = self._init_field(action_spec)
         self._obs = self._init_field(obs_spec)
-        self._next_obs = self._init_field(obs_spec)
         self._rewards = self._init_field(BufferFieldSpec((), np.float32))
         self._policies = self._init_field(BufferFieldSpec((), np.float32))
         self._dones = self._init_field(BufferFieldSpec((), bool))
@@ -40,8 +37,7 @@ class ReplayBuffer:
         return np.ndarray(shape=shape, dtype=field_spec.dtype)
 
     def put(self, action: Union[int, float, list], observation: np.array,
-            reward: float, next_observation: np.ndarray,
-            policy: float, is_done: bool,
+            reward: float, policy: float, is_done: bool,
             end: bool):
         """Stores one experience tuple in the buffer.
 
@@ -49,7 +45,6 @@ class ReplayBuffer:
             action: performed action
             observation: state in which action was performed
             reward: earned reward
-            next_observation: next state after performing action
             policy: probability/probability density of executing stored action
             is_done: True if episode ended and was not terminated by reaching
                 the maximum number of steps per episode
@@ -59,7 +54,6 @@ class ReplayBuffer:
         self._actions[self._pointer] = action
         self._obs[self._pointer] = observation
         self._rewards[self._pointer] = reward
-        self._next_obs[self._pointer] = next_observation
         self._policies[self._pointer] = policy
         self._dones[self._pointer] = is_done
         self._ends[self._pointer] = end
@@ -113,6 +107,20 @@ class ReplayBuffer:
             end_index += 1
             current_length += 1
 
+        start_index_next = start_index + 1
+        end_index_next = end_index + 1
+
+        if start_index_next == self._max_size:
+            start_index_next = 0
+
+        if end_index_next == self._max_size + 1:
+            end_index_next = 1
+
+        if start_index_next > end_index_next:
+            buffer_slice_next = np.r_[0: end_index_next, start_index_next: self._max_size]
+        else:
+            buffer_slice_next = np.r_[start_index_next: end_index_next]
+
         if start_index > end_index:
             buffer_slice = np.r_[0: end_index, start_index: self._max_size]
         else:
@@ -121,7 +129,7 @@ class ReplayBuffer:
         actions = self._actions[buffer_slice]
         observations = self._obs[buffer_slice]
         rewards = self._rewards[buffer_slice]
-        next_observations = self._next_obs[buffer_slice]
+        next_observations = self._obs[buffer_slice_next]
         policies = self._policies[buffer_slice]
         done = self._dones[buffer_slice]
         end = self._ends[buffer_slice]
@@ -166,7 +174,7 @@ class MultiReplayBuffer:
         self._max_size = max_size
         self._buffers = [ReplayBuffer(int(max_size / num_buffers), action_spec, obs_spec) for _ in range(num_buffers)]
 
-    def put(self, steps: List[Tuple[Union[int, float, list], np.array, float, np.array, np.array, bool, bool]]):
+    def put(self, steps: List[Tuple[Union[int, float, list], np.array, float, np.array, bool, bool]]):
         """Stores gathered experiences in the buffers. Accepts list of steps.
 
         Args:
