@@ -370,7 +370,9 @@ class ACERAgent(ABC):
                  critic_adam_epsilon: float = 1e-5, standardize_obs: bool = False, rescale_rewards: int = -1,
                  time_step: int = 1):
 
-        self._tf_time_step = tf.Variable(initial_value=time_step, name='tf_time_step', dtype=tf.dtypes.int64, trainable=False)
+        self._tf_time_step = tf.Variable(
+            initial_value=time_step, name='tf_time_step', dtype=tf.dtypes.int64, trainable=False
+        )
         self._observations_space = observations_space
         self._actions_space = actions_space
         self._std = std
@@ -559,8 +561,18 @@ class ACERAgent(ABC):
         actor_path = str(path / 'actor.tf')
         critic_path = str(path / 'critic.tf')
         buffer_path = str(path / 'buffer.pkl')
+
         self._actor.save_weights(actor_path, overwrite=True)
         self._critic.save_weights(critic_path, overwrite=True)
+
+        if self._running_mean_obs:
+            rms_obs_path = str(path / 'rms_obs.pkl')
+            self._running_mean_obs.save(rms_obs_path)
+
+        if self._running_mean_rewards:
+            rms_rewards_path = str(path / 'rms_rewards.pkl')
+            self._running_mean_rewards.save(rms_rewards_path)
+
         self._memory.save(buffer_path)
 
 

@@ -1,3 +1,4 @@
+import pickle
 from functools import wraps
 from time import time
 from typing import Tuple, List, Union, Dict
@@ -107,6 +108,11 @@ class RunningMeanVariance:
             m_2 = m_a + m_b + np.square(delta) * self.count * batch_count / new_count
             new_var = m_2 / (new_count - 1)
             self.count, self.mean, self.var = new_count, new_mean, new_var
+
+    def save(self, path: str):
+        """Saves the state on disk"""
+        with open(path, 'wb') as f:
+            pickle.dump(self, f)
 
 
 class RunningMeanVarianceTf:

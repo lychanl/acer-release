@@ -12,8 +12,8 @@ Wawrzyński, Paweł. "Real-time reinforcement learning by sequential actor–cri
 and experience replay." Neural Networks 22.10 (2009): 1484-1497.
 """
 from typing import Optional, List, Union, Dict, Tuple
-import os
-os.environ["CUDA_VISIBLE_DEVICES"]="-1"
+# import os
+# os.environ["CUDA_VISIBLE_DEVICES"]="-1"
 import gym
 import tensorflow as tf
 import numpy as np
