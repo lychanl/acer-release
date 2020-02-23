@@ -74,7 +74,7 @@ class ACER(BaseACERAgent):
         """
         batches_indices = tf.RaggedTensor.from_row_lengths(values=tf.range(tf.reduce_sum(lengths)), row_lengths=lengths)
         values = tf.squeeze(self._critic.value(obs))
-        values_next = self._gamma * tf.squeeze(self._critic.value(obs_next)) * (1.0 - tf.cast(dones, tf.dtypes.float32))
+        values_next = tf.squeeze(self._critic.value(obs_next)) * (1.0 - tf.cast(dones, tf.dtypes.float32))
         policies = tf.squeeze(self._actor.prob(obs, actions))
         indices = tf.expand_dims(batches_indices, axis=2)
 
@@ -99,7 +99,7 @@ class ACER(BaseACERAgent):
         ).flat_values
 
         # flat tensors
-        d_coeffs = gamma_coeffs * (rewards + values_next - values) * truncated_densities.flat_values
+        d_coeffs = gamma_coeffs * (rewards + self._gamma * values_next - values) * truncated_densities.flat_values
         # ragged
         d_coeffs_batches = tf.gather_nd(d_coeffs, tf.expand_dims(indices, axis=2))
         # final summation over original batches

@@ -19,8 +19,7 @@ class PessimisticCritic(BaseCritic):
                  **kwargs):
         super().__init__(observations_space, layers, tf_time_step, *args, **kwargs)
 
-        self._v1 = tf.keras.layers.Dense(1, kernel_initializer=utils.normc_initializer())
-        self._v2 = tf.keras.layers.Dense(1, kernel_initializer=utils.normc_initializer())
+        self._v = tf.keras.layers.Dense(2, kernel_initializer=utils.normc_initializer())
 
     def values(self, observations: tf.Tensor,  **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
         """Calculates lower bound of the value function and value function approximation
@@ -38,16 +37,11 @@ class PessimisticCritic(BaseCritic):
         for layer in self._hidden_layers[1:]:
             x = layer(x)
 
-        v1 = self._v1(x)
-        v2 = self._v2(x)
+        v = self._v(x)
 
-        with tf.name_scope('pessimistic_critic'):
-            tf.summary.scalar('batch_v1_mean', tf.reduce_mean(v1), step=self._tf_time_step)
-            tf.summary.scalar('batch_v2_mean', tf.reduce_mean(v2), step=self._tf_time_step)
+        return v
 
-        return v1, v2
-
-    def loss(self, observations: np.array, d1: np.array, d2: np.array) -> tf.Tensor:
+    def loss(self, observations: np.array, d1: tf.Tensor, d2: tf.Tensor) -> tf.Tensor:
         """Computes Critic's loss.
 
         Args:
@@ -55,20 +49,16 @@ class PessimisticCritic(BaseCritic):
             d1: update coefficient of value function lower bound approximation
             d2: update coefficient of value function approximation
         """
-        v1, v2 = self.values(observations)
-        # print()
-        # print(tf.reduce_mean(v1))
-        # print(tf.reduce_mean(v2))
-        # print(tf.reduce_mean(d1))
-        # print(tf.reduce_mean(d2))
+        value = self.values(observations)
 
-        loss1 = tf.reduce_mean(-tf.math.multiply(v1, d1))
-        loss2 = tf.reduce_mean(-tf.math.multiply(v2, d2))
+        loss = tf.reduce_mean(-tf.math.multiply(value, tf.concat([d1, d2], axis=1)))
 
         with tf.name_scope('critic'):
-            tf.summary.scalar('batch_loss_v1', loss1, step=self._tf_time_step)
-            tf.summary.scalar('batch_loss_v2', loss2, step=self._tf_time_step)
-        return loss1 + loss2
+            tf.summary.scalar('batch_loss_value', loss, step=self._tf_time_step)
+            v1, v2 = tf.split(value, 2, axis=1)
+            tf.summary.scalar('batch_v1_mean', tf.reduce_mean(v1), step=self._tf_time_step)
+            tf.summary.scalar('batch_v2_mean', tf.reduce_mean(v2), step=self._tf_time_step)
+        return loss
 
 
 class PACER(BaseACERAgent):
@@ -123,14 +113,14 @@ class PACER(BaseACERAgent):
         See Equation (8) and Equation (9) in the paper (1).
         """
         batches_indices = tf.RaggedTensor.from_row_lengths(values=tf.range(tf.reduce_sum(lengths)), row_lengths=lengths)
-        vals = tf.squeeze(self._critic.values(obs))
-        values_low = vals[0]
-        values = vals[1]
-        vals_next = tf.squeeze(self._critic.values(obs_next))
-        values_low_next = vals_next[0]
-        values_next = vals_next[1]
-        values_low_next = tf.squeeze(values_low_next) * (1.0 - tf.cast(dones, tf.dtypes.float32))
-        values_next = tf.squeeze(values_next) * (1.0 - tf.cast(dones, tf.dtypes.float32))
+
+        values_low, values = tf.split(self._critic.values(obs), 2, axis=1)
+        values_low_next, values_next = tf.split(self._critic.values(obs_next), 2, axis=1)
+        values_low, values = tf.squeeze(values_low), tf.squeeze(values)
+        values_low_next, values_next = tf.squeeze(values_low_next), tf.squeeze(values_next)
+        values_low_next = values_low_next * (1.0 - tf.cast(dones, tf.dtypes.float32))
+        values_next = values_next * (1.0 - tf.cast(dones, tf.dtypes.float32))
+
         policies = tf.squeeze(self._actor.prob(obs, actions))
         indices = tf.expand_dims(batches_indices, axis=2)
 

@@ -147,9 +147,6 @@ class BaseCritic(ABC, tf.keras.Model):
         
         value = self._v(x)
 
-        with tf.name_scope('critic'):
-            tf.summary.scalar('batch_value_mean', tf.reduce_mean(value), step=self._tf_time_step)
-
         return value
 
 
@@ -169,9 +166,11 @@ class Critic(BaseCritic):
                 the paper (1))
         """
 
-        loss = tf.reduce_mean(-tf.math.multiply(self.value(observations), d))
+        value = self.value(observations)
+        loss = tf.reduce_mean(-tf.math.multiply(value, d))
 
         with tf.name_scope('critic'):
+            tf.summary.scalar('batch_value_mean', tf.reduce_mean(value), step=self._tf_time_step)
             tf.summary.scalar('batch_loss', loss, step=self._tf_time_step)
         return loss
 
