@@ -33,9 +33,9 @@ class PessimisticCritic(BaseCritic):
                 and value function approximations
 
         """
-        x = self._layers[0](observations)
+        x = self._hidden_layers[0](observations)
 
-        for layer in self._layers[1:]:
+        for layer in self._hidden_layers[1:]:
             x = layer(x)
 
         v1 = self._v1(x)
