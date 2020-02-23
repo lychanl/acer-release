@@ -45,12 +45,18 @@ class CSVLogger(Logger):
         """
         super().__init__(*args, **kwargs)
         self._file = open(str(file_path), 'wt')
+        self._file_path = file_path
         self._writer = csv.writer(self._file, delimiter=',')
         self._writer.writerow(self._keys)
 
     def _store_log(self, key_values: OrderedDict):
         row = list(key_values.values())
         self._writer.writerow(row)
+
+    def dump(self):
+        self._file.close()
+        self._file = open(str(self._file_path), 'a+t')
+        self._writer = csv.writer(self._file, delimiter=',')
 
     def close(self):
         self._file.close()
