@@ -20,24 +20,24 @@ config.gpu_options.allow_growth = True
 session = InteractiveSession(config=config)
 
 
-class Actor(ABC, tf.keras.Model):
+class BaseActor(ABC, tf.keras.Model):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  beta_penalty: float, tf_time_step: tf.Variable, *args, **kwargs):
-        """Base Actor class
+        """Base abstract Actor class
 
         Args:
             observations_dim: dimension of observations space
             layers: list of hidden layers sizes, eg: for neural network with two layers with 10 and 20 hidden units
                 pass: [10, 20]
-            beta_penalty: penalty coefficient. In discrete case, Actor is penalized for too executing too
+            beta_penalty: penalty coefficient. In discrete case, BaseActor is penalized for too executing too
                 confident actions (no exploration), in the continuous case it is penalized for making actions
                 that are out of the allowed bounds
             tf_time_step: time step as TensorFlow variable, required for TensorBoard summaries
         """
         super().__init__(*args, **kwargs)
 
-        self._layers = []
+        self._hidden_layers = []
 
         if type(actions_space) == gym.spaces.discrete.Discrete:
             actions_dim = actions_space.n
@@ -45,43 +45,32 @@ class Actor(ABC, tf.keras.Model):
             actions_dim = actions_space.shape[0]
 
         if len(observations_space.shape) > 1:
-            self._layers.extend(build_cnn_network())
-            self._layers.extend(build_mlp_network(layers_sizes=layers))
+            self._hidden_layers.extend(build_cnn_network())
+            self._hidden_layers.extend(build_mlp_network(layers_sizes=layers))
         else:
-            self._layers.extend(build_mlp_network(layers_sizes=(observations_space.shape[0], ) + layers))
+            self._hidden_layers.extend(build_mlp_network(layers_sizes=(observations_space.shape[0], ) + layers))
 
-        self._layers.append(tf.keras.layers.Dense(actions_dim, kernel_initializer=utils.normc_initializer()))
+        self._hidden_layers.append(tf.keras.layers.Dense(actions_dim, kernel_initializer=utils.normc_initializer()))
 
         self._actions_dim = actions_dim
         self._beta_penalty = beta_penalty
         self._tf_time_step = tf_time_step
 
-    def _call_layers(self, observations: np.array) -> tf.Tensor:
-        x = self._layers[0](observations)
-        for layer in self._layers[1:]:
+    def _forward(self, observations: np.array) -> tf.Tensor:
+        x = self._hidden_layers[0](observations)
+        for layer in self._hidden_layers[1:]:
             x = layer(x)
         return x
 
     @property
     @abstractmethod
     def action_dtype(self):
-        """Returns data type of the Actor's actions (TensorFlow)"""
+        """Returns data type of the BaseActor's actions (TensorFlow)"""
 
     @property
     @abstractmethod
     def action_dtype_np(self):
-        """Returns data type of the Actor's actions (Numpy)"""
-
-    @abstractmethod
-    def loss(self, observations: np.array, actions: np.array, z: np.array) -> tf.Tensor:
-        """Computes Actor's loss
-
-        Args:
-            observations: batch [batch_size, observations_dim] of observations vectors
-            actions: batch [batch_size, actions_dim] of actions vectors
-            z: batch [batch_size, 1] of gradient update coefficient (summation term in the Equation (8)) from
-                the paper (1))
-        """
+        """Returns data type of the BaseActor's actions (Numpy)"""
 
     @abstractmethod
     def prob(self, observations: np.array, actions: np.array) -> tf.Tensor:
@@ -96,7 +85,7 @@ class Actor(ABC, tf.keras.Model):
         """
 
     @abstractmethod
-    def call(self, observations: np.array, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
+    def act(self, observations: np.array, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
         """Samples actions and computes their probabilities (or probability densities in continuous case)
 
         Args:
@@ -120,8 +109,7 @@ class Actor(ABC, tf.keras.Model):
         """
 
 
-class Critic(tf.keras.Model):
-
+class BaseCritic(ABC, tf.keras.Model):
     def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]],
                  tf_time_step: tf.Variable, *args, **kwargs):
         """Value function approximation as MLP network neural network.
@@ -133,17 +121,17 @@ class Critic(tf.keras.Model):
             tf_time_step: time step as TensorFlow variable, required for TensorBoard summaries
         """
         super().__init__(*args, **kwargs)
-        self._layers = []
+        self._hidden_layers = []
         if len(observations_space.shape) > 1:
-            self._layers.extend(build_cnn_network())
-            self._layers.extend(build_mlp_network(layers_sizes=layers))
+            self._hidden_layers.extend(build_cnn_network())
+            self._hidden_layers.extend(build_mlp_network(layers_sizes=layers))
         else:
-            self._layers.extend(build_mlp_network(layers_sizes=(observations_space.shape[0], ) + layers))
+            self._hidden_layers.extend(build_mlp_network(layers_sizes=(observations_space.shape[0], ) + layers))
 
-        self._layers.append(tf.keras.layers.Dense(1, kernel_initializer=utils.normc_initializer()))
+        self._v = tf.keras.layers.Dense(1, kernel_initializer=utils.normc_initializer())
         self._tf_time_step = tf_time_step
 
-    def call(self, observations: tf.Tensor,  **kwargs) -> tf.Tensor:
+    def value(self, observations: tf.Tensor,  **kwargs) -> tf.Tensor:
         """Calculates value function given observations batch
 
         Args:
@@ -153,36 +141,46 @@ class Critic(tf.keras.Model):
             Tensor [batch_size, 1] with value function estimations
 
         """
-        x = self._layers[0](observations)
-        for layer in self._layers[1:]:
+        x = self._hidden_layers[0](observations)
+        for layer in self._hidden_layers[1:]:
             x = layer(x)
+        
+        value = self._v(x)
 
         with tf.name_scope('critic'):
-            tf.summary.scalar('batch_value_mean', tf.reduce_mean(x), step=self._tf_time_step)
+            tf.summary.scalar('batch_value_mean', tf.reduce_mean(value), step=self._tf_time_step)
 
-        return x
+        return value
 
-    def loss(self, observations: np.array, z: np.array) -> tf.Tensor:
+
+class Critic(BaseCritic):
+
+    def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]], tf_time_step: tf.Variable, *args,
+                 **kwargs):
+        """Basic Critic that outputs single value"""
+        super().__init__(observations_space, layers, tf_time_step, *args, **kwargs)
+
+    def loss(self, observations: np.array, d: np.array) -> tf.Tensor:
         """Computes Critic's loss.
 
         Args:
             observations: batch [batch_size, observations_dim] of observations vectors
-            z: batch [batch_size, 1] of gradient update coefficient (summation term in the Equation (9)) from
+            d: batch [batch_size, 1] of gradient update coefficient (summation term in the Equation (9)) from
                 the paper (1))
         """
 
-        loss = tf.reduce_mean(-tf.math.multiply(self.call(observations), z))
+        loss = tf.reduce_mean(-tf.math.multiply(self.value(observations), d))
 
         with tf.name_scope('critic'):
             tf.summary.scalar('batch_loss', loss, step=self._tf_time_step)
         return loss
 
 
-class CategoricalActor(Actor):
+class CategoricalBaseActor(BaseActor):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  *args, **kwargs):
-        """Actor for discrete actions spaces. Uses Categorical Distribution"""
+        """BaseActor for discrete actions spaces. Uses Categorical Distribution"""
         super().__init__(observations_space, actions_space, layers, *args, **kwargs)
 
     @property
@@ -193,8 +191,8 @@ class CategoricalActor(Actor):
     def action_dtype_np(self):
         return np.int32
 
-    def loss(self, observations: tf.Tensor, actions: tf.Tensor, z: tf.Tensor) -> tf.Tensor:
-        logits = self._call_layers(observations)
+    def loss(self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor) -> tf.Tensor:
+        logits = self._forward(observations)
 
         # TODO: remove hardcoded '10' and '20'
         logits_div = tf.divide(logits, 10)
@@ -213,7 +211,7 @@ class CategoricalActor(Actor):
             axis=1,
             keepdims=True
         )
-        total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, z) + penalty)
+        total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, d) + penalty)
 
         # entropy maximization penalty
         # entropy = -tf.reduce_sum(tf.math.multiply(probs, log_probs), axis=1)
@@ -228,15 +226,15 @@ class CategoricalActor(Actor):
 
     def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> tf.Tensor:
         # TODO: remove hardcoded '10' and '20'
-        logits = tf.divide(self._call_layers(observations), 10)
+        logits = tf.divide(self._forward(observations), 10)
         probs = tf.nn.softmax(logits)
         action_probs = tf.gather_nd(probs, actions, batch_dims=1)
         return action_probs
 
-    def call(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
+    def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
 
         # TODO: remove hardcoded '10' and '20'
-        logits = tf.divide(self._call_layers(observations), 10)
+        logits = tf.divide(self._forward(observations), 10)
         probs = tf.nn.softmax(logits)
         log_probs = tf.nn.log_softmax(logits)
 
@@ -250,25 +248,25 @@ class CategoricalActor(Actor):
 
     def act_deterministic(self, observations: np.array, **kwargs) -> tf.Tensor:
         """Performs most probable action"""
-        logits = tf.divide(self._call_layers(observations), 10)
+        logits = tf.divide(self._forward(observations), 10)
         probs = tf.nn.softmax(logits)
 
         actions = tf.argmax(probs, axis=1)
         return actions
 
 
-class GaussianActor(Actor):
+class GaussianBaseActor(BaseActor):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  beta_penalty: float, actions_bound: float, std: float = None, *args, **kwargs):
-        """Actor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
+        """BaseActor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
 
         TODO: introduce [a, b] intervals as allowed actions bounds
 
         Args:
             observations_dim: dimension of observations space
             layers: list of hidden layer sizes
-            beta_penalty: penalty for too confident actions coefficient
+            beta_penalty: penalty for too confident actions dicient
             actions_bound: upper (lower == '-actions_bound') bound for allowed actions,
              required in case of continuous actions
         """
@@ -296,8 +294,8 @@ class GaussianActor(Actor):
     def action_dtype_np(self):
         return np.float32
 
-    def loss(self, observations: np.array, actions: np.array, z: np.array) -> tf.Tensor:
-        mean = self._call_layers(observations)
+    def loss(self, observations: np.array, actions: np.array, d: np.array) -> tf.Tensor:
+        mean = self._forward(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
             scale_diag=tf.exp(self._log_std)
@@ -316,7 +314,7 @@ class GaussianActor(Actor):
         entropy = dist.entropy()
         # entropy_penalty = 0.01 * entropy
 
-        total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, z) + bounds_penalty)
+        total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, d) + bounds_penalty)
 
         with tf.name_scope('actor'):
             for i in range(self._actions_dim):
@@ -328,7 +326,7 @@ class GaussianActor(Actor):
         return total_loss
 
     def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> tf.Tensor:
-        mean = self._call_layers(observations)
+        mean = self._forward(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
             scale_diag=tf.exp(self._log_std)
@@ -336,8 +334,8 @@ class GaussianActor(Actor):
 
         return dist.prob(actions)
 
-    def call(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
-        mean = self._call_layers(observations)
+    def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
+        mean = self._forward(observations)
 
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
@@ -355,12 +353,12 @@ class GaussianActor(Actor):
 
     def act_deterministic(self, observations: np.array, **kwargs) -> tf.Tensor:
         """Returns mean of the Gaussian"""
-        mean = self._call_layers(observations)
+        mean = self._forward(observations)
         return mean
 
 
-class ACERAgent(ABC):
-    """Base ACER Agent abstraction"""
+class BaseACERAgent(ABC):
+    """Base ACER abstract class"""
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Tuple[int], gamma: int = 0.99, actor_beta_penalty: float = 0.001,
                  std: Optional[float] = None, memory_size: int = 1e6, num_parallel_envs: int = 10,
@@ -472,7 +470,7 @@ class ACERAgent(ABC):
 
     def predict_action(self, observations: np.array, is_deterministic: bool = False) \
             -> Tuple[np.array, Optional[np.array]]:
-        """Predicts actions for given observations. Performs forward pass with Actor network.
+        """Predicts actions for given observations. Performs forward pass with BaseActor network.
 
         Args:
             observations: batch [batch_size, observations_dim] of observations vectors
@@ -486,7 +484,7 @@ class ACERAgent(ABC):
         if is_deterministic:
             return self._actor.act_deterministic(processed_obs).numpy(), None
         else:
-            actions, policies = self._actor(tf.convert_to_tensor(processed_obs))
+            actions, policies = self._actor.act(tf.convert_to_tensor(processed_obs))
             return actions.numpy(), policies.numpy()
 
     def _experience_replay_generator(self):
@@ -550,11 +548,11 @@ class ACERAgent(ABC):
         ...
 
     @abstractmethod
-    def _init_actor(self) -> Actor:
+    def _init_actor(self) -> BaseActor:
         ...
 
     @abstractmethod
-    def _init_critic(self) -> Critic:
+    def _init_critic(self) -> BaseCritic:
         ...
 
     def save(self, path: Path, **kwargs):

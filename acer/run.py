@@ -5,8 +5,8 @@ import signal
 
 from runners import Runner
 
-parser = argparse.ArgumentParser(description='Actor-Critic with experience replay.')
-parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer", choices=['acer'])
+parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
+parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer", choices=['acer', 'pacer'])
 parser.add_argument('--env_name', type=str, help='OpenAI Gym environment name', default="CartPole-v0")
 parser.add_argument('--gamma', type=float, help='discount factor', required=False, default=0.99)
 parser.add_argument('--rho', type=float, help='prob. of success in geometric probability distribution, used to'
@@ -14,11 +14,11 @@ parser.add_argument('--rho', type=float, help='prob. of success in geometric pro
                     required=False, default=0.1)
 parser.add_argument('--b', type=float, help='probability density truncation coefficient',
                     required=False, default=3)
-parser.add_argument('--actor_adam_epsilon', type=float, help='ADAM optimizer epsilon parameter (Actor)',
+parser.add_argument('--actor_adam_epsilon', type=float, help='ADAM optimizer epsilon parameter (BaseActor)',
                     required=False, default=1e-5)
-parser.add_argument('--actor_adam_beta1', type=float, help='ADAM optimizer beta1 (Actor)',
+parser.add_argument('--actor_adam_beta1', type=float, help='ADAM optimizer beta1 (BaseActor)',
                     required=False, default=0.9)
-parser.add_argument('--actor_adam_beta2', type=float, help='ADAM optimizer beta2 (Actor)',
+parser.add_argument('--actor_adam_beta2', type=float, help='ADAM optimizer beta2 (BaseActor)',
                     required=False, default=0.999)
 parser.add_argument('--critic_adam_epsilon', type=float, help='ADAM optimizer epsilon (Critic)',
                     required=False, default=1e-5)
@@ -26,9 +26,9 @@ parser.add_argument('--critic_adam_beta1', type=float, help='ADAM optimizer beta
                     required=False, default=0.9)
 parser.add_argument('--critic_adam_beta2', type=float, help='ADAM optimizer beta2 (Critic)',
                     required=False, default=0.999)
-parser.add_argument('--actor_lr', type=float, help='Actor learning rate', required=False, default=0.001)
+parser.add_argument('--actor_lr', type=float, help='BaseActor learning rate', required=False, default=0.001)
 parser.add_argument('--critic_lr', type=float, help='Critic learning rate', required=False, default=0.001)
-parser.add_argument('--actor_beta_penalty', type=float, help='Actor penalty coefficient', default=0.001)
+parser.add_argument('--actor_beta_penalty', type=float, help='BaseActor penalty coefficient', default=0.001)
 parser.add_argument('--c', type=int, help='experience replay intensity', required=False, default=10)
 parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=0.3)
 parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
@@ -36,7 +36,7 @@ parser.add_argument('--std', type=float, help='value on diagonal of Normal dist.
                     required=False, default=None)
 parser.add_argument('--memory_size', type=int, help='memory buffer size (sum of all of the buffers from every env',
                     required=False, default=1e6)
-parser.add_argument('--actor_layers', nargs='+', type=int, help='List of Actor\'s neural network hidden layers sizes',
+parser.add_argument('--actor_layers', nargs='+', type=int, help='List of BaseActor\'s neural network hidden layers sizes',
                     required=False, default=(100, 100))
 parser.add_argument('--critic_layers', nargs='+', type=int, help='List of Critic\'s neural network hidden layers sizes',
                     required=False, default=(100, 100))
@@ -61,6 +61,8 @@ parser.add_argument('--max_time_steps', type=int, help='Maximum number of time s
                                                        'time steps limit',
                     default=-1)
 parser.add_argument('--log_dir', type=str, help='TensorBoard logging directory', default='logs/')
+parser.add_argument('--save_video_on_kill', action='store_true',
+                    help='True if SIGINT signal should trigger registration of the video')
 
 
 def main():
@@ -76,6 +78,7 @@ def main():
     evaluate_time_steps_interval = parameters.pop('evaluate_time_steps_interval')
     num_evaluation_runs = parameters.pop('num_evaluation_runs')
     max_time_steps = parameters.pop('max_time_steps')
+    save_video_on_kill = parameters.pop('save_video_on_kill')
     algorithm = parameters.pop('algo')
     log_dir = parameters.pop('log_dir')
 
@@ -87,7 +90,8 @@ def main():
         log_dir=log_dir,
         max_time_steps=max_time_steps,
         num_evaluation_runs=num_evaluation_runs,
-        evaluate_time_steps_interval=evaluate_time_steps_interval
+        evaluate_time_steps_interval=evaluate_time_steps_interval,
+        save_video_on_kill=save_video_on_kill
     )
 
     def handle_sigint(sig, frame):

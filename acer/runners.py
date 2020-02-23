@@ -12,7 +12,8 @@ import tensorflow as tf
 from gym import wrappers
 
 from algos.acer import ACER
-from algos.base import ACERAgent
+from algos.base import BaseACERAgent
+from algos.pessimistic_acer import PACER
 from logger import CSVLogger
 from utils import is_atari
 
@@ -23,11 +24,13 @@ logging.basicConfig(
 
 
 def _get_agent(algorithm: str, parameters: Optional[dict], observations_space: gym.Space,
-               actions_space: gym.Space) -> ACERAgent:
+               actions_space: gym.Space) -> BaseACERAgent:
     if not parameters:
         parameters = {}
     if algorithm == 'acer':
         return ACER(observations_space=observations_space, actions_space=actions_space, **parameters)
+    if algorithm == 'pacer':
+        return PACER(observations_space=observations_space, actions_space=actions_space, **parameters)
     else:
         raise NotImplemented
 
@@ -51,7 +54,7 @@ class Runner:
     def __init__(self, environment_name: str, algorithm: str = 'acer', algorithm_parameters: Optional[dict] = None,
                  num_parallel_envs: int = 5, evaluate_time_steps_interval: int = 1500,
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
-                 record: bool = True):
+                 record: bool = True, save_video_on_kill: bool = False):
         """Trains and evaluates the agent.
 
         TODO: frames saving
@@ -68,12 +71,14 @@ class Runner:
             log_dir: logging directory
             max_time_steps: maximum number of training time steps
             record: True if video should be recorded after training
+            save_video_on_kill: True if video should be captured after receiving SIGINT signal
         """
         self._elapsed_time_measure = 0
         self._time_step = 0
         self._done_episodes = 0
         self._next_evaluation_timestamp = 0
         self._n_envs = num_parallel_envs
+        self._save_video_on_kill = save_video_on_kill
         self._evaluate_time_steps_interval = evaluate_time_steps_interval
         self._num_evaluation_runs = num_evaluation_runs
         self._max_time_steps = max_time_steps
@@ -278,4 +283,5 @@ class Runner:
         logging.info(f"flushing data to disk...")
         self._csv_logger.close()
         self._save_checkpoint()
-        self._record_video()
+        if self._save_video_on_kill:
+            self._record_video()
