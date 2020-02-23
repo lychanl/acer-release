@@ -209,7 +209,8 @@ class Runner:
         )
 
     def _record_video(self):
-        env = wrappers.Monitor(gym.make(self._env_name), self._log_dir, force=True, video_callable=lambda x: True)
+        env = wrappers.Monitor(gym.make(self._env_name), self._log_dir + '/video',
+                               force=True, video_callable=lambda x: True)
         is_end = False
         time_step = 0
         current_obs = np.array([env.reset()])
