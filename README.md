@@ -61,29 +61,8 @@ tensorboard --logdir logs
 in the repository's root directory. The dashboard will be available in the browser under
 the addres http://localhost:6006/
 
-## Notes
-1. *num_parallel_envs* denotes number of parallel OpenAI Gym environments. Right now,
-no multithreading/multiprocessing is implemented (actions are executed sequentially in every env).
-Asynchronous workers will be required to handle more complex environments
- (where *.step()* call is computationally expensive). 
- Consider [Ray](https://github.com/ray-project/ray)  
-2. New replay buffer is created for each environment. One trajectory per buffer is sampled
- in the experience replay process. Those trajectories are combined into single batch (i.e.
- single batch consists of *num_parallel_envs* trajectories).
- 
- 
- #### Improvements to be considered
- * Multivariate Normal distribution diagonal as learned parameter  
-    * PoC experiments resulted in fast converge to some low values and
-    further in no exploration and learning at all. 
-    Maybe with entropy penalty the mechanism can work.
- * more meaningful statistics for TensorBoard
- * weights initialization (*normalized column* initialization from the OpenAI Baselines
- is used right now, some sources propose Orthogonal initialization)
- * probably, some optimizations around *@tf.function* usage can be done
- 
- 
- ## References
+
+## References
  
 TBA
  
