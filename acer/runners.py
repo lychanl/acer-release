@@ -268,3 +268,9 @@ class Runner:
         self._agent.save(checkpoint_dir / 'model')
 
         logging.info(f"saved checkpoint in '{str(checkpoint_dir)}'")
+
+    def flush(self):
+        """Dumps checkpoint and CSVLogger output onto the hard drive"""
+        logging.info(f"flushing data onto disk...")
+        self._csv_logger.close()
+        self._save_checkpoint()

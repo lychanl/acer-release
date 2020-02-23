@@ -1,6 +1,8 @@
 import argparse
 
 # handle command line arguments
+import signal
+
 from runners import Runner
 
 parser = argparse.ArgumentParser(description='Actor-Critic with experience replay.')
@@ -87,6 +89,12 @@ def main():
         num_evaluation_runs=num_evaluation_runs,
         evaluate_time_steps_interval=evaluate_time_steps_interval
     )
+
+    def handle_sigint(sig, frame):
+        runner.flush()
+
+    signal.signal(signal.SIGINT, handle_sigint)
+
     runner.run()
 
 
