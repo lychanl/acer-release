@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from typing import Optional, List, Union, Tuple
+from pathlib import Path
 
 import gym
 import numpy as np
@@ -77,8 +78,11 @@ class Runner:
         self._num_evaluation_runs = num_evaluation_runs
         self._max_time_steps = max_time_steps
         self._env_name = environment_name
-        self._log_dir = f"{log_dir}/{environment_name}" \
-                        f"_{algorithm}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        self._log_dir = Path(
+            f"{log_dir}/{environment_name}_{algorithm}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        )
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+
         self._record = record
         self._env = _get_env(environment_name, num_parallel_envs)
         self._evaluate_env = _get_env(environment_name, num_evaluation_runs)
@@ -89,10 +93,13 @@ class Runner:
         dummy_env = self._env.env_fns[0]()
         self._max_steps_in_episode = dummy_env.spec.max_episode_steps
 
-        tensor_board_writer = tf.summary.create_file_writer(self._log_dir)
+        tensor_board_writer = tf.summary.create_file_writer(str(self._log_dir))
         tensor_board_writer.set_as_default()
 
-        self._csv_logger = CSVLogger(self._log_dir + '/results.csv', ['time_step', 'eval_return_mean', 'eval_std_mean'])
+        self._csv_logger = CSVLogger(
+            self._log_dir / 'results.csv',
+            keys=['time_step', 'eval_return_mean', 'eval_std_mean']
+        )
 
         self._save_parameters(algorithm_parameters)
         self._agent = _get_agent(algorithm, algorithm_parameters, dummy_env.observation_space, dummy_env.action_space)
@@ -106,6 +113,8 @@ class Runner:
 
             if self._is_time_to_evaluate():
                 self._evaluate()
+                if self._time_step != 0:
+                    self._save_checkpoint()
 
             start_time = time.time()
             experience = self._step()
@@ -241,5 +250,21 @@ class Runner:
         self._elapsed_time_measure = 0
 
     def _save_parameters(self, algorithm_parameters: dict):
-        with open(self._log_dir + '/parameters.json', 'wt') as f:
+        with open(str(self._log_dir / 'parameters.json'), 'wt') as f:
             json.dump(algorithm_parameters, f)
+
+    def _save_checkpoint(self):
+        """Saves current state and model"""
+        checkpoint_dir = self._log_dir / 'checkpoint'
+        checkpoint_dir.mkdir(exist_ok=True)
+
+        runner_dump = {
+            'time_step': self._time_step,
+            'done_episodes': self._done_episodes,
+        }
+        with open(str(checkpoint_dir / 'runner.json'), 'wt') as f:
+            json.dump(runner_dump, f)
+
+        self._agent.save(checkpoint_dir / 'model')
+
+        logging.info(f"saved checkpoint in '{str(checkpoint_dir)}'")

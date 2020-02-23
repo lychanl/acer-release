@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Tuple, Union, List, Optional, Dict
 
 import gym
@@ -366,9 +367,10 @@ class ACERAgent(ABC):
                  batches_per_env: int = 5, c: int = 10, c0: float = 0.3, actor_lr: float = 0.001,
                  actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999, actor_adam_epsilon: float = 1e-5,
                  critic_lr: float = 0.001, critic_adam_beta1: float = 0.9, critic_adam_beta2: float = 0.999,
-                 critic_adam_epsilon: float = 1e-5, standardize_obs: bool = False, rescale_rewards: int = -1):
+                 critic_adam_epsilon: float = 1e-5, standardize_obs: bool = False, rescale_rewards: int = -1,
+                 time_step: int = 1):
 
-        self._tf_time_step = tf.Variable(initial_value=1, name='tf_time_step', dtype=tf.dtypes.int64, trainable=False)
+        self._tf_time_step = tf.Variable(initial_value=time_step, name='tf_time_step', dtype=tf.dtypes.int64, trainable=False)
         self._observations_space = observations_space
         self._actions_space = actions_space
         self._std = std
@@ -552,5 +554,13 @@ class ACERAgent(ABC):
     @abstractmethod
     def _init_critic(self) -> Critic:
         ...
+
+    def save(self, path: Path, **kwargs):
+        actor_path = str(path / 'actor.tf')
+        critic_path = str(path / 'critic.tf')
+        buffer_path = str(path / 'buffer.pkl')
+        self._actor.save_weights(actor_path, overwrite=True)
+        self._critic.save_weights(critic_path, overwrite=True)
+        self._memory.save(buffer_path)
 
 

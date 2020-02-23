@@ -2,6 +2,7 @@ import csv
 from abc import ABC, abstractmethod
 import datetime
 from collections import defaultdict, OrderedDict
+from pathlib import Path
 from typing import Dict, List, Any
 
 
@@ -36,14 +37,14 @@ class Logger(ABC):
 
 class CSVLogger(Logger):
 
-    def __init__(self, file_path, *args, **kwargs):
+    def __init__(self, file_path: Path, *args, **kwargs):
         """Logs data into csv file. IMPORTANT: close() method have to be called at the end of the run.
 
         Args:
             file_path: path to the log file
         """
         super().__init__(*args, **kwargs)
-        self._file = open(file_path, 'wt')
+        self._file = open(str(file_path), 'wt')
         self._writer = csv.writer(self._file, delimiter=',')
         self._writer.writerow(self._keys)
 

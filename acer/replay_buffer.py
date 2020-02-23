@@ -1,4 +1,5 @@
-
+from __future__ import annotations
+import pickle
 from dataclasses import dataclass
 from typing import Optional, Union, Tuple, List, Dict, Type
 
@@ -226,3 +227,24 @@ class MultiReplayBuffer:
 
     def __repr__(self):
         return f"{self.__class__.__name__}(max_size={self._max_size})"
+
+    def save(self, path: str):
+        """Dumps the buffer onto the disk.
+
+        Args:
+            path: file path to the new file
+        """
+
+        with open(path, 'wb') as f:
+            pickle.dump(self, f)
+
+    @staticmethod
+    def load(path: str) -> MultiReplayBuffer:
+        """Loads the buffer from the disk
+
+        Args:
+            path: path where the buffer was stored
+        """
+        with open(path, 'rb') as f:
+            buffer = pickle.load(f)
+        return buffer
