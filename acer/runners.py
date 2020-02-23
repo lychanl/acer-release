@@ -218,7 +218,9 @@ class Runner:
         )
 
     def _record_video(self):
-        env = wrappers.Monitor(gym.make(self._env_name), self._log_dir + '/video',
+        logging.info(f"saving video of the current model performance...")
+
+        env = wrappers.Monitor(gym.make(self._env_name), self._log_dir / 'video',
                                force=True, video_callable=lambda x: True)
         is_end = False
         time_step = 0
@@ -270,7 +272,8 @@ class Runner:
         logging.info(f"saved checkpoint in '{str(checkpoint_dir)}'")
 
     def flush(self):
-        """Dumps checkpoint and CSVLogger output onto the hard drive"""
-        logging.info(f"flushing data onto disk...")
+        """Dumps checkpoint and CSVLogger output to disk"""
+        logging.info(f"flushing data to disk...")
         self._csv_logger.close()
         self._save_checkpoint()
+        self._record_video()
