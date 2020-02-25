@@ -91,13 +91,13 @@ def main():
         max_time_steps=max_time_steps,
         num_evaluation_runs=num_evaluation_runs,
         evaluate_time_steps_interval=evaluate_time_steps_interval,
-        save_video_on_kill=save_video_on_kill
     )
 
     def handle_sigint(sig, frame):
-        runner.flush()
+        runner.record_video()
 
-    signal.signal(signal.SIGINT, handle_sigint)
+    if save_video_on_kill:
+        signal.signal(signal.SIGINT, handle_sigint)
 
     runner.run()
 

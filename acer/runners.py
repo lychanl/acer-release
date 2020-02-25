@@ -54,7 +54,7 @@ class Runner:
     def __init__(self, environment_name: str, algorithm: str = 'acer', algorithm_parameters: Optional[dict] = None,
                  num_parallel_envs: int = 5, evaluate_time_steps_interval: int = 1500,
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
-                 record: bool = True, save_video_on_kill: bool = False):
+                 record: bool = True):
         """Trains and evaluates the agent.
 
         TODO: frames saving
@@ -71,14 +71,12 @@ class Runner:
             log_dir: logging directory
             max_time_steps: maximum number of training time steps
             record: True if video should be recorded after training
-            save_video_on_kill: True if video should be captured after receiving SIGINT signal
         """
         self._elapsed_time_measure = 0
         self._time_step = 0
         self._done_episodes = 0
         self._next_evaluation_timestamp = 0
         self._n_envs = num_parallel_envs
-        self._save_video_on_kill = save_video_on_kill
         self._evaluate_time_steps_interval = evaluate_time_steps_interval
         self._num_evaluation_runs = num_evaluation_runs
         self._max_time_steps = max_time_steps
@@ -129,7 +127,7 @@ class Runner:
 
         self._csv_logger.close()
         if self._record:
-            self._record_video()
+            self.record_video()
 
     def _step(self) -> List[Tuple[Union[int, float], np.array, float, float, bool, bool]]:
         actions, policies = self._agent.predict_action(self._current_obs)
@@ -222,7 +220,7 @@ class Runner:
             {'time_step': self._time_step, 'eval_return_mean': mean_returns, 'eval_std_mean': std_returns}
         )
 
-    def _record_video(self):
+    def record_video(self):
         logging.info(f"saving video of the current model performance...")
 
         env = wrappers.Monitor(gym.make(self._env_name), self._log_dir / 'video',
@@ -277,11 +275,11 @@ class Runner:
         self._csv_logger.dump()
         logging.info(f"saved evaluation results")
         logging.info(f"saved checkpoint in '{str(checkpoint_dir)}'")
-
-    def flush(self):
-        """Dumps checkpoint and CSVLogger output to disk"""
-        logging.info(f"flushing data to disk...")
-        self._csv_logger.close()
-        self._save_checkpoint()
-        if self._save_video_on_kill:
-            self._record_video()
+    #
+    # def flush(self):
+    #     """Dumps checkpoint and CSVLogger output to disk"""
+    #     logging.info(f"flushing data to disk...")
+    #     self._csv_logger.close()
+    #     self._save_checkpoint()
+    #     if self._save_video_on_kill:
+    #         self._record_video()
