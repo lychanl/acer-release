@@ -138,7 +138,7 @@ class PACER(BaseACERAgent):
             tf.minimum(policies_ratio_product, self._b),
             batch_mask
         )
-        # matrices filled with and padded with 0's
+        # matrices filled with ones and padded with 0's
         ones = tf.ones_like(truncated_densities).to_tensor()
         gamma_coeffs_batches = ones * self._gamma
         gamma_coeffs = tf.ragged.boolean_mask(
@@ -152,6 +152,13 @@ class PACER(BaseACERAgent):
         d1_coeffs_batches = tf.gather_nd(d1_coeffs, tf.expand_dims(indices, axis=2))
         # final summation over original batches
         d1 = tf.stop_gradient(tf.reduce_sum(d1_coeffs_batches, axis=1))
+
+        # flat tensors
+        d2_coeffs = gamma_coeffs * (rewards + self._gamma * values_next - values) * truncated_densities.flat_values
+        # ragged
+        d2_coeffs_batches = tf.gather_nd(d2_coeffs, tf.expand_dims(indices, axis=2))
+        # final summation over original batches
+        d2 = tf.stop_gradient(tf.reduce_sum(d2_coeffs_batches, axis=1))
 
         # K + 1 duplicated K + 1 times
         K = tf.cast(tf.repeat(lengths, lengths), tf.float32)
@@ -169,15 +176,15 @@ class PACER(BaseACERAgent):
         k3 = k1 + 1
         # k
         k4 = k2 - 1
-        z_coeffs = gamma_coeffs * (rewards + (
+        z3 = gamma_coeffs * (rewards + (
                     self._gamma * (k1 * values_low_next + k2 * values_next) - (k3 * values_low + k4 * values)) / K)
-        d2_coeffs = z_coeffs * truncated_densities.flat_values
-        d2_coeffs_batches = tf.gather_nd(d2_coeffs, tf.expand_dims(indices, axis=2))
-        d2 = tf.stop_gradient(tf.reduce_sum(d2_coeffs_batches, axis=1))
+        d3_coeffs = z3 * truncated_densities.flat_values
+        d3_coeffs_batches = tf.gather_nd(d3_coeffs, tf.expand_dims(indices, axis=2))
+        d3 = tf.stop_gradient(tf.reduce_sum(d3_coeffs_batches, axis=1))
 
-        self._backward_pass(first_obs, first_actions, d1, d2)
+        self._backward_pass(first_obs, first_actions, d1, d2, d3)
 
-    def _backward_pass(self, observations: tf.Tensor, actions: tf.Tensor, d1: tf.Tensor, d2: tf.Tensor):
+    def _backward_pass(self, observations: tf.Tensor, actions: tf.Tensor, d1: tf.Tensor, d2: tf.Tensor, d3: tf.Tensor):
         """Performs backward pass in BaseActor's and Critic's networks
 
         Args:
@@ -187,7 +194,7 @@ class PACER(BaseACERAgent):
             d2: batch [batch_size, observations_dim] of gradient update coefficients (value)
         """
         with tf.GradientTape() as tape:
-            loss = self._actor.loss(observations, actions, d2)
+            loss = self._actor.loss(observations, actions, d3)
         grads = tape.gradient(loss, self._actor.trainable_variables)
         gradients = zip(grads, self._actor.trainable_variables)
 
