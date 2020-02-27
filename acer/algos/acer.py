@@ -23,14 +23,14 @@ from algos.base import BaseACERAgent, BaseActor, CategoricalBaseActor, GaussianB
 
 class ACER(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
-                 critic_layers: Optional[Tuple[int]], rho: float = 0.1, b: float = 3, *args, **kwargs):
+                 critic_layers: Optional[Tuple[int]], lam: float = 0.1, b: float = 3, *args, **kwargs):
         """BaseActor-Critic with Experience Replay
 
         TODO: finish docstrings
         """
 
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
-        self._rho = rho
+        self._lam = lam
         self._b = b
 
     def _init_actor(self) -> BaseActor:
@@ -131,7 +131,7 @@ class ACER(BaseACERAgent):
         self._critic_optimizer.apply_gradients(gradients)
 
     def _fetch_offline_batch(self) -> List[Dict[str, Union[np.array, list]]]:
-        trajectory_lens = [np.random.geometric(self._rho) + 1 for _ in range(self._num_parallel_envs)]
+        trajectory_lens = [np.random.geometric(1 - self._lam) + 1 for _ in range(self._num_parallel_envs)]
         batch = []
         [batch.extend(self._memory.get(trajectory_lens)) for _ in range(self._batches_per_env)]
         return batch
