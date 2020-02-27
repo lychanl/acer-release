@@ -1,7 +1,7 @@
 import argparse
-
-# handle command line arguments
 import signal
+
+import tensorflow as tf
 
 from runners import Runner
 
@@ -51,7 +51,7 @@ parser.add_argument('--standardize_obs', help='True, if observations should be s
 parser.add_argument('--rescale_rewards', help='-1 to turn rescaling off, 0 to rescale automatically based on'
                                               'running variance; value greater than 0 rescales the rewards by'
                                               'dividing them by the value',
-                    type=int, default=-1)
+                    type=float, default=-1)
 parser.add_argument('--evaluate_time_steps_interval', type=int, help='Number of time steps between evaluations. '
                                                                      '-1 to turn evaluation off',
                     default=10000)
@@ -63,6 +63,8 @@ parser.add_argument('--max_time_steps', type=int, help='Maximum number of time s
 parser.add_argument('--log_dir', type=str, help='TensorBoard logging directory', default='logs/')
 parser.add_argument('--save_video_on_kill', action='store_true',
                     help='True if SIGINT signal should trigger registration of the video')
+parser.add_argument('--use_cpu', action='store_true',
+                    help='True if CPU (instead of GPU) should be used')
 
 
 def main():
@@ -81,6 +83,10 @@ def main():
     save_video_on_kill = parameters.pop('save_video_on_kill')
     algorithm = parameters.pop('algo')
     log_dir = parameters.pop('log_dir')
+    use_cpu = parameters.pop('use_cpu')
+
+    if use_cpu:
+        tf.config.set_visible_devices([], 'GPU')
 
     runner = Runner(
         environment_name=cmd_parameters.env_name,
