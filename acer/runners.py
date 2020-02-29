@@ -54,11 +54,8 @@ class Runner:
     def __init__(self, environment_name: str, algorithm: str = 'acer', algorithm_parameters: Optional[dict] = None,
                  num_parallel_envs: int = 5, evaluate_time_steps_interval: int = 1500,
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
-                 record: bool = True):
+                 record: bool = True, experiment_name: str = None):
         """Trains and evaluates the agent.
-
-        TODO: frames saving
-        TODO: checkpoints saving
 
         Args:
             environment_name: environment to be created
@@ -81,9 +78,15 @@ class Runner:
         self._num_evaluation_runs = num_evaluation_runs
         self._max_time_steps = max_time_steps
         self._env_name = environment_name
-        self._log_dir = Path(
-            f"{log_dir}/{environment_name}_{algorithm}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        )
+        if experiment_name:
+            self._log_dir = Path(
+                f"{log_dir}/{environment_name}_{algorithm}_{experiment_name}"
+                f"_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            )
+        else:
+            self._log_dir = Path(
+                f"{log_dir}/{environment_name}_{algorithm}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            )
         self._log_dir.mkdir(parents=True, exist_ok=True)
 
         self._record = record

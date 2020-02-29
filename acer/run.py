@@ -59,6 +59,7 @@ parser.add_argument('--max_time_steps', type=int, help='Maximum number of time s
                                                        'time steps limit',
                     default=-1)
 parser.add_argument('--log_dir', type=str, help='TensorBoard logging directory', default='logs/')
+parser.add_argument('--experiment_name', type=str, help='Name of the current experiment', default='')
 parser.add_argument('--save_video_on_kill', action='store_true',
                     help='True if SIGINT signal should trigger registration of the video')
 parser.add_argument('--use_cpu', action='store_true',
@@ -79,6 +80,7 @@ def main():
     num_evaluation_runs = parameters.pop('num_evaluation_runs')
     max_time_steps = parameters.pop('max_time_steps')
     save_video_on_kill = parameters.pop('save_video_on_kill')
+    experiment_name = parameters.pop('experiment_name')
     algorithm = parameters.pop('algo')
     log_dir = parameters.pop('log_dir')
     use_cpu = parameters.pop('use_cpu')
@@ -95,6 +97,7 @@ def main():
         max_time_steps=max_time_steps,
         num_evaluation_runs=num_evaluation_runs,
         evaluate_time_steps_interval=evaluate_time_steps_interval,
+        experiment_name=experiment_name
     )
 
     def handle_sigint(sig, frame):
