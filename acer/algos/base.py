@@ -74,14 +74,14 @@ class BaseActor(ABC, tf.keras.Model):
 
     @abstractmethod
     def prob(self, observations: np.array, actions: np.array) -> tf.Tensor:
-        """Computes probabilities (or probability densities in continuous case) of executing passed actions
+        """Computes probabilities (or probability densities in continuous case) and logarithms of it
 
         Args:
             observations: batch [batch_size, observations_dim] of observations vectors
             actions: batch [batch_size, actions_dim] of actions vectors
 
         Returns:
-             Tensor [batch_size, actions_dim, 1] with computed probabilities (densities)
+             Tensor [batch_size, actions_dim, 2] with computed probabilities (densities) and logarithms
         """
 
     @abstractmethod
@@ -131,6 +131,9 @@ class BaseCritic(ABC, tf.keras.Model):
         self._v = tf.keras.layers.Dense(1, kernel_initializer=utils.normc_initializer())
         self._tf_time_step = tf_time_step
 
+    def call(self, inputs, training=None, mask=None):
+        return self.value(inputs)
+
     def value(self, observations: tf.Tensor,  **kwargs) -> tf.Tensor:
         """Calculates value function given observations batch
 
@@ -175,7 +178,7 @@ class Critic(BaseCritic):
         return loss
 
 
-class CategoricalBaseActor(BaseActor):
+class CategoricalActor(BaseActor):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  *args, **kwargs):
@@ -223,12 +226,14 @@ class CategoricalBaseActor(BaseActor):
 
         return total_loss
 
-    def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> tf.Tensor:
+    def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         # TODO: remove hardcoded '10' and '20'
         logits = tf.divide(self._forward(observations), 10)
         probs = tf.nn.softmax(logits)
+        log_probs = tf.nn.log_softmax(logits)
         action_probs = tf.gather_nd(probs, actions, batch_dims=1)
-        return action_probs
+        action_log_probs = tf.gather_nd(log_probs, actions, batch_dims=1)
+        return action_probs, action_log_probs
 
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
 
@@ -254,7 +259,7 @@ class CategoricalBaseActor(BaseActor):
         return actions
 
 
-class GaussianBaseActor(BaseActor):
+class GaussianActor(BaseActor):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  beta_penalty: float, actions_bound: float, std: float = None, *args, **kwargs):
@@ -324,14 +329,14 @@ class GaussianBaseActor(BaseActor):
 
         return total_loss
 
-    def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> tf.Tensor:
+    def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         mean = self._forward(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
             scale_diag=tf.exp(self._log_std)
         )
 
-        return dist.prob(actions)
+        return dist.prob(actions), dist.log_prob(actions)
 
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
         mean = self._forward(observations)

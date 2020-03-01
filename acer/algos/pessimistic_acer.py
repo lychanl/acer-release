@@ -10,7 +10,7 @@ import tensorflow as tf
 import numpy as np
 
 import utils
-from algos.base import BaseACERAgent, BaseActor, CategoricalBaseActor, GaussianBaseActor, BaseCritic
+from algos.base import BaseACERAgent, BaseActor, CategoricalActor, GaussianActor, BaseCritic
 
 
 class PessimisticCritic(BaseCritic):
@@ -75,12 +75,12 @@ class PACER(BaseACERAgent):
 
     def _init_actor(self) -> BaseActor:
         if self._is_discrete:
-            return CategoricalBaseActor(
+            return CategoricalActor(
                 self._observations_space, self._actions_space, self._actor_layers,
                 self._actor_beta_penalty, self._tf_time_step
             )
         else:
-            return GaussianBaseActor(
+            return GaussianActor(
                 self._observations_space, self._actions_space, self._actor_layers,
                 self._actor_beta_penalty, self._actions_bound, self._std, self._tf_time_step
             )
@@ -121,7 +121,9 @@ class PACER(BaseACERAgent):
         values_low_next = values_low_next * (1.0 - tf.cast(dones, tf.dtypes.float32))
         values_next = values_next * (1.0 - tf.cast(dones, tf.dtypes.float32))
 
-        policies = tf.squeeze(self._actor.prob(obs, actions))
+        policies, log_policies = tf.split(self._actor.prob(obs, actions), 2, axis=0)
+        policies, log_policies = tf.squeeze(policies), tf.squeeze(log_policies)
+
         indices = tf.expand_dims(batches_indices, axis=2)
 
         # flat tensor
@@ -183,6 +185,12 @@ class PACER(BaseACERAgent):
         d3 = tf.stop_gradient(tf.reduce_sum(d3_coeffs_batches, axis=1))
 
         self._backward_pass(first_obs, first_actions, d1, d2, d3)
+
+        _, new_log_policies = tf.split(self._actor.prob(obs, actions), 2, axis=0)
+        new_log_policies = tf.squeeze(new_log_policies)
+        approx_kl = tf.reduce_mean(policies - new_log_policies)
+        with tf.name_scope('actor'):
+            tf.summary.scalar('sample_approx_kl_divergence', approx_kl, self._tf_time_step)
 
     def _backward_pass(self, observations: tf.Tensor, actions: tf.Tensor, d1: tf.Tensor, d2: tf.Tensor, d3: tf.Tensor):
         """Performs backward pass in BaseActor's and Critic's networks

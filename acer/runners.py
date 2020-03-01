@@ -95,6 +95,7 @@ class Runner:
 
         self._done_steps_in_a_episode = [0] * self._n_envs
         self._returns = [0] * self._n_envs
+        self._rewards = [[] for _ in range(self._n_envs)]
 
         dummy_env = self._env.env_fns[0]()
         self._max_steps_in_episode = dummy_env.spec.max_episode_steps
@@ -161,6 +162,7 @@ class Runner:
             )
 
             self._returns[i] += steps[1][i]
+            self._rewards[i].append(steps[1][i])
 
             if is_end:
                 self._done_episodes += 1
@@ -170,10 +172,12 @@ class Runner:
                              f"total time steps done: {self._time_step}")
 
                 with tf.name_scope('rewards'):
+                    tf.summary.histogram('rewards', self._rewards[i], self._done_episodes)
                     tf.summary.scalar('return', self._returns[i], self._done_episodes)
                     tf.summary.scalar('episode length', self._done_steps_in_a_episode[i], self._done_episodes)
 
                 self._returns[i] = 0
+                self._rewards[i] = []
                 self._done_steps_in_a_episode[i] = 0
 
         self._current_obs = np.array(self._current_obs)

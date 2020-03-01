@@ -18,7 +18,45 @@ import gym
 import tensorflow as tf
 import numpy as np
 
+import utils
 from algos.base import BaseACERAgent, BaseActor, CategoricalActor, GaussianActor, Critic
+from models.cnn import build_cnn_network
+from models.mlp import build_mlp_network
+
+
+class QuantileRegression(tf.keras.Model):
+    def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]], tf_time_step: tf.Variable, *args,
+                 **kwargs):
+        super().__init__(*args, **kwargs)
+        self._hidden_layers = []
+        if len(observations_space.shape) > 1:
+            self._hidden_layers.extend(build_cnn_network())
+            self._hidden_layers.extend(build_mlp_network(layers_sizes=layers))
+        else:
+            self._hidden_layers.extend(build_mlp_network(layers_sizes=(observations_space.shape[0], ) + layers))
+
+        self._r = tf.keras.layers.Dense(1, kernel_initializer=utils.normc_initializer())
+        self._tf_time_step = tf_time_step
+
+    def loss(self, observations, r):
+        r_pred = self.r(observations)
+        error = r - r_pred
+        with tf.name_scope('qr'):
+            tf.summary.scalar('qr_batch_mean', tf.reduce_mean(r_pred), step=self._tf_time_step)
+
+        return tf.reduce_mean(-tf.math.multiply(r, tf.maximum(0.999 * error, -0.001 * error)))
+
+    def call(self, inputs, training=None, mask=None):
+        return self.r(inputs)
+
+    def r(self, observations: tf.Tensor, **kwargs) -> tf.Tensor:
+        x = self._hidden_layers[0](observations)
+        for layer in self._hidden_layers[1:]:
+            x = layer(x)
+
+        r = self._r(x)
+
+        return r
 
 
 class ACER(BaseACERAgent):
@@ -32,6 +70,15 @@ class ACER(BaseACERAgent):
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
         self._lam = lam
         self._b = b
+
+        self._qr = QuantileRegression(self._observations_space, self._critic_layers, self._tf_time_step)
+
+        self._qr_optimizer = tf.keras.optimizers.Adam(
+            lr=kwargs['critic_lr'],
+            beta_1=kwargs['critic_adam_beta1'],
+            beta_2=kwargs['critic_adam_beta2'],
+            epsilon=kwargs['critic_adam_epsilon'],
+        )
 
     def _init_actor(self) -> BaseActor:
         if self._is_discrete:
@@ -75,8 +122,10 @@ class ACER(BaseACERAgent):
         batches_indices = tf.RaggedTensor.from_row_lengths(values=tf.range(tf.reduce_sum(lengths)), row_lengths=lengths)
         values = tf.squeeze(self._critic.value(obs))
         values_next = tf.squeeze(self._critic.value(obs_next)) * (1.0 - tf.cast(dones, tf.dtypes.float32))
-        policies, log_policies = tf.split(self._actor.prob(obs, actions), 2, axis=0)
-        policies, log_policies = tf.squeeze(policies), tf.squeeze(log_policies)
+
+        r_max = tf.squeeze(self._qr.r(obs))
+
+        policies = tf.squeeze(self._actor.prob(obs, actions))
         indices = tf.expand_dims(batches_indices, axis=2)
 
         # flat tensor
@@ -100,21 +149,15 @@ class ACER(BaseACERAgent):
         ).flat_values
 
         # flat tensors
-        d_coeffs = gamma_coeffs * (rewards + self._gamma * values_next - values) * truncated_densities.flat_values
+        d_coeffs = gamma_coeffs * (rewards - r_max) * truncated_densities.flat_values
         # ragged
         d_coeffs_batches = tf.gather_nd(d_coeffs, tf.expand_dims(indices, axis=2))
         # final summation over original batches
         d = tf.stop_gradient(tf.reduce_sum(d_coeffs_batches, axis=1))
 
-        self._backward_pass(first_obs, first_actions, d)
+        self._backward_pass(first_obs, first_actions, d, obs, rewards)
 
-        _, new_log_policies = tf.split(self._actor.prob(obs, actions), 2, axis=0)
-        new_log_policies = tf.squeeze(new_log_policies)
-        approx_kl = tf.reduce_mean(policies - new_log_policies)
-        with tf.name_scope('actor'):
-            tf.summary.scalar('sample_approx_kl_divergence', approx_kl, self._tf_time_step)
-
-    def _backward_pass(self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor):
+    def _backward_pass(self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor, obs, r):
         """Performs backward pass in BaseActor's and Critic's networks
 
         Args:
@@ -129,6 +172,13 @@ class ACER(BaseACERAgent):
         gradients = zip(grads, self._actor.trainable_variables)
 
         self._actor_optimizer.apply_gradients(gradients)
+
+        with tf.GradientTape() as tape:
+            loss = self._qr.loss(obs, r)
+        grads = tape.gradient(loss, self._qr.trainable_variables)
+        gradients = zip(grads, self._qr.trainable_variables)
+
+        self._qr_optimizer.apply_gradients(gradients)
 
         with tf.GradientTape() as tape:
             loss = self._critic.loss(observations, d)
