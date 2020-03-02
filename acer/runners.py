@@ -7,6 +7,7 @@ from typing import Optional, List, Union, Tuple
 from pathlib import Path
 
 import gym
+import pybullet_envs
 import numpy as np
 import tensorflow as tf
 from gym import wrappers
