@@ -281,7 +281,7 @@ class GaussianActor(BaseActor):
         if std:
             # change constant to Variable to make std a learned parameter
             self._log_std = tf.constant(
-                tf.math.log(std * actions_bound),
+                tf.math.log([std]),
                 name="actor_std",
             )
         else:
@@ -533,6 +533,7 @@ class BaseACERAgent(ABC):
     def _process_rewards(self, rewards: np.array) -> np.array:
         """Rescales returns with standard deviation. Additional clipping is used to prevent performance spikes."""
         if self._rescale_rewards == 0:
+            # return np.tanh(rewards / 10) * 5
             return np.clip(
                 rewards / np.sqrt(self._running_mean_rewards.var + 1e-8),
                 -5.0,
