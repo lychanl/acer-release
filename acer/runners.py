@@ -15,6 +15,7 @@ from gym import wrappers
 from algos.acer import ACER
 from algos.base import BaseACERAgent
 from algos.pessimistic_acer import PACER
+from algos.representative_acer import RepresentativeACER
 from logger import CSVLogger
 from utils import is_atari
 
@@ -32,6 +33,8 @@ def _get_agent(algorithm: str, parameters: Optional[dict], observations_space: g
         return ACER(observations_space=observations_space, actions_space=actions_space, **parameters)
     if algorithm == 'pacer':
         return PACER(observations_space=observations_space, actions_space=actions_space, **parameters)
+    if algorithm == 'racer':
+        return RepresentativeACER(observations_space=observations_space, actions_space=actions_space, **parameters)
     else:
         raise NotImplemented
 
