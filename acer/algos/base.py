@@ -281,7 +281,7 @@ class GaussianActor(BaseActor):
         if std:
             # change constant to Variable to make std a learned parameter
             self.log_std = tf.constant(
-                tf.math.log([std]),
+                tf.math.log([std] * actions_space.shape[0]),
                 name="actor_std",
             )
         else:

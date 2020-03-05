@@ -25,7 +25,7 @@ class RepresentativeACER(ACER):
         policies, log_policies = tf.squeeze(policies), tf.squeeze(log_policies)
         indices = tf.expand_dims(batches_indices, axis=2)
 
-        cov_matrix = tf.linalg.diag(tf.repeat(tf.square(tf.exp(self._actor.log_std)), self._actions_space.shape[0]))
+        cov_matrix = tf.linalg.diag(tf.square(tf.exp(self._actor.log_std)))
         kappa_coeff = ((2 * np.pi) ** self._actions_space.shape[0]) * tf.linalg.det(cov_matrix)
         kappas = kappa_coeff * tf.square(old_policies)
         policy_max = 1 / tf.sqrt(kappa_coeff)
