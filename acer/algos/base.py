@@ -370,6 +370,7 @@ class BaseACERAgent(ABC):
                  actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999, actor_adam_epsilon: float = 1e-5,
                  critic_lr: float = 0.001, critic_adam_beta1: float = 0.9, critic_adam_beta2: float = 0.999,
                  critic_adam_epsilon: float = 1e-5, standardize_obs: bool = False, rescale_rewards: int = -1,
+                 limit_reward_tanh: float = 3.,
                  time_step: int = 1):
 
         self._tf_time_step = tf.Variable(
@@ -387,6 +388,7 @@ class BaseACERAgent(ABC):
         self._batches_per_env = batches_per_env
         self._time_step = 0
         self._num_parallel_envs = num_parallel_envs
+        self._limit_reward_tanh = limit_reward_tanh
 
         if type(actions_space) == gym.spaces.Discrete:
             self._is_discrete = True
@@ -533,15 +535,20 @@ class BaseACERAgent(ABC):
     def _process_rewards(self, rewards: np.array) -> np.array:
         """Rescales returns with standard deviation. Additional clipping is used to prevent performance spikes."""
         if self._rescale_rewards == 0:
-            return np.clip(
-                rewards / np.sqrt(self._running_mean_rewards.var + 1e-8),
-                -5.0,
-                5.0
-            )
+            rewards = rewards / np.sqrt(self._running_mean_rewards.var + 1e-8)
+            if not self._limit_reward_tanh:
+                rewards = np.clip(
+                    rewards / np.sqrt(self._running_mean_rewards.var + 1e-8),
+                    -5.0,
+                    5.0
+                )
         elif self._rescale_rewards >= 0:
-            return rewards / self._rescale_rewards
-        else:
-            return rewards
+            rewards = rewards / self._rescale_rewards
+        
+        if self._limit_reward_tanh:
+            rewards = np.tanh(rewards / self._limit_reward_tanh) * self._limit_reward_tanh
+        
+        return rewards
 
     @abstractmethod
     def _fetch_offline_batch(self) -> List[Dict[str, Union[np.array, list]]]:

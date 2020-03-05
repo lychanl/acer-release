@@ -50,6 +50,9 @@ parser.add_argument('--rescale_rewards', help='-1 to turn rescaling off, 0 to re
                                               'running variance; value greater than 0 rescales the rewards by'
                                               'dividing them by the value',
                     type=float, default=-1)
+parser.add_argument('--limit_reward_tanh', help='limits reward to [-value, value] using tanh function'
+                                                '0 to disable',
+                    type=float, default=None)
 parser.add_argument('--evaluate_time_steps_interval', type=int, help='Number of time steps between evaluations. '
                                                                      '-1 to turn evaluation off',
                     default=10000)
