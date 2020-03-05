@@ -280,12 +280,12 @@ class GaussianActor(BaseActor):
 
         if std:
             # change constant to Variable to make std a learned parameter
-            self._log_std = tf.constant(
-                tf.math.log(std * actions_bound),
+            self.log_std = tf.constant(
+                tf.math.log([std] * actions_space.shape[0]),
                 name="actor_std",
             )
         else:
-            self._log_std = tf.constant(
+            self.log_std = tf.constant(
                 tf.math.log(0.4 * actions_bound),
                 name="actor_std",
             )
@@ -302,7 +302,7 @@ class GaussianActor(BaseActor):
         mean = self._forward(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
-            scale_diag=tf.exp(self._log_std)
+            scale_diag=tf.exp(self.log_std)
         )
 
         action_log_probs = tf.expand_dims(dist.log_prob(actions), axis=1)
@@ -322,7 +322,7 @@ class GaussianActor(BaseActor):
 
         with tf.name_scope('actor'):
             for i in range(self._actions_dim):
-                tf.summary.scalar(f'std_{i}', tf.exp(self._log_std[i]), step=self._tf_time_step)
+                tf.summary.scalar(f'std_{i}', tf.exp(self.log_std[i]), step=self._tf_time_step)
             tf.summary.scalar('batch_loss', total_loss, step=self._tf_time_step)
             tf.summary.scalar('batch_bounds_penalty_mean', tf.reduce_mean(bounds_penalty), step=self._tf_time_step)
             tf.summary.scalar('batch_entropy_mean', tf.reduce_mean(entropy), step=self._tf_time_step)
@@ -333,7 +333,7 @@ class GaussianActor(BaseActor):
         mean = self._forward(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
-            scale_diag=tf.exp(self._log_std)
+            scale_diag=tf.exp(self.log_std)
         )
 
         return dist.prob(actions), dist.log_prob(actions)
@@ -343,7 +343,7 @@ class GaussianActor(BaseActor):
 
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
-            scale_diag=tf.exp(self._log_std)
+            scale_diag=tf.exp(self.log_std)
         )
 
         actions = dist.sample(dtype=self.dtype)
