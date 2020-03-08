@@ -6,7 +6,8 @@ import tensorflow as tf
 from runners import Runner
 
 parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
-parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer", choices=['acer', 'pacer', 'racer'])
+parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer",
+                    choices=['acer', 'pacer', 'racer', 'wacer'])
 parser.add_argument('--env_name', type=str, help='OpenAI Gym environment name', default="CartPole-v0")
 parser.add_argument('--gamma', type=float, help='discount factor', required=False, default=0.99)
 parser.add_argument('--lam', type=float, help='lambda parameter', required=False, default=0.9)
