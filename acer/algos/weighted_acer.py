@@ -18,7 +18,9 @@ class WeightCritic(BaseCritic):
 
     def _init_zero(self, observations_space: gym.Space):
         self.compile(loss=tf.keras.losses.mean_absolute_error)
-        data = np.random.uniform(observations_space.low, observations_space.high, (10000, len(observations_space.low)))
+        data = np.random.uniform(
+            1e20, -1e20, (int(1e4), observations_space.low.shape[0])
+        )
         self.fit(data, np.zeros(shape=(len(data), )), epochs=2)
 
     def value(self, observations: tf.Tensor,  **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
@@ -41,19 +43,20 @@ class WeightCritic(BaseCritic):
 
         return v
 
-    def loss_v2(self, observations: np.array, d: tf.Tensor) -> tf.Tensor:
+    def loss_v2(self, observations: np.array, policies: tf.Tensor, old_policies: tf.Tensor) -> tf.Tensor:
         """Computes Critic's loss.
 
         Args:
+            old_policies: batch [batch_size, observations_dim] of policies from the buffer
+            policies: batch [batch_size, observations_dim] of current policies
             observations: batch [batch_size, observations_dim] of observations vectors
-            d: update coefficient
         """
         value = self.value(observations)
 
-        loss = tf.reduce_mean(-tf.math.multiply(value, d))
+        loss = tf.losses.mean_squared_error(policies, tf.multiply(value, old_policies))
 
         with tf.name_scope('critic'):
-            tf.summary.scalar('batch_v2_loss', loss, step=self._tf_time_step)
+            tf.summary.scalar('batch_v2_loss', tf.reduce_mean(loss), step=self._tf_time_step)
             tf.summary.scalar('batch_v2_mean', tf.reduce_mean(value), step=self._tf_time_step)
         return loss
 
@@ -111,13 +114,6 @@ class WeightedACER(BaseACERAgent):
     @tf.function(experimental_relax_shapes=True)
     def _learn_from_experience_batch(self, obs, obs_next, actions, old_policies,
                                      rewards, first_obs, first_actions, dones, lengths):
-        """Backward pass with single batch of experience.
-
-        Every experience replay requires sequence of experiences with random length, thus we have to use
-        ragged tensors here.
-
-        See Equation (8) and Equation (9) in the paper (1).
-        """
         batches_indices = tf.RaggedTensor.from_row_lengths(values=tf.range(tf.reduce_sum(lengths)), row_lengths=lengths)
         values = tf.squeeze(self._critic.value(obs))
         values_next = tf.squeeze(self._critic.value(obs_next)) * (1.0 - tf.cast(dones, tf.dtypes.float32))
@@ -142,7 +138,7 @@ class WeightedACER(BaseACERAgent):
 
         gamma_coeffs_batches = tf.ones_like(policies_ratio_batches).to_tensor() * self._gamma
         gamma_coeffs = tf.ragged.boolean_mask(
-            tf.tanh(tf.math.cumprod(gamma_coeffs_batches, axis=1, exclusive=True) / 2) * 2,
+            tf.tanh(tf.math.cumprod(gamma_coeffs_batches, axis=1, exclusive=True) / self._b) * self._b,
             batch_mask
         ).flat_values
 
@@ -154,9 +150,7 @@ class WeightedACER(BaseACERAgent):
         # final summation over original batches
         d1 = tf.stop_gradient(tf.reduce_sum(d_coeffs_batches, axis=1))
 
-        d2 = policies - policies_weights * old_policies
-
-        self._backward_pass(first_obs, first_actions, d1, d2, obs)
+        self._backward_pass(first_obs, first_actions, d1, tf.stop_gradient(policies), old_policies, obs)
 
         _, new_log_policies = tf.split(self._actor.prob(obs, actions), 2, axis=0)
         new_log_policies = tf.squeeze(new_log_policies)
@@ -165,16 +159,16 @@ class WeightedACER(BaseACERAgent):
             tf.summary.scalar('sample_approx_kl_divergence', approx_kl, self._tf_time_step)
 
     def _backward_pass(self, observations: tf.Tensor, actions: tf.Tensor,
-                       d1: tf.Tensor, d2: tf.Tensor, observations_v2: tf.Tensor):
+                       d1: tf.Tensor, policies: tf.Tensor, old_policies: tf.Tensor, observations_v2: tf.Tensor):
         """Performs backward pass in BaseActor's and Critic's networks
 
         Args:
             observations: batch [batch_size, observations_dim] of observations vectors
             actions: batch [batch_size, actions_dim] of actions vectors
             d1: batch [batch_size, observations_dim] of gradient update coefficients (v1)
-            d2: batch [batch_size, observations_dim] of gradient update coefficients (v2)
-            observations_v2: batch [initial_bath_size, observations_dim] of observations vectors for
-                v2 Critic update
+            policies: batch [batch_size, observations_dim] current policy function values
+            old_policies: batch [batch_size, observations_dim] policy function values from the buffer
+            observations_v2: batch [batch_size, observations_dim] of observations vectors to for V2 update
         """
         with tf.GradientTape() as tape:
             loss = self._actor.loss(observations, actions, d1)
@@ -191,7 +185,7 @@ class WeightedACER(BaseACERAgent):
         self._critic_optimizer.apply_gradients(gradients)
 
         with tf.GradientTape() as tape:
-            loss = self._critic_v2.loss_v2(observations_v2, d2)
+            loss = self._critic_v2.loss_v2(observations_v2, policies, old_policies)
         grads = tape.gradient(loss, self._critic_v2.trainable_variables)
         gradients = zip(grads, self._critic_v2.trainable_variables)
         self._critic_v2_optimizer.apply_gradients(gradients)
