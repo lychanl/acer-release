@@ -76,7 +76,7 @@ class WeightedACER(BaseACERAgent):
         self._critic_v2 = WeightCritic(self._observations_space, self._critic_layers, self._tf_time_step)
 
         self._critic_v2_optimizer = tf.keras.optimizers.Adam(
-            lr=kwargs['critic_lr'],
+            lr=0.001,
             beta_1=kwargs['critic_adam_beta1'],
             beta_2=kwargs['critic_adam_beta2'],
             epsilon=kwargs['critic_adam_epsilon'],
@@ -138,13 +138,13 @@ class WeightedACER(BaseACERAgent):
 
         gamma_coeffs_batches = tf.ones_like(policies_ratio_batches).to_tensor() * self._gamma
         gamma_coeffs = tf.ragged.boolean_mask(
-            tf.tanh(tf.math.cumprod(gamma_coeffs_batches, axis=1, exclusive=True) / self._b) * self._b,
+            tf.math.cumprod(gamma_coeffs_batches, axis=1, exclusive=True),
             batch_mask
         ).flat_values
 
         # flat tensors
         d_coeffs = gamma_coeffs * (rewards + self._gamma * values_next - values) \
-            * policies_ratio_product_batches.flat_values / policies_weights
+            * tf.tanh(policies_ratio_product_batches.flat_values / policies_weights / self._b) * self._b
         # ragged
         d_coeffs_batches = tf.gather_nd(d_coeffs, tf.expand_dims(indices, axis=2))
         # final summation over original batches
