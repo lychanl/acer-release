@@ -17,6 +17,7 @@ from algos.base import BaseACERAgent
 from algos.pessimistic_acer import PACER
 from algos.representative_acer import RepresentativeACER
 from algos.quantile_acer import QACER
+from algos.weighted_acer import WeightedACER
 from logger import CSVLogger
 from utils import is_atari
 
@@ -38,6 +39,8 @@ def _get_agent(algorithm: str, parameters: Optional[dict], observations_space: g
         return RepresentativeACER(observations_space=observations_space, actions_space=actions_space, **parameters)
     if algorithm == 'qacer':
         return QACER(observations_space=observations_space, actions_space=actions_space, **parameters)
+    if algorithm == 'wacer':
+        return WeightedACER(observations_space=observations_space, actions_space=actions_space, **parameters)
     else:
         raise NotImplemented
 
