@@ -9,6 +9,10 @@ import numpy as np
 from algos.base import BaseACERAgent, BaseActor, CategoricalActor, GaussianActor, BaseCritic, Critic
 
 
+def linear_exp(x):
+    return tf.where(x <= 0, 1 / (1 - x), 1 + x)
+
+
 class WeightCritic(BaseCritic):
 
     def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]], tf_time_step: tf.Variable, *args,
@@ -39,7 +43,7 @@ class WeightCritic(BaseCritic):
         for layer in self._hidden_layers[1:]:
             x = layer(x)
 
-        v = tf.exp(self._v(x))
+        v = linear_exp(self._v(x))
 
         return v
 
@@ -76,7 +80,7 @@ class WeightedACER(BaseACERAgent):
         self._critic_v2 = WeightCritic(self._observations_space, self._critic_layers, self._tf_time_step)
 
         self._critic_v2_optimizer = tf.keras.optimizers.Adam(
-            lr=0.001,
+            lr=kwargs['critic_lr'],
             beta_1=kwargs['critic_adam_beta1'],
             beta_2=kwargs['critic_adam_beta2'],
             epsilon=kwargs['critic_adam_epsilon'],
