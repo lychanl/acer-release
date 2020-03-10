@@ -27,23 +27,24 @@ logging.basicConfig(
 )
 
 
+ALGOS = {
+    'acer': ACER,
+    'pacer': PACER,
+    'racer': RepresentativeACER,
+    'qacer': QACER,
+    'wacer': WeightedACER
+}
+
+
 def _get_agent(algorithm: str, parameters: Optional[dict], observations_space: gym.Space,
                actions_space: gym.Space) -> BaseACERAgent:
     if not parameters:
         parameters = {}
-    if algorithm == 'acer':
-        return ACER(observations_space=observations_space, actions_space=actions_space, **parameters)
-    if algorithm == 'pacer':
-        return PACER(observations_space=observations_space, actions_space=actions_space, **parameters)
-    if algorithm == 'racer':
-        return RepresentativeACER(observations_space=observations_space, actions_space=actions_space, **parameters)
-    if algorithm == 'qacer':
-        return QACER(observations_space=observations_space, actions_space=actions_space, **parameters)
-    if algorithm == 'wacer':
-        return WeightedACER(observations_space=observations_space, actions_space=actions_space, **parameters)
-    else:
+    
+    if algorithm not in ALGOS:
         raise NotImplemented
 
+    return ALGOS[algorithm](observations_space=observations_space, actions_space=actions_space, **parameters)
 
 def _get_env(env_id: str, num_parallel_envs: int, asynchronous: bool = True) -> gym.vector.AsyncVectorEnv:
     if is_atari(env_id):
