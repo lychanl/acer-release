@@ -68,6 +68,12 @@ class QuantileCritic(BaseCritic):
             tf.summary.scalar('batch_loss_value', loss, step=self._tf_time_step)
             tf.summary.scalar('batch_v_mean', tf.reduce_mean(value), self._tf_time_step)
             tf.summary.scalar('correct_quantile_order', tf.reduce_mean(tf.cast(correct_order, tf.float32)), self._tf_time_step)
+            tf.summary.scalar('batch_1st_q', tf.reduce_mean(tf.slice(value, [0, 0], [-1, 1])), self._tf_time_step)
+            tf.summary.scalar('batch_middle_q', tf.reduce_mean(tf.slice(value, [0, self._atoms // 2], [-1, 1])), self._tf_time_step)
+            tf.summary.scalar('batch_last_q', tf.reduce_mean(tf.slice(value, [0, self._atoms], [-1, 1])), self._tf_time_step)
+            tf.summary.scalar('batch_1st_q_d', tf.reduce_mean(tf.slice(atoms_d, [0, 0], [-1, 1])), self._tf_time_step)
+            tf.summary.scalar('batch_middle_q_d', tf.reduce_mean(tf.slice(atoms_d, [0, self._atoms // 2], [-1, 1])), self._tf_time_step)
+            tf.summary.scalar('batch_last_q_d', tf.reduce_mean(tf.slice(atoms_d, [0, self._atoms], [-1, 1])), self._tf_time_step)
         return loss
 
 
@@ -156,17 +162,15 @@ class QACER(BaseACERAgent):
 
         with tf.name_scope('critic'):
             tf.summary.scalar('batch_mean_temporal_difference', tf.reduce_mean(u), step=self._tf_time_step)
-            tf.summary.scalar('batch_median_temporal_difference', tfp.stats.percentile(u, 50.0, interpolation='midpoint'), step=self._tf_time_step)
-
 
         tau = tf.range(0., self._atoms + 1, 1.) / self._atoms
-        tau = tf.reshape(tau, (1, -1, 1))
+        tau = tf.reshape(tau, (1, 1, -1))
         
         if self._kappa > 0.:
-            loss1_gradient = -tf.abs(tau - tf.cast(tf.less(u, 0), tf.float32)) * tf.where(tf.abs(u) < self._kappa, u, self._kappa * tf.sign(u))
+            loss1_gradient_parts = -tf.abs(tau - tf.cast(tf.less(u, 0), tf.float32)) * tf.where(tf.abs(u) < self._kappa, u, self._kappa * tf.sign(u))
         else:
-            loss1_gradient = -(tau - tf.cast(tf.less(u, 0), tf.float32))
-        loss1_gradient = tf.reduce_mean(loss1_gradient, axis=1)
+            loss1_gradient_parts = -(tau - tf.cast(tf.less(u, 0), tf.float32))
+        loss1_gradient = tf.reduce_mean(loss1_gradient_parts, axis=1)
 
         # flat tensors
         d1_coeffs = tf.expand_dims(gamma_coeffs, axis=1) * loss1_gradient * tf.expand_dims(truncated_densities.flat_values, axis=1)
