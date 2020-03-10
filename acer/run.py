@@ -6,7 +6,7 @@ import tensorflow as tf
 from runners import Runner
 
 parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
-parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer", choices=['acer', 'pacer', 'racer'])
+parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer", choices=['acer', 'pacer', 'racer', 'qacer'])
 parser.add_argument('--env_name', type=str, help='OpenAI Gym environment name', default="CartPole-v0")
 parser.add_argument('--gamma', type=float, help='discount factor', required=False, default=0.99)
 parser.add_argument('--lam', type=float, help='lambda parameter', required=False, default=0.9)
@@ -29,6 +29,8 @@ parser.add_argument('--critic_lr', type=float, help='Critic learning rate', requ
 parser.add_argument('--actor_beta_penalty', type=float, help='BaseActor penalty coefficient', default=0.001)
 parser.add_argument('--c', type=int, help='experience replay intensity', required=False, default=10)
 parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=0.3)
+parser.add_argument('--kappa', type=float, help='kappa parameter for qacer', default=0.)
+parser.add_argument('--atoms', type=int, help='number of atoms for qacer', default=50)
 parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
                                               '0.4 * actions_bound is set.',
                     required=False, default=None)
@@ -67,6 +69,8 @@ parser.add_argument('--save_video_on_kill', action='store_true',
                     help='True if SIGINT signal should trigger registration of the video')
 parser.add_argument('--use_cpu', action='store_true',
                     help='True if CPU (instead of GPU) should be used')
+parser.add_argument('--synchronous', action='store_true',
+                    help='True if not use asynchronous envs')
 
 
 def main():
@@ -87,6 +91,7 @@ def main():
     algorithm = parameters.pop('algo')
     log_dir = parameters.pop('log_dir')
     use_cpu = parameters.pop('use_cpu')
+    synchronous = parameters.pop('synchronous')
 
     if use_cpu:
         tf.config.set_visible_devices([], 'GPU')
@@ -100,7 +105,8 @@ def main():
         max_time_steps=max_time_steps,
         num_evaluation_runs=num_evaluation_runs,
         evaluate_time_steps_interval=evaluate_time_steps_interval,
-        experiment_name=experiment_name
+        experiment_name=experiment_name,
+        asynchronous=not synchronous
     )
 
     def handle_sigint(sig, frame):

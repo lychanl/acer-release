@@ -370,8 +370,7 @@ class BaseACERAgent(ABC):
                  actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999, actor_adam_epsilon: float = 1e-5,
                  critic_lr: float = 0.001, critic_adam_beta1: float = 0.9, critic_adam_beta2: float = 0.999,
                  critic_adam_epsilon: float = 1e-5, standardize_obs: bool = False, rescale_rewards: int = -1,
-                 limit_reward_tanh: float = 3.,
-                 time_step: int = 1):
+                 limit_reward_tanh: float = 3., time_step: int = 1, **kwargs):
 
         self._tf_time_step = tf.Variable(
             initial_value=time_step, name='tf_time_step', dtype=tf.dtypes.int64, trainable=False

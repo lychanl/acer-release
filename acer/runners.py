@@ -16,6 +16,7 @@ from algos.acer import ACER
 from algos.base import BaseACERAgent
 from algos.pessimistic_acer import PACER
 from algos.representative_acer import RepresentativeACER
+from algos.quantile_acer import QACER
 from logger import CSVLogger
 from utils import is_atari
 
@@ -35,19 +36,22 @@ def _get_agent(algorithm: str, parameters: Optional[dict], observations_space: g
         return PACER(observations_space=observations_space, actions_space=actions_space, **parameters)
     if algorithm == 'racer':
         return RepresentativeACER(observations_space=observations_space, actions_space=actions_space, **parameters)
+    if algorithm == 'qacer':
+        return QACER(observations_space=observations_space, actions_space=actions_space, **parameters)
     else:
         raise NotImplemented
 
 
-def _get_env(env_id: str, num_parallel_envs: int) -> gym.vector.AsyncVectorEnv:
+def _get_env(env_id: str, num_parallel_envs: int, asynchronous: bool = True) -> gym.vector.AsyncVectorEnv:
     if is_atari(env_id):
         def get_env_fn():
             return wrappers.AtariPreprocessing(
                 gym.make(env_id),
             )
-        env = gym.vector.AsyncVectorEnv([get_env_fn for _ in range(num_parallel_envs)])
+        builders = [get_env_fn for _ in range(num_parallel_envs)]
+        env = gym.vector.AsyncVectorEnv(builders) if asynchronous else gym.vector.SyncVectorEnv(builders)
     else:
-        env = gym.vector.make(env_id, num_envs=num_parallel_envs)
+        env = gym.vector.make(env_id, num_envs=num_parallel_envs, asynchronous=asynchronous)
     return env
 
 
@@ -58,7 +62,7 @@ class Runner:
     def __init__(self, environment_name: str, algorithm: str = 'acer', algorithm_parameters: Optional[dict] = None,
                  num_parallel_envs: int = 5, evaluate_time_steps_interval: int = 1500,
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
-                 record: bool = True, experiment_name: str = None):
+                 record: bool = True, experiment_name: str = None, asynchronous: bool = True):
         """Trains and evaluates the agent.
 
         Args:
@@ -72,6 +76,7 @@ class Runner:
             log_dir: logging directory
             max_time_steps: maximum number of training time steps
             record: True if video should be recorded after training
+            asynchronous: True to use concurrent envs
         """
         self._elapsed_time_measure = 0
         self._time_step = 0
@@ -94,8 +99,8 @@ class Runner:
         self._log_dir.mkdir(parents=True, exist_ok=True)
 
         self._record = record
-        self._env = _get_env(environment_name, num_parallel_envs)
-        self._evaluate_env = _get_env(environment_name, num_evaluation_runs)
+        self._env = _get_env(environment_name, num_parallel_envs, asynchronous)
+        self._evaluate_env = _get_env(environment_name, num_evaluation_runs, asynchronous)
 
         self._done_steps_in_a_episode = [0] * self._n_envs
         self._returns = [0] * self._n_envs
