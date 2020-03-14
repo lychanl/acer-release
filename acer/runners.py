@@ -13,8 +13,9 @@ import tensorflow as tf
 from gym import wrappers
 
 from algos.acer import ACER
+from algos.acerce2 import ACERCE2
 from algos.base import BaseACERAgent
-from algos.eacer import EACER
+from algos.acerce import ACERCE
 from algos.pessimistic_acer import PACER
 from algos.representative_acer import RepresentativeACER
 from algos.quantile_acer import QACER
@@ -30,7 +31,8 @@ logging.basicConfig(
 
 ALGOS = {
     'acer': ACER,
-    'eacer': EACER,
+    'acerce': ACERCE,
+    'acerce2': ACERCE2,
     'pacer': PACER,
     'racer': RepresentativeACER,
     'qacer': QACER,
@@ -47,6 +49,7 @@ def _get_agent(algorithm: str, parameters: Optional[dict], observations_space: g
         raise NotImplemented
 
     return ALGOS[algorithm](observations_space=observations_space, actions_space=actions_space, **parameters)
+
 
 def _get_env(env_id: str, num_parallel_envs: int, asynchronous: bool = True) -> gym.vector.AsyncVectorEnv:
     if is_atari(env_id):

@@ -48,6 +48,15 @@ python acer/run.py --algo acer --env_name Pendulum-v0 --gamma 0.95 \
     --num_parallel_envs 10  --actor_beta_penalty 0.1 --batches_per_env 10
 ```
 
+
+```shell script
+python acer/run.py --algo acerce2 --env_name Pendulum-v0 --gamma 0.95 --use_cpu --alpha 0.3 --explorer_lr 0.005 \                                              1 ↵  8984  16:36:19
+    --lam 0.9 --b 2 --c0 0.3 --c 10 --actor_lr 0.005 --critic_lr 0.005  \
+    --actor_layers 20 --critic_layers 50 --memory_size 1000000 \
+    --num_parallel_envs 10  --actor_beta_penalty 0.1 --batches_per_env 10 --evaluate_time_steps_interval 2000
+
+```
+
 ## Parameters
 TBA
 

@@ -71,7 +71,7 @@ class ExplorerGaussianActor(GaussianActor):
         return actions, actions_probs
 
 
-class EACER(BaseACERAgent):
+class ACERCE(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Optional[Tuple[int]], lam: float = 0.1, b: float = 3, alpha: float = 0.8,
                  explorer_lr: float = 0.001,
