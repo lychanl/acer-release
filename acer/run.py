@@ -26,11 +26,13 @@ parser.add_argument('--critic_adam_beta2', type=float, help='ADAM optimizer beta
                     required=False, default=0.999)
 parser.add_argument('--actor_lr', type=float, help='BaseActor learning rate', required=False, default=0.001)
 parser.add_argument('--critic_lr', type=float, help='Critic learning rate', required=False, default=0.001)
+parser.add_argument('--explorer_lr', type=float, help='Explorer (eacer) learning rate', required=False, default=0.001)
 parser.add_argument('--actor_beta_penalty', type=float, help='BaseActor penalty coefficient', default=0.001)
 parser.add_argument('--c', type=int, help='experience replay intensity', required=False, default=10)
 parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=0.3)
 parser.add_argument('--kappa', type=float, help='kappa parameter for qacer', default=0.)
 parser.add_argument('--atoms', type=int, help='number of atoms for qacer', default=50)
+parser.add_argument('--alpha', type=float, help='Alpha parameter for eacer', default=0.8)
 parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
                                               '0.4 * actions_bound is set.',
                     required=False, default=None)

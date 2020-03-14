@@ -14,6 +14,7 @@ from gym import wrappers
 
 from algos.acer import ACER
 from algos.base import BaseACERAgent
+from algos.eacer import EACER
 from algos.pessimistic_acer import PACER
 from algos.representative_acer import RepresentativeACER
 from algos.quantile_acer import QACER
@@ -29,6 +30,7 @@ logging.basicConfig(
 
 ALGOS = {
     'acer': ACER,
+    'eacer': EACER,
     'pacer': PACER,
     'racer': RepresentativeACER,
     'qacer': QACER,
