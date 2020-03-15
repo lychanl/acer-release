@@ -38,6 +38,8 @@ class ExplorerGaussianActor(GaussianActor):
 
         with tf.name_scope('actor'):
             tf.summary.scalar('mean_std', tf.reduce_mean(std), step=self._tf_time_step)
+            tf.summary.scalar('max_std', tf.reduce_max(std), step=self._tf_time_step)
+            tf.summary.scalar('min_std', tf.reduce_min(std), step=self._tf_time_step)
             tf.summary.scalar('batch_loss', total_loss, step=self._tf_time_step)
             tf.summary.scalar('batch_bounds_penalty_mean', tf.reduce_mean(bounds_penalty), step=self._tf_time_step)
             tf.summary.scalar('batch_entropy_mean', tf.reduce_mean(entropy), step=self._tf_time_step)

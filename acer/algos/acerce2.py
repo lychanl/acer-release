@@ -60,7 +60,7 @@ class ACERCE2(ACERCE):
         with tf.name_scope('actor'):
             tf.summary.scalar('forced_ratio', tf.reduce_mean(tf.exp(policies - tf.squeeze(kappa))), self._tf_time_step)
 
-        exploration_gain = (0.5 * exp_rho_h - 0.5 + tf.math.log(self._alpha)) * exp_rho_h
+        exploration_gain = tf.math.log(self._alpha) + 0.5 * exp_rho_h - 0.5
 
         self._backward_pass(first_obs, first_actions, d, exploration_gain, obs)
 
