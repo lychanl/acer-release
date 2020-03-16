@@ -55,10 +55,10 @@ class ACERCE2(ACERCE):
         # exp_rho_h = tf.tanh(tf.expand_dims(tf.squeeze(h_i) * tf.exp(-rho), axis=1) / self._b) * self._b
         exp_rho_h = tf.expand_dims(tf.squeeze(h_i) * tf.exp(-rho), axis=1)
 
-        kappa = tf.math.log(self._n) - 0.5 * rho - 0.5
+        kappa = self._n / tf.sqrt(2.0) * tf.exp(-0.5 * rho)
 
         with tf.name_scope('actor'):
-            tf.summary.scalar('forced_ratio', tf.reduce_mean(tf.exp(policies - tf.squeeze(kappa))), self._tf_time_step)
+            tf.summary.scalar('forced_ratio', tf.reduce_mean(policies - tf.squeeze(kappa)), self._tf_time_step)
 
         exploration_gain = tf.math.log(self._alpha) + 0.5 * exp_rho_h - 0.5
 

@@ -157,13 +157,10 @@ class ACERCE(BaseACERAgent):
         h_i = tf.matmul(tf.matmul(actions_diff, self._c_inverse), tf.linalg.matrix_transpose(actions_diff))
         exp_rho_h = tf.expand_dims(tf.squeeze(h_i) * tf.exp(-rho), axis=1)
 
-        kappa = self._n / tf.sqrt(2.0) * tf.exp(-0.5 * rho)
+        alpha_empir = tf.sqrt(2.0) * tf.exp(-0.5 * tf.squeeze(h_i) * tf.exp(-rho))
 
         with tf.name_scope('actor'):
-            tf.summary.scalar('forced_ratio', tf.reduce_mean(policies / tf.squeeze(kappa)), self._tf_time_step)
-
-        # exploration_gain = \
-            # tf.sqrt(2.0) * (self._alpha - tf.sqrt(2.0) * tf.exp(-0.5 * exp_rho_h)) * tf.exp(-0.5 * exp_rho_h) * exp_rho_h
+            tf.summary.scalar('alpha_empir', tf.reduce_mean(alpha_empir), self._tf_time_step)
 
         exploration_gain = (self._alpha - tf.sqrt(2.0) * tf.exp(-0.5 * exp_rho_h))
 
