@@ -80,13 +80,16 @@ class ISACER(ACER):
 
         # flat tensors
         if NO_CUMULATIVE:
-            d_coeffs = rewards + self._gamma * values_next - values
+            d_coeffs = (rewards + self._gamma * values_next - values) * policies_ratio_batches.flat_values
         else:
             d_coeffs = (self._gamma if SIMPLE_GAMMA else gamma_coeffs) * (rewards + self._gamma * values_next - values) * truncated_densities.flat_values
         # ragged
         d_coeffs_batches = tf.gather_nd(d_coeffs, tf.expand_dims(indices, axis=2))
         # final summation over original batches
-        d = tf.stop_gradient((tf.reduce_mean if NO_CUMULATIVE else tf.reduce_sum)(d_coeffs_batches, axis=1))
+        if NO_CUMULATIVE:
+            d = tf.stop_gradient(tf.reduce_mean(d_coeffs_batches))
+        else:
+            d = tf.stop_gradient(tf.reduce_sum(d_coeffs_batches, axis=1))
 
         self._backward_pass(first_obs, first_actions, d)
 
@@ -96,3 +99,9 @@ class ISACER(ACER):
         with tf.name_scope('actor'):
             tf.summary.scalar('mean_policies_ratio', tf.reduce_mean(policies_ratio), self._tf_time_step)
             tf.summary.scalar('sample_approx_kl_divergence', approx_kl, self._tf_time_step)
+
+    def _fetch_offline_batch(self) -> List[Dict[str, Union[np.array, list]]]:
+        trajectory_lens = [1 for _ in range(self._num_parallel_envs)]
+        batch = []
+        [batch.extend(self._memory.get(trajectory_lens)) for _ in range(self._batches_per_env)]
+        return batch
