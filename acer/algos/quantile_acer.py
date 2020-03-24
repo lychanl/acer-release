@@ -16,7 +16,7 @@ from algos.base import BaseACERAgent, BaseActor, CategoricalActor, GaussianActor
 
 class QuantileCritic(BaseCritic):
 
-    def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]], tf_time_step: tf.Variable, atoms: int, 
+    def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]], tf_time_step: tf.Variable, outputs: int, 
                  kappa: float, *args, **kwargs):
         """ 
         Args:
@@ -25,9 +25,9 @@ class QuantileCritic(BaseCritic):
         """
         super().__init__(observations_space, layers, tf_time_step, *args, **kwargs)
 
-        self._atoms = atoms
+        self._outputs = outputs
         self._kappa = kappa
-        self._v = tf.keras.layers.Dense(atoms + 1, kernel_initializer=utils.normc_initializer())
+        self._v = tf.keras.layers.Dense(outputs, kernel_initializer=utils.normc_initializer())
 
     def values(self, observations: tf.Tensor,  **kwargs) -> tf.Tensor:
         """Calculates quantiles' values of value function
@@ -48,39 +48,41 @@ class QuantileCritic(BaseCritic):
 
         return v
 
-    def loss(self, observations: np.array, atoms_d: tf.Tensor) -> tf.Tensor:
+    def loss(self, observations: np.array, d: tf.Tensor) -> tf.Tensor:
         """Computes Critic's loss.
 
         Args:
             observations: batch [batch_size, observations_dim] of observations vectors
-            atoms_d: update coefficient of value function lower bound approximation
+            d: update coefficient of value function lower bound approximation
         """
         value = self.values(observations)
 
-        loss = tf.reduce_sum(tf.math.multiply(value, atoms_d))
+        loss = tf.reduce_sum(-tf.math.multiply(value, d))
 
-        value_lower = tf.slice(value, [0, 0], [-1, self._atoms])
-        value_higher = tf.slice(value, [0, 1], [-1, self._atoms])
+        if self._outputs > 1:
+            value_lower = tf.slice(value, [0, 0], [-1, self._outputs - 1])
+            value_higher = tf.slice(value, [0, 1], [-1, self._outputs - 1])
 
-        correct_order = value_lower < value_higher
+            correct_order = value_lower < value_higher
 
         with tf.name_scope('critic'):
             tf.summary.scalar('batch_loss_value', loss, step=self._tf_time_step)
             tf.summary.scalar('batch_v_mean', tf.reduce_mean(value), self._tf_time_step)
-            tf.summary.scalar('correct_quantile_order', tf.reduce_mean(tf.cast(correct_order, tf.float32)), self._tf_time_step)
-            tf.summary.scalar('batch_1st_q', tf.reduce_mean(tf.slice(value, [0, 0], [-1, 1])), self._tf_time_step)
-            tf.summary.scalar('batch_middle_q', tf.reduce_mean(tf.slice(value, [0, self._atoms // 2], [-1, 1])), self._tf_time_step)
-            tf.summary.scalar('batch_last_q', tf.reduce_mean(tf.slice(value, [0, self._atoms], [-1, 1])), self._tf_time_step)
-            tf.summary.scalar('batch_1st_q_d', tf.reduce_mean(tf.slice(atoms_d, [0, 0], [-1, 1])), self._tf_time_step)
-            tf.summary.scalar('batch_middle_q_d', tf.reduce_mean(tf.slice(atoms_d, [0, self._atoms // 2], [-1, 1])), self._tf_time_step)
-            tf.summary.scalar('batch_last_q_d', tf.reduce_mean(tf.slice(atoms_d, [0, self._atoms], [-1, 1])), self._tf_time_step)
+            if self._outputs > 1:
+                tf.summary.scalar('correct_quantile_order', tf.reduce_mean(tf.cast(correct_order, tf.float32)), self._tf_time_step)
+                tf.summary.scalar('batch_1st_q', tf.reduce_mean(tf.slice(value, [0, 0], [-1, 1])), self._tf_time_step)
+                tf.summary.scalar('batch_middle_q', tf.reduce_mean(tf.slice(value, [0, self._outputs // 2], [-1, 1])), self._tf_time_step)
+                tf.summary.scalar('batch_last_q', tf.reduce_mean(tf.slice(value, [0, self._outputs - 1], [-1, 1])), self._tf_time_step)
+                tf.summary.scalar('batch_1st_q_d', tf.reduce_mean(tf.slice(d, [0, 0], [-1, 1])), self._tf_time_step)
+                tf.summary.scalar('batch_middle_q_d', tf.reduce_mean(tf.slice(d, [0, self._outputs // 2], [-1, 1])), self._tf_time_step)
+                tf.summary.scalar('batch_last_q_d', tf.reduce_mean(tf.slice(d, [0, self._outputs - 1], [-1, 1])), self._tf_time_step)
         return loss
 
 
 class QACER(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Optional[Tuple[int]], lam: float = 0.1, b: float = 3, atoms: int = 50, kappa: float = 0.,
-                 *args, **kwargs):
+                 border_atoms=False, *args, **kwargs):
         """BaseActor-Critic with Experience Replay and pessimistic Critic
 
         TODO: finish docstrings
@@ -89,6 +91,7 @@ class QACER(BaseACERAgent):
         self._b = b
         self._atoms = atoms
         self._kappa = kappa
+        self._border_atoms = border_atoms
 
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
 
@@ -105,7 +108,8 @@ class QACER(BaseACERAgent):
             )
 
     def _init_critic(self) -> BaseCritic:
-        return QuantileCritic(self._observations_space, self._critic_layers, self._tf_time_step, self._atoms, self._kappa)
+        outputs = self._atoms + 1 if self._border_atoms else self._atoms
+        return QuantileCritic(self._observations_space, self._critic_layers, self._tf_time_step, outputs, self._kappa)
 
     def learn(self):
         """
@@ -163,15 +167,20 @@ class QACER(BaseACERAgent):
         with tf.name_scope('critic'):
             tf.summary.scalar('batch_mean_temporal_difference', tf.reduce_mean(u), step=self._tf_time_step)
 
-        tau = tf.range(0., self._atoms + 1, 1.) / self._atoms
+        if self._border_atoms:
+            tau = tf.range(0., self._atoms + 1, 1.) / self._atoms
+        else:
+            tau = tf.range(1., 2 * self._atoms, 2.) / (2 * self._atoms)
         tau = tf.reshape(tau, (1, 1, -1))
         
-        if self._kappa > 0.:
-            loss1_gradient_parts = -tf.abs(tau - tf.cast(tf.less(u, 0), tf.float32)) * tf.where(tf.abs(u) < self._kappa, u, self._kappa * tf.sign(u))
+        if self._kappa < 0.:
+            loss1_gradient_parts = u
+        elif self._kappa > 0.:
+            loss1_gradient_parts = tf.abs(tau - tf.cast(tf.less(u, 0), tf.float32)) * tf.where(tf.abs(u) < self._kappa, u, self._kappa * tf.sign(u))
         else:
-            loss1_gradient_parts = -(tau - tf.cast(tf.less(u, 0), tf.float32))
+            loss1_gradient_parts = (tau - tf.cast(tf.less(u, 0), tf.float32))
         loss1_gradient = tf.reduce_mean(loss1_gradient_parts, axis=1)
-
+        
         # flat tensors
         d1_coeffs = tf.expand_dims(gamma_coeffs, axis=1) * loss1_gradient * tf.expand_dims(truncated_densities.flat_values, axis=1)
         # ragged
@@ -183,7 +192,7 @@ class QACER(BaseACERAgent):
         # flat tensors
         d2_coeffs = gamma_coeffs * td2 * truncated_densities.flat_values
         # ragged
-        d2_coeffs_batches = tf.gather_nd(d2_coeffs, indices)
+        d2_coeffs_batches = tf.gather_nd(d2_coeffs, tf.expand_dims(indices, axis=2))
         # final summation over original batches
         d2 = tf.stop_gradient(tf.reduce_sum(d2_coeffs_batches, axis=1))
 
