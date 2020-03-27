@@ -35,7 +35,7 @@ class ReplayBuffer:
 
     def _init_field(self, field_spec: BufferFieldSpec):
         shape = (self._max_size, *field_spec.shape)
-        return np.ndarray(shape=shape, dtype=field_spec.dtype)
+        return np.zeros(shape=shape, dtype=field_spec.dtype)
 
     def put(self, action: Union[int, float, list], observation: np.array,
             reward: float, policy: float, is_done: bool,
@@ -71,17 +71,17 @@ class ReplayBuffer:
     def _update_size(self):
         self._current_size = np.min([self._current_size + 1, self._max_size])
 
-    def get(self, trajectory_len: Optional[int] = None) -> Dict[str, np.array]:
+    def get(self, trajectory_len: Optional[int] = None) -> Tuple[Dict[str, np.array], int]:
         """Samples random trajectory. Trajectory length is truncated to the 'trajectory_len' value.
         If trajectory length is not provided, whole episode is fetched. If trajectory is shorter than
         'trajectory_len', trajectory is truncated to one episode only.
 
         Returns:
-            Dictionary with single, truncated experience trajectory
+            Tuple with dictionary with truncated experience trajectory and first (middle) index
         """
         if self._current_size == 0:
             # empty buffer
-            return {
+            return ({
                 "actions": np.array([]),
                 "observations": np.array([]),
                 "rewards": np.array([]),
@@ -89,10 +89,55 @@ class ReplayBuffer:
                 "policies": np.array([]),
                 "dones": np.array([]),
                 "ends": np.array([])
-            }
-        start_index = self._sample_random_index()
-        end_index = start_index + 1
+            }, -1)
+        sample_index = self._sample_random_index()
+        start_index, end_index = self._get_indices(sample_index, trajectory_len)
 
+        batch = self._fetch_batch(end_index, sample_index, start_index)
+        return batch
+
+    def _fetch_batch(self, end_index, sample_index, start_index):
+        start_index_next = start_index + 1
+        end_index_next = end_index + 1
+
+        if start_index_next == self._max_size:
+            start_index_next = 0
+
+        if end_index_next == self._max_size + 1:
+            end_index_next = 1
+
+        middle_index = sample_index - start_index \
+            if sample_index >= start_index else self._max_size - start_index + sample_index
+        if start_index_next >= end_index_next:
+            buffer_slice_next = np.r_[0: end_index_next, start_index_next: self._max_size]
+        else:
+            buffer_slice_next = np.r_[start_index_next: end_index_next]
+        if start_index >= end_index:
+            buffer_slice = np.r_[0: end_index, start_index: self._max_size]
+        else:
+            buffer_slice = np.r_[start_index: end_index]
+
+        actions = self._actions[buffer_slice]
+        observations = self._obs[buffer_slice]
+        rewards = self._rewards[buffer_slice]
+        next_observations = self._obs[buffer_slice_next]
+        policies = self._policies[buffer_slice]
+        done = self._dones[buffer_slice]
+        end = self._ends[buffer_slice]
+
+        return ({
+            "actions": actions,
+            "observations": observations,
+            "rewards": rewards,
+            "next_observations": next_observations,
+            "policies": policies,
+            "dones": done,
+            "ends": end
+        }, middle_index)
+
+    def _get_indices(self, sample_index, trajectory_len):
+        start_index = sample_index
+        end_index = sample_index + 1
         current_length = 1
         while True:
             if end_index == self._max_size:
@@ -107,43 +152,7 @@ class ReplayBuffer:
                 break
             end_index += 1
             current_length += 1
-
-        start_index_next = start_index + 1
-        end_index_next = end_index + 1
-
-        if start_index_next == self._max_size:
-            start_index_next = 0
-
-        if end_index_next == self._max_size + 1:
-            end_index_next = 1
-
-        if start_index_next > end_index_next:
-            buffer_slice_next = np.r_[0: end_index_next, start_index_next: self._max_size]
-        else:
-            buffer_slice_next = np.r_[start_index_next: end_index_next]
-
-        if start_index > end_index:
-            buffer_slice = np.r_[0: end_index, start_index: self._max_size]
-        else:
-            buffer_slice = np.r_[start_index: end_index]
-
-        actions = self._actions[buffer_slice]
-        observations = self._obs[buffer_slice]
-        rewards = self._rewards[buffer_slice]
-        next_observations = self._obs[buffer_slice_next]
-        policies = self._policies[buffer_slice]
-        done = self._dones[buffer_slice]
-        end = self._ends[buffer_slice]
-
-        return {
-            "actions": actions,
-            "observations": observations,
-            "rewards": rewards,
-            "next_observations": next_observations,
-            "policies": policies,
-            "dones": done,
-            "ends": end
-        }
+        return start_index, end_index
 
     def _sample_random_index(self) -> int:
         """Uniformly samples one index from the buffer"""
@@ -160,6 +169,114 @@ class ReplayBuffer:
 
     def __repr__(self):
         return f"{self.__class__.__name__}(max_size={self._max_size})"
+
+
+class WindowReplayBuffer(ReplayBuffer):
+
+    def __init__(self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
+        super().__init__(max_size, action_spec, obs_spec)
+        self._policies = self._init_field(action_spec)
+
+    def _get_indices(self, sample_index, trajectory_len):
+        current_length = 0
+        start_index = sample_index
+        end_index = sample_index + 1
+        is_start_finished = False
+        is_end_finished = False
+        while True:
+            if trajectory_len is not None and current_length == trajectory_len:
+                break
+
+            if not is_end_finished:
+                if end_index == self._max_size:
+                    if self._pointer == 0:
+                        is_end_finished = True
+                    else:
+                        end_index = 0
+
+            if not is_start_finished:
+                if start_index == self._pointer or (start_index != 0 and self._ends[start_index - 1]):
+                    is_start_finished = True
+
+            if not is_end_finished:
+                if end_index == self._pointer or self._ends[end_index]:
+                    is_end_finished = True
+
+            if not is_start_finished:
+                if start_index == 0:
+                    if self._current_size < self._max_size or self._pointer == self._max_size - 1:
+                        is_start_finished = True
+                    else:
+                        start_index = self._max_size - 1
+                else:
+                    start_index -= 1
+
+            if not is_end_finished:
+                end_index += 1
+            current_length += 1
+        return start_index, end_index
+
+
+class WholeWindowReplayBuffer(WindowReplayBuffer):
+
+    def __init__(self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
+        super().__init__(max_size, action_spec, obs_spec)
+        self._policies = self._init_field(action_spec)
+
+    def get(self, trajectory_len: Optional[int] = None) -> List[Tuple[Dict[str, np.array], int]]:
+        if self._current_size == 0:
+            # empty buffer
+            return []
+
+        sample_index = self._sample_random_index()
+        indices = self._get_indices_list(sample_index, trajectory_len)
+
+        batches = [self._fetch_batch(end_index, sample_index, start_index) for start_index, end_index in indices]
+
+        return batches
+
+    def _get_indices_list(self, sample_index, trajectory_len):
+        current_length = 0
+        start_index = sample_index
+        end_index = sample_index + 1
+
+        indices = [(start_index, end_index)]
+
+        is_start_finished = False
+        is_end_finished = False
+        while True:
+            if trajectory_len is not None and current_length == trajectory_len:
+                break
+
+            if not is_end_finished:
+                if end_index == self._max_size:
+                    if self._pointer == 0:
+                        is_end_finished = True
+                    else:
+                        end_index = 0
+
+            if not is_start_finished:
+                if start_index == self._pointer or (start_index != 0 and self._ends[start_index - 1]):
+                    is_start_finished = True
+
+            if not is_end_finished:
+                if end_index == self._pointer or self._ends[end_index]:
+                    is_end_finished = True
+
+            if not is_start_finished:
+                if start_index == 0:
+                    if self._current_size < self._max_size or self._pointer == self._max_size - 1:
+                        is_start_finished = True
+                    else:
+                        start_index = self._max_size - 1
+                else:
+                    start_index -= 1
+
+            if not is_end_finished:
+                end_index += 1
+            current_length += 1
+            indices.append((start_index, end_index))
+        return indices
 
 
 class MultiReplayBuffer:
@@ -189,7 +306,7 @@ class MultiReplayBuffer:
         for buffer, step in zip(self._buffers, steps):
             buffer.put(*step)
 
-    def get(self, trajectories_lens: Optional[List[int]] = None) -> List[Dict[str, Union[np.array, list]]]:
+    def get(self, trajectories_lens: Optional[List[int]] = None) -> List[Tuple[Dict[str, Union[np.array, list]], int]]:
         """Samples trajectory from every buffer.
 
         Args:
@@ -248,3 +365,9 @@ class MultiReplayBuffer:
         with open(path, 'rb') as f:
             buffer = pickle.load(f)
         return buffer
+
+
+class MultiWindowReplayBuffer(MultiReplayBuffer):
+    def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
+        super().__init__(max_size, num_buffers, action_spec, obs_spec)
+        self._buffers = [WindowReplayBuffer(int(max_size / num_buffers), action_spec, obs_spec) for _ in range(num_buffers)]

@@ -13,6 +13,8 @@ import tensorflow as tf
 from gym import wrappers
 
 from algos.acer import ACER
+from algos.acerac import ACERAC
+from algos.acerac_single import ACERACSingle
 from algos.acerce2 import ACERCE2
 from algos.base import BaseACERAgent
 from algos.acerce import ACERCE
@@ -20,7 +22,6 @@ from algos.pessimistic_acer import PACER
 from algos.representative_acer import RepresentativeACER
 from algos.quantile_acer import QACER
 from algos.weighted_acer import WeightedACER
-from algos.isacer import ISACER
 from logger import CSVLogger
 from utils import is_atari
 
@@ -34,11 +35,12 @@ ALGOS = {
     'acer': ACER,
     'acerce': ACERCE,
     'acerce2': ACERCE2,
-    'isacer': ISACER,
+    'acerac': ACERAC,
+    'aceracs': ACERACSingle,
     'pacer': PACER,
     'racer': RepresentativeACER,
     'qacer': QACER,
-    'wacer': WeightedACER,
+    'wacer': WeightedACER
 }
 
 
