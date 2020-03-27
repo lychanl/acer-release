@@ -32,9 +32,8 @@ parser.add_argument('--c', type=int, help='experience replay intensity', require
 parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=0.3)
 parser.add_argument('--kappa', type=float, help='kappa parameter for qacer', default=0.)
 parser.add_argument('--atoms', type=int, help='number of atoms for qacer', default=50)
-parser.add_argument('--border_atoms', help='use border atoms for qacer', default=False, action='store_const', const=True)
 parser.add_argument('--alpha', type=float, help='Alpha parameter for eacer', default=0.8)
-parser.add_argument('--is_alpha', type=float, help='Alpha parameter for isacer', default=0.1)
+parser.add_argument('--tau', type=int, help='Tau parameter for acerac', default=2)
 parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
                                               '0.4 * actions_bound is set.',
                     required=False, default=None)
