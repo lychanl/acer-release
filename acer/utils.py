@@ -17,7 +17,7 @@ def normc_initializer():
     return _initializer
 
 
-def flatten_experience(buffers_batches: List[Dict[str, Union[np.array, list]]])\
+def flatten_experience(buffers_batches: List[Tuple[Dict[str, Union[np.array, list]], int]])\
         -> Tuple[np.array, np.array, np.array, np.array, np.array, np.array]:
     """Parses experience from the buffers (from dictionaries) into matrices that can be feed into
     neural network in a single pass.
@@ -31,12 +31,12 @@ def flatten_experience(buffers_batches: List[Dict[str, Union[np.array, list]]])\
             * batch [batch_size, observations_dim] of 'next' observations
             * batch [batch_size, actions_dim] of actions
     """
-    observations = np.concatenate([batch['observations'] for batch in buffers_batches], axis=0)
-    next_observations = np.concatenate([batch['next_observations'] for batch in buffers_batches], axis=0)
-    actions = np.concatenate([batch['actions'] for batch in buffers_batches], axis=0)
-    policies = np.concatenate([batch['policies'] for batch in buffers_batches], axis=0)
-    rewards = np.concatenate([batch['rewards'] for batch in buffers_batches], axis=0)
-    dones = np.concatenate([batch['dones'] for batch in buffers_batches], axis=0)
+    observations = np.concatenate([batch[0]['observations'] for batch in buffers_batches], axis=0)
+    next_observations = np.concatenate([batch[0]['next_observations'] for batch in buffers_batches], axis=0)
+    actions = np.concatenate([batch[0]['actions'] for batch in buffers_batches], axis=0)
+    policies = np.concatenate([batch[0]['policies'] for batch in buffers_batches], axis=0)
+    rewards = np.concatenate([batch[0]['rewards'] for batch in buffers_batches], axis=0)
+    dones = np.concatenate([batch[0]['dones'] for batch in buffers_batches], axis=0)
 
     return observations, next_observations, actions, policies, rewards, dones
 

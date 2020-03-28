@@ -495,17 +495,18 @@ class BaseACERAgent(ABC):
     def _experience_replay_generator(self):
         while True:
             offline_batch = self._fetch_offline_batch()
+
             obs_flatten, obs_next_flatten, actions_flatten, policies_flatten, rewards_flatten, dones_flatten \
                 = utils.flatten_experience(offline_batch)
 
-            lengths = [len(batch['observations']) for batch in offline_batch]
+            lengths = [len(batch[0]['observations']) for batch in offline_batch]
 
             obs_flatten = self._process_observations(obs_flatten)
             obs_next_flatten = self._process_observations(obs_next_flatten)
             rewards_flatten = self._process_rewards(rewards_flatten)
 
-            first_obs = self._process_observations([batch['observations'][0] for batch in offline_batch])
-            first_actions = [batch['actions'][0] for batch in offline_batch]
+            first_obs = self._process_observations([batch[0]['observations'][0] for batch in offline_batch])
+            first_actions = [batch[0]['actions'][0] for batch in offline_batch]
 
             yield (
                 obs_flatten,
@@ -550,7 +551,7 @@ class BaseACERAgent(ABC):
         return rewards
 
     @abstractmethod
-    def _fetch_offline_batch(self) -> List[Dict[str, Union[np.array, list]]]:
+    def _fetch_offline_batch(self) -> List[Tuple[Dict[str, Union[np.array, list]], int]]:
         ...
 
     @abstractmethod
