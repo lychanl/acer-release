@@ -233,7 +233,7 @@ class ACERAC(BaseACERAgent):
             c_mu_di_batches = tf.squeeze(
                 tf.gather_nd(c_mu_di, big_batches_indices).to_tensor()
             )
-            c_mu_dim_sum = tf.stop_gradient(tf.reduce_sum(c_mu_di_batches, axis=1))
+            c_mu_dim_sum = tf.stop_gradient(tf.reduce_sum(c_mu_di_batches, axis=1) / self._tau)
 
             d_batches = tf.squeeze(
                 tf.gather_nd(d, big_batches_indices).to_tensor()
@@ -243,18 +243,17 @@ class ACERAC(BaseACERAgent):
             bounds_penalty = tf.scalar_mul(
                     self._actor._beta_penalty,
                     tf.square(tf.maximum(0.0, tf.abs(means_gradient) - self._actions_bound))
-                )
+            )
 
             bounds_penalty = tf.reduce_mean(
                 tf.reduce_sum(
-                    tf.squeeze(
-                        tf.gather_nd(bounds_penalty, tf.expand_dims(batches_indices_gradients, axis=2)),
-                        axis=2
-                    ).to_tensor(),
-                    axis=2
-                )
+                    bounds_penalty,
+                    axis=1
+                ),
+                0
             )
-            actor_loss = tf.reduce_mean(-(means_gradient_batches * c_mu_dim_sum / self._tau)) + bounds_penalty
+            actor_loss = tf.matmul(tf.expand_dims(means_gradient_batches, axis=1), tf.expand_dims(c_mu_dim_sum, axis=2))
+            actor_loss = -tf.reduce_mean(tf.squeeze(actor_loss)) + bounds_penalty
             critic_loss = -tf.reduce_mean(values_gradient * d_batches / self._tau)
 
         grads_actor = tape.gradient(actor_loss, self._actor.trainable_variables)
@@ -263,7 +262,7 @@ class ACERAC(BaseACERAgent):
 
         with tf.name_scope('actor'):
             tf.summary.scalar(f'batch_actor_loss', actor_loss, step=self._tf_time_step)
-            tf.summary.scalar(f'batch_bounds_penalty', tf.reduce_sum(bounds_penalty), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_bounds_penalty', bounds_penalty, step=self._tf_time_step)
 
         grads_critic = tape.gradient(critic_loss, self._critic.trainable_variables)
         grads_var_critic = zip(grads_critic, self._critic.trainable_variables)
