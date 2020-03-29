@@ -7,20 +7,133 @@ import tensorflow_probability as tfp
 import tensorflow as tf
 import numpy as np
 
-
-from algos.acerac_single import ACERACSingle
+from algos.base import GaussianActor, BaseActor, Critic, BaseACERAgent
 from replay_buffer import MultiWindowReplayBuffer, BufferFieldSpec
 
 
-class ACERAC(ACERACSingle):
-    def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
-                 critic_layers: Optional[Tuple[int]], lam: float = 0.1, b: float = 3, tau: int = 2, *args, **kwargs):
+class NoiseGaussianActor(GaussianActor):
 
-        super().__init__(observations_space, actions_space, actor_layers, critic_layers, lam, b, tau, *args, **kwargs)
+    def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
+                 beta_penalty: float, actions_bound: float, tau: int = 2, alpha: float = 0.8,
+                 num_parallel_envs: int = 1, noise_type: str = 'mean', *args, **kwargs):
+        super().__init__(observations_space, actions_space, layers, beta_penalty, actions_bound, *args, **kwargs)
+
+        self._num_parallel_envs = num_parallel_envs
+        self._tau = tau
+        self._alpha = alpha
+        self._noise_dist = tfp.distributions.MultivariateNormalDiag(
+            scale_diag=tf.exp(self.log_std),
+        )
+        self._noise_type = noise_type
+        if noise_type == 'mean':
+            self._noise_buffer = [self._init_noise_buffer() for _ in range(self._num_parallel_envs)]
+        else:
+            self._last_noise = self._sample_noise()
+            self._noise_init_mask = tf.ones(shape=(self._num_parallel_envs, 1))
+
+    def _init_noise_buffer(self):
+        buffer = deque(maxlen=self._tau)
+        for _ in range(self._tau):
+            buffer.append(self._noise_dist.sample())
+        return buffer
+
+    def _sample_noise(self):
+        return self._noise_dist.sample(sample_shape=(self._num_parallel_envs, ))
+
+    def update_ends(self, ends: np.array):
+        if self._noise_type == 'mean':
+            self._noise_buffer = [
+                buffer if not end else self._init_noise_buffer() for buffer, end in zip(self._noise_buffer, ends)
+            ]
+        else:
+            self._noise_init_mask = tf.cast(ends, dtype=tf.float32)
+
+    def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+        mean = self._forward(observations)
+        dist = tfp.distributions.MultivariateNormalDiag(
+            scale_diag=tf.exp(self.log_std)
+        )
+
+        return dist.prob(actions - mean), dist.log_prob(actions - mean)
+
+    def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
+        mean = self._forward(observations)
+
+        noise_init = self._sample_noise()
+        if self._noise_type == 'mean':
+            [buffer.append(noise) for buffer, noise in zip(self._noise_buffer, noise_init)]
+            noise = tf.convert_to_tensor([np.sum(buffer, axis=0) / np.sqrt(self._tau) for buffer in self._noise_buffer])
+        else:
+            noise_cont = self._alpha * self._last_noise + tf.sqrt(1 - tf.square(self._alpha)) * noise_init
+            noise = noise_init * self._noise_init_mask + noise_cont * (1 - self._noise_init_mask)
+            self._last_noise = noise
+            self._noise_init_mask = tf.zeros_like(self._noise_init_mask)
+
+        actions = mean + noise
+
+        with tf.name_scope('actor'):
+            for i in range(self._actions_dim):
+                tf.summary.scalar(f'batch_action_{i}_mean', tf.reduce_mean(actions[:, i]), step=self._tf_time_step)
+                tf.summary.scalar(f'batch_action_{i}_min', tf.reduce_min(actions[:, i]), step=self._tf_time_step)
+                tf.summary.scalar(f'batch_action_{i}_max', tf.reduce_max(actions[:, i]), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_noise_mean', tf.reduce_mean(noise), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_noise_min', tf.reduce_min(noise), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_noise_max', tf.reduce_max(noise), step=self._tf_time_step)
+
+        return actions, mean
+
+
+class ACERAC(BaseACERAgent):
+    def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
+                 critic_layers: Optional[Tuple[int]], lam: float = 0.1, b: float = 3, tau: int = 2, alpha: float = 0.8,
+                 noise_type: str = 'mean', *args, **kwargs):
+
+        self._tau = tau
+        self._alpha = alpha
+        self._noise_type = noise_type
+        super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
+        self._lam = lam
+        self._b = b
+
+        self._cov_matrix = tf.linalg.diag(tf.square(tf.exp(self._actor.log_std)))
+
+        self._c_invs = []
+        self._c_dets = []
+
+        for i in range(1, int((self._tau * 2)) + 2):
+            if self._noise_type == 'mean':
+                window_range = tf.range(i)
+                toeplitz_mat = tf.cast(tf.linalg.LinearOperatorToeplitz(window_range, window_range).to_dense(), tf.float32)
+                Lambda = tf.maximum((self._tau - toeplitz_mat) / self._tau, 0)
+            else:
+                window_range = tf.range(i)
+                ones = tf.ones(shape=[i, i]) * self._alpha
+                toeplitz_mat = tf.cast(tf.linalg.LinearOperatorToeplitz(window_range, window_range).to_dense(),
+                                       tf.float32)
+                Lambda = tf.pow(ones, toeplitz_mat)
+            operator_1 = tf.linalg.LinearOperatorFullMatrix(Lambda)
+            operator_2 = tf.linalg.LinearOperatorFullMatrix(self._cov_matrix)
+            c = tf.linalg.LinearOperatorKronecker([operator_1, operator_2]).to_dense()
+            self._c_dets.append((tf.linalg.det(c) + 1e-20).numpy())
+            c_inv = tf.linalg.inv(c)
+            self._c_invs.append(c_inv.numpy())
+
+        self._c_dets = tf.constant(self._c_dets)
+        self._c_invs = tf.ragged.constant(self._c_invs)
+        # self._actor_optimizer.learning_rate = self._actor_optimizer.learning_rate / tau
+        # self._critic_optimizer.learning_rate = self._critic_optimizer.learning_rate / tau
+        # self._actor.log_std = self._actor.log_std / tf.math.log(tf.sqrt(float(tau)))
+
+        self._data_loader = tf.data.Dataset.from_generator(
+            self._experience_replay_generator,
+            (tf.dtypes.float32, tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.float32, tf.dtypes.float32,
+             tf.dtypes.float32, tf.dtypes.bool, tf.dtypes.int32, tf.dtypes.int32,
+             tf.dtypes.int32, tf.dtypes.float32, tf.dtypes.float32, tf.dtypes.int32)
+        ).prefetch(2)
 
     def _init_replay_buffer(self, memory_size: int):
         if type(self._actions_space) == gym.spaces.Discrete:
-            actions_shape = (1, )
+            actions_shape = (1,)
         else:
             actions_shape = self._actions_space.shape
 
@@ -30,6 +143,19 @@ class ACERAC(ACERACSingle):
             max_size=memory_size,
             num_buffers=self._num_parallel_envs
         )
+
+    def _init_actor(self) -> BaseActor:
+        if self._is_discrete:
+            raise NotImplementedError
+        else:
+            return NoiseGaussianActor(
+                self._observations_space, self._actions_space, self._actor_layers,
+                self._actor_beta_penalty, self._actions_bound, self._tau, self._alpha, self._num_parallel_envs,
+                self._noise_type, self._std, self._tf_time_step
+            )
+
+    def _init_critic(self) -> Critic:
+        return Critic(self._observations_space, self._critic_layers, self._tf_time_step)
 
     def save_experience(self, steps: List[
         Tuple[Union[int, float, list], np.array, np.array, np.array, bool, bool]
@@ -46,12 +172,22 @@ class ACERAC(ACERACSingle):
 
     @tf.function(experimental_relax_shapes=True)
     def _learn_from_experience_batch(self, obs, obs_next, actions, old_policies,
-                                     rewards, middle_obs, middle_actions, dones, lengths, rewards_lengths):
-
-        c_det = tf.gather(self._c_dets, lengths - 1)
+                                     rewards, middle_obs, dones, lengths,
+                                     rewards_lengths, big_batches_lengths, obs_gradient, obs_gradient_middle,
+                                     lengths_gradient):
         c_invs = tf.gather(self._c_invs, lengths - 1).to_tensor()
 
-        batches_indices = tf.RaggedTensor.from_row_lengths(values=tf.range(tf.reduce_sum(lengths)), row_lengths=lengths)
+        batches_indices = tf.RaggedTensor.from_row_lengths(
+            values=tf.range(tf.reduce_sum(lengths)), row_lengths=lengths
+        )
+        batches_indices_gradients = tf.expand_dims(tf.RaggedTensor.from_row_lengths(
+            values=tf.range(tf.reduce_sum(lengths_gradient)), row_lengths=lengths_gradient
+        ), 2)
+        big_batches_indices = tf.expand_dims(tf.RaggedTensor.from_row_lengths(
+            values=tf.range(tf.reduce_sum(big_batches_lengths)), row_lengths=big_batches_lengths
+        ), 2)
+
+        values_middle = tf.squeeze(self._critic.value(middle_obs))
         batch_indices_rewards = tf.RaggedTensor.from_row_lengths(values=tf.range(tf.reduce_sum(rewards_lengths)), row_lengths=rewards_lengths)
         values_last = tf.squeeze(self._critic.value(obs_next)) * (1.0 - tf.cast(dones, tf.dtypes.float32))
         policies, _ = tf.split(self._actor.prob(obs, actions), 2, axis=0)
@@ -63,9 +199,10 @@ class ACERAC(ACERACSingle):
         rewards_flatten = tf.squeeze(tf.gather_nd(rewards, tf.expand_dims(rewards_indices, axis=2)), axis=-1)
 
         with tf.GradientTape(persistent=True) as tape:
-            print()
             means = self._actor.act_deterministic(obs)
-            values_middle = tf.squeeze(self._critic.value(middle_obs))
+            means_gradient = self._actor.act_deterministic(obs_gradient)
+            values_gradient = tf.squeeze(self._critic.value(obs_gradient_middle))
+
             means_flatten = tf.squeeze(tf.gather_nd(means, tf.expand_dims(indices, axis=2)), axis=2).merge_dims(1, 2)
             actions_mu_diff_current = tf.expand_dims((actions_flatten - means_flatten).to_tensor(), 1)
             actions_mu_diff_old = tf.expand_dims((actions_flatten - old_means_flatten).to_tensor(), 1)
@@ -81,17 +218,44 @@ class ACERAC(ACERACSingle):
                 batch_mask
             )
             td_return = tf.reduce_sum(rewards_flatten * gamma_coeffs.with_row_splits_dtype(tf.int32), axis=1)
-            d = truncated_density * (-tf.squeeze(values_middle) + td_return + tf.pow(self._gamma, tf.cast(rewards_lengths, tf.float32)) * values_last)
+            d = truncated_density * (-values_middle
+                                     + td_return
+                                     + tf.pow(self._gamma, tf.cast(rewards_lengths, tf.float32)) * values_last)
 
-            density = (1 / tf.sqrt((tf.pow(np.pi, tf.cast(means_flatten.row_lengths(), tf.float32)) * c_det))) * tf.squeeze(tf.exp(-0.5 * exp_current))
-            bounds_penalty = tf.reduce_mean(
-                tf.scalar_mul(
+            means_gradient_batches = tf.squeeze(
+                tf.gather_nd(means_gradient, tf.expand_dims(batches_indices_gradients, axis=2)),
+                axis=2
+            ).to_tensor()
+            means_gradient_batches = tf.reshape(means_gradient_batches, shape=[tf.shape(means_gradient_batches)[0], -1])
+
+            c_mu = tf.matmul(c_invs, tf.transpose(actions_mu_diff_current, [0, 2, 1]))
+            c_mu_di = c_mu * tf.expand_dims(tf.expand_dims(d, axis=1), 2)
+            c_mu_di_batches = tf.squeeze(
+                tf.gather_nd(c_mu_di, big_batches_indices).to_tensor()
+            )
+            c_mu_dim_sum = tf.stop_gradient(tf.reduce_sum(c_mu_di_batches, axis=1))
+
+            d_batches = tf.squeeze(
+                tf.gather_nd(d, big_batches_indices).to_tensor()
+            )
+            d_batches = tf.stop_gradient(tf.reduce_sum(d_batches, axis=1))
+
+            bounds_penalty = tf.scalar_mul(
                     self._actor._beta_penalty,
-                    tf.square(tf.maximum(0.0, tf.abs(means) - self._actions_bound))
+                    tf.square(tf.maximum(0.0, tf.abs(means_gradient) - self._actions_bound))
+                )
+
+            bounds_penalty = tf.reduce_mean(
+                tf.reduce_sum(
+                    tf.squeeze(
+                        tf.gather_nd(bounds_penalty, tf.expand_dims(batches_indices_gradients, axis=2)),
+                        axis=2
+                    ).to_tensor(),
+                    axis=2
                 )
             )
-            actor_loss = tf.reduce_mean(-tf.math.log(density + 1e-20) * tf.stop_gradient(d)) + bounds_penalty
-            critic_loss = -tf.reduce_mean(values_middle * tf.stop_gradient(d))
+            actor_loss = tf.reduce_mean(-(means_gradient_batches * c_mu_dim_sum / self._tau)) + bounds_penalty
+            critic_loss = -tf.reduce_mean(values_gradient * d_batches / self._tau)
 
         grads_actor = tape.gradient(actor_loss, self._actor.trainable_variables)
         grads_var_actor = zip(grads_actor, self._actor.trainable_variables)
@@ -99,7 +263,7 @@ class ACERAC(ACERACSingle):
 
         with tf.name_scope('actor'):
             tf.summary.scalar(f'batch_actor_loss', actor_loss, step=self._tf_time_step)
-            tf.summary.scalar(f'batch_bounds_penalty', bounds_penalty, step=self._tf_time_step)
+            tf.summary.scalar(f'batch_bounds_penalty', tf.reduce_sum(bounds_penalty), step=self._tf_time_step)
 
         grads_critic = tape.gradient(critic_loss, self._critic.trainable_variables)
         grads_var_critic = zip(grads_critic, self._critic.trainable_variables)
@@ -110,7 +274,7 @@ class ACERAC(ACERACSingle):
             tf.summary.scalar(f'batch_value_mean', tf.reduce_mean(values_middle), step=self._tf_time_step)
 
     def _fetch_offline_batch(self) -> List[Tuple[Dict[str, Union[np.array, list]], int]]:
-        trajectory_lens = [[np.random.randint(0, self._tau) for _ in range(self._num_parallel_envs)] for _ in range(self._batches_per_env)]
+        trajectory_lens = [[self._tau - 1 for _ in range(self._num_parallel_envs)] for _ in range(self._batches_per_env)]
         batch = []
         [batch.extend(self._memory.get(trajectories)) for trajectories in trajectory_lens]
         return batch
@@ -120,28 +284,63 @@ class ACERAC(ACERACSingle):
             offline_batches = self._fetch_offline_batch()
 
             obs, obs_next, actions, policies, rewards, dones, lengths, rewards_lengths, c, c_inv = [], [], [], [], [], [], [], [], [], []
+            obs_gradient, actions_gradient, obs_gradient_middle, lengths_gradient = [], [], [], []
             middle_obs, middle_actions = [], []
-            for batch, i in offline_batches:
-                obs.append(batch['observations'])
-                obs_next.append(batch['next_observations'][batch['next_observations'].shape[0] - 1])
-                actions.append(batch['actions'])
-                policies.append(batch['policies'])
-                rewards.append(batch['rewards'][i:])
-                dones.append(batch['dones'][batch['observations'].shape[0] - 1])
-                lengths.append(len(batch['observations']))
-                rewards_lengths.append(len(rewards[-1]))
-                middle_obs.append(batch['observations'][i])
-                middle_actions.append(batch['actions'][i])
+
+            big_batches_lengths = []
+
+            for batch, middle_index in offline_batches:
+                batch_size = len(batch['observations'])
+                big_batch_len = 1
+                k = 1
+
+                obs_gradient.append(batch['observations'])
+                obs_gradient_middle.append([batch['observations'][middle_index]])
+                actions_gradient.append(batch['actions'])
+                lengths_gradient.append(len(obs_gradient[-1]))
+
+                obs.append([batch['observations'][middle_index]])
+                obs_next.append(batch['next_observations'][middle_index])
+                actions.append([batch['actions'][middle_index]])
+                policies.append([batch['policies'][middle_index]])
+                rewards.append([batch['rewards'][middle_index]])
+                dones.append(batch['dones'][middle_index])
+                lengths.append(1)
+                rewards_lengths.append(1)
+                middle_obs.append(batch['observations'][middle_index])
+                middle_actions.append(batch['actions'][middle_index])
+                while 1:
+                    start = max([0, middle_index - k])
+                    end = min([middle_index + k + 1, batch_size])
+                    obs.append(batch['observations'][start: end])
+                    obs_next.append(batch['next_observations'][end - 1])
+                    actions.append(batch['actions'][start: end])
+                    policies.append(batch['policies'][start: end])
+                    rewards.append(batch['rewards'][middle_index: end])
+                    dones.append(batch['dones'][end - 1])
+                    lengths.append(len(obs[-1]))
+                    big_batch_len += 1
+                    rewards_lengths.append(len(rewards[-1]))
+                    middle_obs.append(batch['observations'][middle_index])
+                    middle_actions.append(batch['actions'][middle_index])
+                    if start == 0 and end == batch_size:
+                        break
+                    k += 1
+                big_batches_lengths.append(big_batch_len)
 
             obs = np.concatenate(obs, axis=0)
             obs_next = np.stack(obs_next)
             dones = np.stack(dones)
             rewards = np.concatenate(rewards, axis=0)
             actions = np.concatenate(actions, axis=0)
+            obs_gradient = np.concatenate(obs_gradient, axis=0)
+            obs_gradient_middle = np.concatenate(obs_gradient_middle, axis=0)
             policies = np.concatenate(policies, axis=0)
-            middle_actions = np.stack(middle_actions)
             middle_obs = np.stack(middle_obs)
+
             obs_flatten = self._process_observations(obs)
+            obs_gradient = self._process_observations(obs_gradient)
+            obs_gradient_middle = self._process_observations(obs_gradient_middle)
             obs_next_flatten = self._process_observations(obs_next)
             rewards_flatten = self._process_rewards(rewards)
 
@@ -152,8 +351,12 @@ class ACERAC(ACERACSingle):
                 policies,
                 rewards_flatten,
                 middle_obs,
-                middle_actions,
                 dones,
                 lengths,
-                rewards_lengths
+                rewards_lengths,
+                big_batches_lengths,
+
+                obs_gradient,
+                obs_gradient_middle,
+                lengths_gradient
             )

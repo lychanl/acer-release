@@ -14,7 +14,6 @@ from gym import wrappers
 
 from algos.acer import ACER
 from algos.acerac import ACERAC
-from algos.acerac_single import ACERACSingle
 from algos.acerce2 import ACERCE2
 from algos.base import BaseACERAgent
 from algos.acerce import ACERCE
@@ -36,7 +35,6 @@ ALGOS = {
     'acerce': ACERCE,
     'acerce2': ACERCE2,
     'acerac': ACERAC,
-    'aceracs': ACERACSingle,
     'pacer': PACER,
     'racer': RepresentativeACER,
     'qacer': QACER,
