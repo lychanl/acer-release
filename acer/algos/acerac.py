@@ -190,7 +190,6 @@ class ACERAC(BaseACERAgent):
         values_middle = tf.squeeze(self._critic.value(middle_obs))
         batch_indices_rewards = tf.RaggedTensor.from_row_lengths(values=tf.range(tf.reduce_sum(rewards_lengths)), row_lengths=rewards_lengths)
         values_last = tf.squeeze(self._critic.value(obs_next)) * (1.0 - tf.cast(dones, tf.dtypes.float32))
-        policies, _ = tf.split(self._actor.prob(obs, actions), 2, axis=0)
         indices = tf.expand_dims(batches_indices, axis=2)
         rewards_indices = tf.expand_dims(batch_indices_rewards, axis=2)
 

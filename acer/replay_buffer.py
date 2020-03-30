@@ -217,6 +217,40 @@ class WindowReplayBuffer(ReplayBuffer):
         return start_index, end_index
 
 
+class PrevReplayBuffer(ReplayBuffer):
+
+    def __init__(self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
+        super().__init__(max_size, action_spec, obs_spec)
+        self._policies = self._init_field(action_spec)
+
+    def get(self, trajectory_len: Optional[int] = None) -> Tuple[Dict[str, np.array], int]:
+        if self._current_size == 0:
+            # empty buffer
+            return ({
+                "actions": np.array([]),
+                "observations": np.array([]),
+                "rewards": np.array([]),
+                "next_observations": np.array([]),
+                "policies": np.array([]),
+                "dones": np.array([]),
+                "ends": np.array([])
+            }, -1)
+
+        start = sample_index = self._sample_random_index()
+        trajectory_len_adjusted = trajectory_len
+        if self._pointer != sample_index:
+            if sample_index > 0 and not self._ends[sample_index - 1]:
+                start = sample_index - 1
+                trajectory_len_adjusted = trajectory_len + 1
+            elif self._current_size == self._max_size and sample_index == 0 and not self._ends[- 1]:
+                start = self._max_size - 1
+                trajectory_len_adjusted = trajectory_len + 1
+
+        start_index, end_index = self._get_indices(start, trajectory_len_adjusted)
+        batch = self._fetch_batch(end_index, sample_index, start_index)
+        return batch
+
+
 class WholeWindowReplayBuffer(WindowReplayBuffer):
 
     def __init__(self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
@@ -371,3 +405,9 @@ class MultiWindowReplayBuffer(MultiReplayBuffer):
     def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
         super().__init__(max_size, num_buffers, action_spec, obs_spec)
         self._buffers = [WindowReplayBuffer(int(max_size / num_buffers), action_spec, obs_spec) for _ in range(num_buffers)]
+
+
+class MultiPrevReplayBuffer(MultiReplayBuffer):
+    def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
+        super().__init__(max_size, num_buffers, action_spec, obs_spec)
+        self._buffers = [PrevReplayBuffer(int(max_size / num_buffers), action_spec, obs_spec) for _ in range(num_buffers)]
