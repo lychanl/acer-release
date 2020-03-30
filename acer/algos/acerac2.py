@@ -177,18 +177,18 @@ class ACERAC2(BaseACERAgent):
                                      + td_return
                                      + tf.pow(self._gamma, tf.cast(lengths, tf.float32)) * values_next)
             means_gradient_batches = tf.squeeze(
-                tf.gather_nd(means, tf.expand_dims(batches_indices_gradients, axis=2)),
+                tf.gather_nd(means_gradient, tf.expand_dims(batches_indices_gradients, axis=2)),
                 axis=2
             ).to_tensor()
             means_gradient_batches = tf.reshape(means_gradient_batches, shape=[tf.shape(means_gradient_batches)[0], -1])
 
             c_mu = tf.matmul(c_invs, tf.transpose(actions_mu_diff_current, [0, 2, 1]))
-            c_mu_di = c_mu * tf.expand_dims(tf.expand_dims(d, axis=1), 2)
-            c_mu_di_batches = tf.squeeze(
-                tf.gather_nd(c_mu_di, big_batches_indices).to_tensor()
+            c_mu_d = c_mu * tf.expand_dims(tf.expand_dims(d, axis=1), 2)
+            c_mu_d_batches = tf.squeeze(
+                tf.gather_nd(c_mu_d, big_batches_indices).to_tensor()
             )
-            c_mu_dim_sum = tf.stop_gradient(tf.reduce_sum(c_mu_di_batches, axis=1) / self._tau)
 
+            c_mu_sum = tf.stop_gradient(tf.reduce_sum(c_mu_d_batches, axis=1) / tf.expand_dims(tf.cast(big_batches_lengths, tf.float32), 1))
             d_batches = tf.squeeze(
                 tf.gather_nd(d, big_batches_indices).to_tensor()
             )
@@ -206,9 +206,9 @@ class ACERAC2(BaseACERAgent):
                 ),
                 0
             )
-            actor_loss = tf.matmul(tf.expand_dims(means_gradient_batches, axis=1), tf.expand_dims(c_mu_dim_sum, axis=2))
+            actor_loss = tf.matmul(tf.expand_dims(means_gradient_batches, axis=1), tf.expand_dims(c_mu_sum, axis=2))
             actor_loss = -tf.reduce_mean(tf.squeeze(actor_loss)) + bounds_penalty
-            critic_loss = -tf.reduce_mean(values_gradient * d_batches / self._tau)
+            critic_loss = -tf.reduce_mean(values_gradient * d_batches / tf.expand_dims(tf.cast(big_batches_lengths, tf.float32), 1))
 
         grads_actor = tape.gradient(actor_loss, self._actor.trainable_variables)
         grads_var_actor = zip(grads_actor, self._actor.trainable_variables)
@@ -248,25 +248,24 @@ class ACERAC2(BaseACERAgent):
             obs_first_gradient = []
             lengths_gradient = []
 
-            for batch, middle_index in offline_batches:
+            for batch, first_index in offline_batches:
                 batch_size = len(batch['observations'])
                 big_batch_len = 0
-
-                obs_first_gradient.append(batch['observations'][middle_index])
-                obs_gradient.append(batch['observations'][middle_index:])
+                obs_first_gradient.append(batch['observations'][first_index])
+                obs_gradient.append(batch['observations'][first_index: ])
                 lengths_gradient.append(len(obs_gradient[-1]))
 
-                for i in range(middle_index + 1, batch_size + 1):
-                    obs.append(batch['observations'][middle_index: i])
-                    obs_first.append(batch['observations'][middle_index])
+                for i in range(first_index + 1, batch_size + 1):
+                    obs.append(batch['observations'][first_index: i])
+                    obs_first.append(batch['observations'][first_index])
                     obs_next.append(batch['next_observations'][i - 1])
-                    actions.append(batch['actions'][middle_index: i])
-                    policies.append(batch['policies'][middle_index: i])
-                    rewards.append(batch['rewards'][middle_index: i])
+                    actions.append(batch['actions'][first_index: i])
+                    policies.append(batch['policies'][first_index: i])
+                    rewards.append(batch['rewards'][first_index: i])
                     dones.append(batch['dones'][i - 1])
                     lengths.append(len(obs[-1]))
-                    is_prev_noise_batch.append(float(middle_index != 0))
-                    is_prev_noise.append([float(middle_index != 0) for _ in range(len(obs[-1]))])
+                    is_prev_noise_batch.append(float(first_index != 0))
+                    is_prev_noise.append([float(first_index != 0) for _ in range(len(obs[-1]))])
                     big_batch_len += 1
 
                     prev_obs.append([batch['observations'][0] for _ in range(len(obs[-1]))])
