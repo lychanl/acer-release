@@ -37,10 +37,14 @@ def k_prod(x, y):
 
 class ACERAC2(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
-                 critic_layers: Optional[Tuple[int]], b: float = 3, tau: int = 2, *args, **kwargs):
+                 critic_layers: Optional[Tuple[int]], b: float = 3, tau: int = 2, alpha: int = None, *args, **kwargs):
 
         self._tau = tau
-        self._alpha = 1 - (1 / tau)
+        if alpha is None:
+            self._alpha = 1 - (1 / tau)
+        else:
+            self._alpha = alpha
+        print(self._alpha)
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
         self._b = b
 

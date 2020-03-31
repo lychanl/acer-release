@@ -32,7 +32,7 @@ parser.add_argument('--c', type=int, help='experience replay intensity', require
 parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=0.3)
 parser.add_argument('--kappa', type=float, help='kappa parameter for qacer', default=0.)
 parser.add_argument('--atoms', type=int, help='number of atoms for qacer', default=50)
-parser.add_argument('--alpha', type=float, help='Alpha parameter for eacer', default=0.8)
+parser.add_argument('--alpha', type=float, help='Alpha parameter for acerac. None will set 1-(1/tau)', default=None)
 parser.add_argument('--tau', type=int, help='Tau parameter for acerac', default=2)
 parser.add_argument('--noise_type', type=str, help='Type of noise for ACERAC',
                     default='mean', choices=['mean', 'autocor'])
