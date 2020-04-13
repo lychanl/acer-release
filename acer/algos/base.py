@@ -52,8 +52,8 @@ class BaseActor(ABC, tf.keras.Model):
 
         self._hidden_layers.append(tf.keras.layers.Dense(actions_dim, kernel_initializer=utils.normc_initializer()))
 
-        self._actions_dim = actions_dim
-        self._beta_penalty = beta_penalty
+        self.actions_dim = actions_dim
+        self.beta_penalty = beta_penalty
         self._tf_time_step = tf_time_step
 
     def _forward(self, observations: np.array) -> tf.Tensor:
@@ -207,7 +207,7 @@ class CategoricalActor(BaseActor):
 
         penalty = tf.reduce_sum(
             tf.scalar_mul(
-                self._beta_penalty,
+                self.beta_penalty,
                 tf.square(tf.maximum(0.0, tf.abs(logits) - 20))
             ),
             axis=1,
@@ -217,7 +217,7 @@ class CategoricalActor(BaseActor):
 
         # entropy maximization penalty
         # entropy = -tf.reduce_sum(tf.math.multiply(probs, log_probs), axis=1)
-        # penalty = self._beta_penalty * (-tf.reduce_sum(tf.math.multiply(probs, log_probs), axis=1))
+        # penalty = self.beta_penalty * (-tf.reduce_sum(tf.math.multiply(probs, log_probs), axis=1))
 
         with tf.name_scope('actor'):
             tf.summary.scalar('batch_entropy_mean', tf.reduce_mean(dist.entropy()), step=self._tf_time_step)
@@ -309,7 +309,7 @@ class GaussianActor(BaseActor):
 
         bounds_penalty = tf.reduce_sum(
             tf.scalar_mul(
-                self._beta_penalty,
+                self.beta_penalty,
                 tf.square(tf.maximum(0.0, tf.abs(mean) - self._actions_bound))
             ),
             axis=1,
@@ -321,7 +321,7 @@ class GaussianActor(BaseActor):
         total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, d) + bounds_penalty)
 
         with tf.name_scope('actor'):
-            for i in range(self._actions_dim):
+            for i in range(self.actions_dim):
                 tf.summary.scalar(f'std_{i}', tf.exp(self.log_std[i]), step=self._tf_time_step)
             tf.summary.scalar('batch_loss', total_loss, step=self._tf_time_step)
             tf.summary.scalar('batch_bounds_penalty_mean', tf.reduce_mean(bounds_penalty), step=self._tf_time_step)
@@ -350,7 +350,7 @@ class GaussianActor(BaseActor):
         actions_probs = dist.prob(actions)
 
         with tf.name_scope('actor'):
-            for i in range(self._actions_dim):
+            for i in range(self.actions_dim):
                 tf.summary.scalar(f'batch_action_{i}_mean', tf.reduce_mean(actions[:, i]), step=self._tf_time_step)
 
         return actions, actions_probs

@@ -17,10 +17,12 @@ class ReplayBuffer:
     def __init__(self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
         """Stores trajectories.
 
-        Each of the sample stored in the buffer has the same probability of being drawn.
+        Each of the samples stored in the buffer has the same probability of being drawn.
 
         Args:
             max_size: maximum number of entries to be stored in the buffer - only newest entries are stored.
+            action_spec: BufferFieldSpec with actions space specification
+            obs_spec: BufferFieldSpec with observations space specification
         """
         self._max_size = max_size
         self._current_size = 0
@@ -96,7 +98,7 @@ class ReplayBuffer:
         batch = self._fetch_batch(end_index, sample_index, start_index)
         return batch
 
-    def _fetch_batch(self, end_index, sample_index, start_index):
+    def _fetch_batch(self, end_index: int, sample_index: int, start_index: int) -> Tuple[Dict[str, np.array], int]:
         start_index_next = start_index + 1
         end_index_next = end_index + 1
 
@@ -135,7 +137,7 @@ class ReplayBuffer:
             "ends": end
         }, middle_index)
 
-    def _get_indices(self, sample_index, trajectory_len):
+    def _get_indices(self, sample_index: int, trajectory_len: int) -> Tuple[int, int]:
         start_index = sample_index
         end_index = sample_index + 1
         current_length = 1
@@ -174,10 +176,21 @@ class ReplayBuffer:
 class WindowReplayBuffer(ReplayBuffer):
 
     def __init__(self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
+        """Extends ReplayBuffer to fetch 'window' of experiences around selected index.
+        Also policies buffer is replaced to store data in same specification as actions
+        (used in algorithms with autocorrelated actions).
+
+        Each of the samples stored in the buffer has the same probability of being drawn.
+
+        Args:
+            max_size: maximum number of entries to be stored in the buffer - only newest entries are stored.
+            action_spec: BufferFieldSpec with actions space specification
+            obs_spec: BufferFieldSpec with observations space specification
+        """
         super().__init__(max_size, action_spec, obs_spec)
         self._policies = self._init_field(action_spec)
 
-    def _get_indices(self, sample_index, trajectory_len):
+    def _get_indices(self, sample_index: int, trajectory_len: int) -> Tuple[int, int]:
         current_length = 0
         start_index = sample_index
         end_index = sample_index + 1
@@ -220,6 +233,17 @@ class WindowReplayBuffer(ReplayBuffer):
 class PrevReplayBuffer(ReplayBuffer):
 
     def __init__(self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
+        """Extends ReplayBuffer to fetch one experience tuple before selected index.
+        If selected index indicates first time step in a episode, no additional tuples are attached.
+
+        Also policies buffer is replaced to store data in same specification as actions
+        (used in algorithms with autocorrelated actions).
+
+        Args:
+            max_size: maximum number of entries to be stored in the buffer - only newest entries are stored.
+            action_spec: BufferFieldSpec with actions space specification
+            obs_spec: BufferFieldSpec with observations space specification
+        """
         super().__init__(max_size, action_spec, obs_spec)
         self._policies = self._init_field(action_spec)
 
@@ -251,83 +275,27 @@ class PrevReplayBuffer(ReplayBuffer):
         return batch
 
 
-class WholeWindowReplayBuffer(WindowReplayBuffer):
-
-    def __init__(self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
-        super().__init__(max_size, action_spec, obs_spec)
-        self._policies = self._init_field(action_spec)
-
-    def get(self, trajectory_len: Optional[int] = None) -> List[Tuple[Dict[str, np.array], int]]:
-        if self._current_size == 0:
-            # empty buffer
-            return []
-
-        sample_index = self._sample_random_index()
-        indices = self._get_indices_list(sample_index, trajectory_len)
-
-        batches = [self._fetch_batch(end_index, sample_index, start_index) for start_index, end_index in indices]
-
-        return batches
-
-    def _get_indices_list(self, sample_index, trajectory_len):
-        current_length = 0
-        start_index = sample_index
-        end_index = sample_index + 1
-
-        indices = [(start_index, end_index)]
-
-        is_start_finished = False
-        is_end_finished = False
-        while True:
-            if trajectory_len is not None and current_length == trajectory_len:
-                break
-
-            if not is_end_finished:
-                if end_index == self._max_size:
-                    if self._pointer == 0:
-                        is_end_finished = True
-                    else:
-                        end_index = 0
-
-            if not is_start_finished:
-                if start_index == self._pointer or (start_index != 0 and self._ends[start_index - 1]):
-                    is_start_finished = True
-
-            if not is_end_finished:
-                if end_index == self._pointer or self._ends[end_index]:
-                    is_end_finished = True
-
-            if not is_start_finished:
-                if start_index == 0:
-                    if self._current_size < self._max_size or self._pointer == self._max_size - 1:
-                        is_start_finished = True
-                    else:
-                        start_index = self._max_size - 1
-                else:
-                    start_index -= 1
-
-            if not is_end_finished:
-                end_index += 1
-            current_length += 1
-            indices.append((start_index, end_index))
-        return indices
-
-
 class MultiReplayBuffer:
 
-    def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
+    def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec,
+                 obs_spec: BufferFieldSpec, buffer_class: type = ReplayBuffer):
         """Encapsulates ReplayBuffers from multiple environments.
 
         Args:
-            max_size: maximum number of entries in a single buffer
-            num_buffers: number of buffers to be created
+            max_size: maximum number of entries to be stored in the buffer - only newest entries are stored.
+            action_spec: BufferFieldSpec with actions space specification
+            obs_spec: BufferFieldSpec with observations space specification
+            buffer_class: class of a buffer to be created
         """
         self._n_buffers = num_buffers
         self._max_size = max_size
-        self._buffers = [ReplayBuffer(int(max_size / num_buffers), action_spec, obs_spec) for _ in range(num_buffers)]
+
+        assert issubclass(buffer_class, ReplayBuffer), "Buffer class should derive from ReplayBuffer"
+
+        self._buffers = [buffer_class(int(max_size / num_buffers), action_spec, obs_spec) for _ in range(num_buffers)]
 
     def put(self, steps: List[Tuple[Union[int, float, list], np.array, float, np.array, bool, bool]]):
-        """Stores gathered experiences in the buffers. Accepts list of steps.
+        """Stores experience in the buffers. Accepts list of steps.
 
         Args:
             steps: List of steps, each of step Tuple consists of: action, observation, reward,
@@ -347,7 +315,7 @@ class MultiReplayBuffer:
             trajectories_lens: List of maximum lengths of trajectory to be fetched from corresponding buffer
 
         Returns:
-            list of sampled trajectory from every buffer, see ReplayBuffer.get() for format description
+            list of sampled trajectory from every buffer, see ReplayBuffer.get() for the format description
         """
         assert trajectories_lens is None or len(trajectories_lens) == self._n_buffers,\
             f"'steps' list should provide one step (experience) for every buffer" \
@@ -399,15 +367,3 @@ class MultiReplayBuffer:
         with open(path, 'rb') as f:
             buffer = pickle.load(f)
         return buffer
-
-
-class MultiWindowReplayBuffer(MultiReplayBuffer):
-    def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
-        super().__init__(max_size, num_buffers, action_spec, obs_spec)
-        self._buffers = [WindowReplayBuffer(int(max_size / num_buffers), action_spec, obs_spec) for _ in range(num_buffers)]
-
-
-class MultiPrevReplayBuffer(MultiReplayBuffer):
-    def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
-        super().__init__(max_size, num_buffers, action_spec, obs_spec)
-        self._buffers = [PrevReplayBuffer(int(max_size / num_buffers), action_spec, obs_spec) for _ in range(num_buffers)]
