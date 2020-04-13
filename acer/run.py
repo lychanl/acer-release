@@ -34,7 +34,7 @@ parser.add_argument('--kappa', type=float, help='kappa parameter for qacer', def
 parser.add_argument('--atoms', type=int, help='number of atoms for qacer', default=50)
 parser.add_argument('--alpha', type=float, help='Alpha parameter for acerac. None will set 1-(1/tau)', default=None)
 parser.add_argument('--tau', type=int, help='Tau parameter for acerac', default=2)
-parser.add_argument('--noise_type', type=str, help='Type of noise for ACERAC',
+parser.add_argument('--noise_type', type=str, help='Type of noise for OldACERAC',
                     default='mean', choices=['mean', 'autocor'])
 parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
                                               '0.4 * actions_bound is set.',

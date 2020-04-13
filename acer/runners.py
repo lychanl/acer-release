@@ -14,7 +14,7 @@ from gym import wrappers
 
 from algos.acer import ACER
 from algos.acerac import ACERAC
-from algos.acerac2 import ACERAC2
+from algos.old_acerac import OldACERAC
 from algos.acerce2 import ACERCE2
 from algos.base import BaseACERAgent
 from algos.acerce import ACERCE
@@ -36,7 +36,7 @@ ALGOS = {
     'acerce': ACERCE,
     'acerce2': ACERCE2,
     'acerac': ACERAC,
-    'acerac2': ACERAC2,
+    'old_acerac': OldACERAC,
     'pacer': PACER,
     'racer': RepresentativeACER,
     'qacer': QACER,
@@ -304,11 +304,3 @@ class Runner:
         self._csv_logger.dump()
         logging.info(f"saved evaluation results")
         logging.info(f"saved checkpoint in '{str(checkpoint_dir)}'")
-    #
-    # def flush(self):
-    #     """Dumps checkpoint and CSVLogger output to disk"""
-    #     logging.info(f"flushing data to disk...")
-    #     self._csv_logger.close()
-    #     self._save_checkpoint()
-    #     if self._save_video_on_kill:
-    #         self._record_video()
