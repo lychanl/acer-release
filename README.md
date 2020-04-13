@@ -1,7 +1,7 @@
-# Actor-Critic with Experience Replay and Pessimistic Critic
+# Actor-Critic with Experience Replay and autocorrelated actions
 This repository contains original implementation of **Actor-Critic with
- Experience Replay and Pessimistic Critic** algorithm.
- Implementation of **Actor-Critic with Experience Replay** is also present.
+ Experience Replay and autocorrelated actions** algorithm.
+ Implementation of original **Actor-Critic with Experience Replay** is also present.
 ## Installation
 
 ### Prerequisites
@@ -33,13 +33,6 @@ python run.py {args...}
 ``` 
 
 ## Example runs
-```shell script
-python3 acer/run.py --algo classic --env_name LunarLander-v2 --gamma 0.99 --lam 0.9 --b 5 --c0 0.3 \
-    --c 10 --actor_lr 0.001 --critic_lr 0.002  --actor_layers 60 --critic_layers 100 \
-    --memory_size 1000000 --num_parallel_envs 10 --actor_beta_penalty 0.001 \
-    --num_evaluation_runs 5 --batches_per_env 10 --rescale_rewards 0
-
-```
 
 ```shell script
 python acer/run.py --algo acer --env_name Pendulum-v0 --gamma 0.95 \
@@ -48,13 +41,12 @@ python acer/run.py --algo acer --env_name Pendulum-v0 --gamma 0.95 \
     --num_parallel_envs 10  --actor_beta_penalty 0.1 --batches_per_env 10
 ```
 
-
 ```shell script
-python acer/run.py --algo acerce2 --env_name Pendulum-v0 --gamma 0.95 --use_cpu --alpha 0.3 --explorer_lr 0.005 \                                              1 ↵  8984  16:36:19
-    --lam 0.9 --b 2 --c0 0.3 --c 10 --actor_lr 0.005 --critic_lr 0.005  \
-    --actor_layers 20 --critic_layers 50 --memory_size 1000000 \
-    --num_parallel_envs 10  --actor_beta_penalty 0.1 --batches_per_env 10 --evaluate_time_steps_interval 2000
-
+python3.7 acer/run.py --algo acerac --env_name HalfCheetahBulletEnv-v0 \
+    --gamma 0.99 --lam 0.9 --b 2 --c0 0.1 --c 10 --actor_lr 0.00003 --critic_lr 0.00006 \
+    --actor_layers 256 256  --critic_layers 256 256 --memory_size 1000000 \
+    --num_parallel_envs 10 --actor_beta_penalty 0.001 --batches_per_env 10 \
+    --num_evaluation_runs 5  --std 0.4  --max_time_steps 3000000 --tau 4 --alpha 0.5
 ```
 
 ## Parameters
