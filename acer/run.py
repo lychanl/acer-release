@@ -60,6 +60,8 @@ parser.add_argument('--rescale_rewards', help='-1 to turn rescaling off, 0 to re
 parser.add_argument('--limit_reward_tanh', help='limits reward to [-value, value] using tanh function'
                                                 '0 to disable',
                     type=float, default=None)
+parser.add_argument('--gradient_norm', help='Global gradient clip norm',
+                    type=float, default=None)
 parser.add_argument('--evaluate_time_steps_interval', type=int, help='Number of time steps between evaluations. '
                                                                      '-1 to turn evaluation off',
                     default=10000)
