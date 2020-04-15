@@ -127,12 +127,7 @@ class ACER(BaseACERAgent):
             loss = self._actor.loss(observations, actions, d)
         grads = tape.gradient(loss, self._actor.trainable_variables)
         if self._gradient_norm is not None:
-            grads_critic, grads_norm = tf.clip_by_global_norm(
-                grads,
-                self._gradient_norm
-            )
-            with tf.name_scope('actor'):
-                tf.summary.scalar("gradient_norm", grads_norm, self._tf_time_step)
+            grads = self._clip_gradient(grads, self._actor_gradient_norm_median, 'actor')
         gradients = zip(grads, self._actor.trainable_variables)
 
         self._actor_optimizer.apply_gradients(gradients)
@@ -141,12 +136,7 @@ class ACER(BaseACERAgent):
             loss = self._critic.loss(observations, d)
         grads = tape.gradient(loss, self._critic.trainable_variables)
         if self._gradient_norm is not None:
-            grads_critic, grads_norm = tf.clip_by_global_norm(
-                grads,
-                self._gradient_norm
-            )
-            with tf.name_scope('critic'):
-                tf.summary.scalar("gradient_norm", grads_norm, self._tf_time_step)
+            grads = self._clip_gradient(grads, self._critic_gradient_norm_median, 'critic')
         gradients = zip(grads, self._critic.trainable_variables)
 
         self._critic_optimizer.apply_gradients(gradients)

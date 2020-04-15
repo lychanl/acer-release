@@ -302,12 +302,7 @@ class ACERAC(BaseACERAgent):
 
         grads_actor = tape.gradient(actor_loss, self._actor.trainable_variables)
         if self._gradient_norm is not None:
-            grads_actor, grads_norm = tf.clip_by_global_norm(
-                grads_actor,
-                self._gradient_norm
-            )
-            with tf.name_scope('actor'):
-                tf.summary.scalar("gradient_norm", grads_norm, self._tf_time_step)
+            grads_actor = self._clip_gradient(grads_actor, self._actor_gradient_norm_median, 'actor')
         grads_var_actor = zip(grads_actor, self._actor.trainable_variables)
         self._actor_optimizer.apply_gradients(grads_var_actor)
 
@@ -317,12 +312,7 @@ class ACERAC(BaseACERAgent):
 
         grads_critic = tape.gradient(critic_loss, self._critic.trainable_variables)
         if self._gradient_norm is not None:
-            grads_critic, grads_norm = tf.clip_by_global_norm(
-                grads_critic,
-                self._gradient_norm
-            )
-            with tf.name_scope('critic'):
-                tf.summary.scalar("gradient_norm", grads_norm, self._tf_time_step)
+            grads_critic = self._clip_gradient(grads_critic, self._critic_gradient_norm_median, 'critic')
         grads_var_critic = zip(grads_critic, self._critic.trainable_variables)
         self._critic_optimizer.apply_gradients(grads_var_critic)
 
