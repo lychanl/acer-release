@@ -28,10 +28,11 @@ class RunningMeanVarianceTf:
             epsilon: small value for numerical stability
             shape: shape of the normalized vector
         """
-        self.mean = tf.zeros(shape=shape)
-        self.var = tf.ones(shape=shape)
-        self.count = tf.Variable(initial_value=epsilon)
+        self.mean = tf.Variable(initial_value=tf.zeros(shape=shape), trainable=False)
+        self.var = tf.Variable(initial_value=tf.ones(shape=shape), trainable=False)
+        self.count = tf.Variable(initial_value=epsilon, trainable=False)
 
+    @tf.function
     def update(self, x: tf.Tensor):
         """Updates statistics with given batch [batch_size, vector_size] of samples
 
@@ -49,10 +50,10 @@ class RunningMeanVarianceTf:
             delta = batch_mean - self.mean
             new_mean = self.mean + delta * batch_count / new_count
 
-            m_a = self.var * (self.count - tf.constant(1))
-            m_b = batch_var * (batch_count - tf.constant(1))
-            m_2 = m_a + m_b + np.square(delta) * self.count * batch_count / new_count
-            new_var = m_2 / (new_count - tf.constant(1))
+            m_a = self.var * (self.count - 1.0)
+            m_b = batch_var * (batch_count - 1.0)
+            m_2 = m_a + m_b + tf.square(delta) * self.count * batch_count / new_count
+            new_var = m_2 / (new_count - 1.0)
             self._assign_new_values(new_count, new_mean, new_var)
 
     def _assign_new_values(self, count: tf.Tensor, mean: tf.Tensor, var: tf.Tensor):

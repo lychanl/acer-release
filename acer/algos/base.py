@@ -7,6 +7,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
 
+import tf_utils
 import utils
 from models.cnn import build_cnn_network
 from models.mlp import build_mlp_network
@@ -425,13 +426,13 @@ class BaseACERAgent(ABC):
         )
 
         if standardize_obs:
-            self._running_mean_obs = utils.RunningMeanVariance(shape=observations_space.shape)
+            self._running_mean_obs = tf_utils.RunningMeanVarianceTf(shape=observations_space.shape)
         else:
             self._running_mean_obs = None
 
         self._rescale_rewards = rescale_rewards
         if rescale_rewards == 0:
-            self._running_mean_rewards = utils.RunningMeanVariance(shape=(1, ))
+            self._running_mean_rewards = tf_utils.RunningMeanVarianceTf(shape=(1, ))
         else:
             self._running_mean_rewards = None
 
@@ -549,33 +550,35 @@ class BaseACERAgent(ABC):
                 lengths
             )
 
+    @tf.function
     def _process_observations(self, observations: np.array) -> np.array:
         """If standardization is turned on, observations are being standardized with running mean and variance.
         Additional clipping is used to prevent performance spikes."""
         if self._running_mean_obs:
-            return np.clip(
-                (observations - self._running_mean_obs.mean) / np.sqrt(self._running_mean_obs.var + 1e-8),
-                -10.0,
-                10.0
+            return tf.clip_by_value(
+                (observations - self._running_mean_obs.mean) / tf.sqrt(self._running_mean_obs.var + 1e-8),
+                tf.constant(-10.0),
+                tf.constant(10.0)
             )
         else:
             return observations
 
+    @tf.function
     def _process_rewards(self, rewards: np.array) -> np.array:
         """Rescales returns with standard deviation. Additional clipping is used to prevent performance spikes."""
         if self._rescale_rewards == 0:
-            rewards = rewards / np.sqrt(self._running_mean_rewards.var + 1e-8)
+            rewards = rewards / tf.sqrt(self._running_mean_rewards.var + 1e-8)
             if not self._limit_reward_tanh:
-                rewards = np.clip(
-                    rewards / np.sqrt(self._running_mean_rewards.var + 1e-8),
-                    -5.0,
-                    5.0
+                rewards = tf.clip_by_value(
+                    rewards / tf.sqrt(self._running_mean_rewards.var + 1e-8),
+                    tf.constant(-5.0),
+                    tf.constant(5.0),
                 )
         elif self._rescale_rewards >= 0:
             rewards = rewards / self._rescale_rewards
         
         if self._limit_reward_tanh:
-            rewards = np.tanh(rewards / self._limit_reward_tanh) * self._limit_reward_tanh
+            rewards = tf.tanh(rewards / self._limit_reward_tanh) * self._limit_reward_tanh
         
         return rewards
 
