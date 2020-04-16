@@ -271,7 +271,7 @@ class GaussianActor(BaseActor):
         Args:
             observations_dim: dimension of observations space
             layers: list of hidden layer sizes
-            beta_penalty: penalty for too confident actions dicient
+            beta_penalty: penalty for too confident actions coefficient
             actions_bound: upper (lower == '-actions_bound') bound for allowed actions,
              required in case of continuous actions
         """
