@@ -455,7 +455,7 @@ class BaseACERAgent(ABC):
         if self._gradient_norm == 0:
             grads_clipped, grads_norm = tf.clip_by_global_norm(
                 grads,
-                norm_variable
+                norm_variable * 4
             )
             update_sign = tf.pow(
                 -1.0, tf.cast(tf.less(grads_norm, norm_variable), dtype=tf.float32)
@@ -555,8 +555,10 @@ class BaseACERAgent(ABC):
         """If standardization is turned on, observations are being standardized with running mean and variance.
         Additional clipping is used to prevent performance spikes."""
         if self._running_mean_obs:
+            centered = tf.cast(observations, dtype=tf.float32) - tf.cast(self._running_mean_obs.mean, dtype=tf.float32)
+            standardized = centered / tf.cast(tf.sqrt(self._running_mean_obs.var + 1e-8), dtype=tf.float32)
             return tf.clip_by_value(
-                (observations - self._running_mean_obs.mean) / tf.sqrt(self._running_mean_obs.var + 1e-8),
+                standardized,
                 tf.constant(-10.0),
                 tf.constant(10.0)
             )

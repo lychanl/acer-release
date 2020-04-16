@@ -28,9 +28,9 @@ class RunningMeanVarianceTf:
             epsilon: small value for numerical stability
             shape: shape of the normalized vector
         """
-        self.mean = tf.Variable(initial_value=tf.zeros(shape=shape), trainable=False)
-        self.var = tf.Variable(initial_value=tf.ones(shape=shape), trainable=False)
-        self.count = tf.Variable(initial_value=epsilon, trainable=False)
+        self.mean = tf.Variable(initial_value=tf.zeros(shape=shape, dtype=tf.float32), trainable=False)
+        self.var = tf.Variable(initial_value=tf.ones(shape=shape, dtype=tf.float32), trainable=False)
+        self.count = tf.Variable(initial_value=epsilon, trainable=False, dtype=tf.float32)
 
     @tf.function(experimental_relax_shapes=True)
     def update(self, x: tf.Tensor):
