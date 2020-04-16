@@ -461,7 +461,7 @@ class BaseACERAgent(ABC):
                 -1.0, tf.cast(tf.less(grads_norm, norm_variable), dtype=tf.float32)
             )
             norm_variable.assign_add(
-                update_sign * norm_variable * 0.1
+                update_sign * norm_variable * 0.01
             )
             with tf.name_scope(scope):
                 tf.summary.scalar("gradient_norm_median", norm_variable, self._tf_time_step)
