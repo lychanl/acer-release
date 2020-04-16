@@ -550,7 +550,7 @@ class BaseACERAgent(ABC):
                 lengths
             )
 
-    @tf.function
+    @tf.function(experimental_relax_shapes=True)
     def _process_observations(self, observations: np.array) -> np.array:
         """If standardization is turned on, observations are being standardized with running mean and variance.
         Additional clipping is used to prevent performance spikes."""
@@ -563,7 +563,7 @@ class BaseACERAgent(ABC):
         else:
             return observations
 
-    @tf.function
+    @tf.function(experimental_relax_shapes=True)
     def _process_rewards(self, rewards: np.array) -> np.array:
         """Rescales returns with standard deviation. Additional clipping is used to prevent performance spikes."""
         if self._rescale_rewards == 0:

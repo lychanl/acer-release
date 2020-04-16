@@ -32,7 +32,7 @@ class RunningMeanVarianceTf:
         self.var = tf.Variable(initial_value=tf.ones(shape=shape), trainable=False)
         self.count = tf.Variable(initial_value=epsilon, trainable=False)
 
-    @tf.function
+    @tf.function(experimental_relax_shapes=True)
     def update(self, x: tf.Tensor):
         """Updates statistics with given batch [batch_size, vector_size] of samples
 
@@ -60,3 +60,7 @@ class RunningMeanVarianceTf:
         self.count.assign(count)
         self.mean.assign(mean)
         self.var.assign(var)
+
+    def save(self, path: str):
+        """Saves the state on disk"""
+        pass
