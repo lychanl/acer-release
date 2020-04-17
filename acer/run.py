@@ -100,7 +100,7 @@ def main():
     save_video_on_kill = parameters.pop('save_video_on_kill')
     no_checkpoint = parameters.pop('no_checkpoint')
     no_tensorboard = parameters.pop('no_tensorboard')
-    record_time_steps = parameters.pop('record_time_steps')
+    record_time_steps = parameters.pop('record_time_steps', None)
     experiment_name = parameters.pop('experiment_name')
     algorithm = parameters.pop('algo')
     log_dir = parameters.pop('log_dir')
