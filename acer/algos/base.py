@@ -49,7 +49,7 @@ class BaseActor(ABC, tf.keras.Model):
             self._hidden_layers.extend(build_cnn_network())
             self._hidden_layers.extend(build_mlp_network(layers_sizes=layers))
         else:
-            self._hidden_layers.extend(build_mlp_network(layers_sizes=(observations_space.shape[0], ) + layers))
+            self._hidden_layers.extend(build_mlp_network(layers_sizes=(observations_space.shape[0],) + layers))
 
         self._hidden_layers.append(tf.keras.layers.Dense(actions_dim, kernel_initializer=utils.normc_initializer()))
 
@@ -127,7 +127,7 @@ class BaseCritic(ABC, tf.keras.Model):
             self._hidden_layers.extend(build_cnn_network())
             self._hidden_layers.extend(build_mlp_network(layers_sizes=layers))
         else:
-            self._hidden_layers.extend(build_mlp_network(layers_sizes=(observations_space.shape[0], ) + layers))
+            self._hidden_layers.extend(build_mlp_network(layers_sizes=(observations_space.shape[0],) + layers))
 
         self._v = tf.keras.layers.Dense(1, kernel_initializer=utils.normc_initializer())
         self._tf_time_step = tf_time_step
@@ -148,7 +148,7 @@ class BaseCritic(ABC, tf.keras.Model):
         x = self._hidden_layers[0](observations)
         for layer in self._hidden_layers[1:]:
             x = layer(x)
-        
+
         value = self._v(x)
 
         return value
@@ -237,7 +237,6 @@ class CategoricalActor(BaseActor):
         return action_probs, action_log_probs
 
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
-
         # TODO: remove hardcoded '10' and '20'
         logits = tf.divide(self._forward(observations), 10)
         probs = tf.nn.softmax(logits)
@@ -449,31 +448,6 @@ class BaseACERAgent(ABC):
             num_buffers=self._num_parallel_envs
         )
 
-    def _clip_gradient(
-            self, grads: List[tf.Tensor], norm_variable: tf.Variable, scope: str
-    ) -> List[tf.Tensor]:
-        if self._gradient_norm == 0:
-            grads_clipped, grads_norm = tf.clip_by_global_norm(
-                grads,
-                norm_variable * 4
-            )
-            update_sign = tf.pow(
-                -1.0, tf.cast(tf.less(grads_norm, norm_variable), dtype=tf.float32)
-            )
-            norm_variable.assign_add(
-                update_sign * norm_variable * 0.01
-            )
-            with tf.name_scope(scope):
-                tf.summary.scalar("gradient_norm_median", norm_variable, self._tf_time_step)
-        else:
-            grads_clipped, grads_norm = tf.clip_by_global_norm(
-                grads,
-                self._gradient_norm
-            )
-        with tf.name_scope(scope):
-            tf.summary.scalar("gradient_norm", grads_norm, self._tf_time_step)
-        return grads_clipped
-
     def save_experience(self, steps: List[
         Tuple[Union[int, float, list], np.array, float, np.array, bool, bool]
     ]):
@@ -550,7 +524,6 @@ class BaseACERAgent(ABC):
                 lengths
             )
 
-    @tf.function(experimental_relax_shapes=True)
     def _process_observations(self, observations: np.array) -> np.array:
         """If standardization is turned on, observations are being standardized with running mean and variance.
         Additional clipping is used to prevent performance spikes."""
@@ -565,7 +538,6 @@ class BaseACERAgent(ABC):
         else:
             return observations
 
-    @tf.function(experimental_relax_shapes=True)
     def _process_rewards(self, rewards: np.array) -> np.array:
         """Rescales returns with standard deviation. Additional clipping is used to prevent performance spikes."""
         if self._rescale_rewards == 0:
