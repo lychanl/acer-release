@@ -76,6 +76,8 @@ parser.add_argument('--no_tensorboard', help='Disable tensorboard logs', action=
 parser.add_argument('--experiment_name', type=str, help='Name of the current experiment', default='')
 parser.add_argument('--save_video_on_kill', action='store_true',
                     help='True if SIGINT signal should trigger registration of the video')
+parser.add_argument('--record_time_steps', type=int, default=None,
+                    help='Number of time steps between evaluation video recordings')
 parser.add_argument('--use_cpu', action='store_true',
                     help='True if CPU (instead of GPU) should be used')
 parser.add_argument('--synchronous', action='store_true',
@@ -98,6 +100,7 @@ def main():
     save_video_on_kill = parameters.pop('save_video_on_kill')
     no_checkpoint = parameters.pop('no_checkpoint')
     no_tensorboard = parameters.pop('no_tensorboard')
+    record_time_steps = parameters.pop('record_time_steps')
     experiment_name = parameters.pop('experiment_name')
     algorithm = parameters.pop('algo')
     log_dir = parameters.pop('log_dir')
@@ -120,6 +123,7 @@ def main():
         asynchronous=not synchronous,
         log_tensorboard=not no_tensorboard,
         do_checkpoint=not no_checkpoint,
+        record_time_steps=record_time_steps
     )
 
     def handle_sigint(sig, frame):

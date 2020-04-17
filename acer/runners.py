@@ -75,8 +75,8 @@ class Runner:
     def __init__(self, environment_name: str, algorithm: str = 'acer', algorithm_parameters: Optional[dict] = None,
                  num_parallel_envs: int = 5, evaluate_time_steps_interval: int = 1500,
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
-                 record: bool = True, experiment_name: str = None, asynchronous: bool = True,
-                 log_tensorboard: bool = True, do_checkpoint: bool = True):
+                 record_end: bool = True, experiment_name: str = None, asynchronous: bool = True,
+                 log_tensorboard: bool = True, do_checkpoint: bool = True, record_time_steps: int = None):
         """Trains and evaluates the agent.
 
         Args:
@@ -89,7 +89,7 @@ class Runner:
             num_evaluation_runs: number of runs per one evaluation
             log_dir: logging directory
             max_time_steps: maximum number of training time steps
-            record: True if video should be recorded after training
+            record_end: True if video should be recorded after training
             asynchronous: True to use concurrent envs
             log_tensorboard: True to create TensorBoard logs
             do_checkpoint: True to save checkpoints over the training
@@ -98,6 +98,7 @@ class Runner:
         self._time_step = 0
         self._done_episodes = 0
         self._next_evaluation_timestamp = 0
+        self._next_record_timestamp = 0
         self._n_envs = num_parallel_envs
         self._evaluate_time_steps_interval = evaluate_time_steps_interval
         self._num_evaluation_runs = num_evaluation_runs
@@ -116,7 +117,8 @@ class Runner:
             )
         self._log_dir.mkdir(parents=True, exist_ok=True)
 
-        self._record = record
+        self._record_end = record_end
+        self._record_time_steps = record_time_steps
         self._env = _get_env(environment_name, num_parallel_envs, asynchronous)
         self._evaluate_env = _get_env(environment_name, num_evaluation_runs, asynchronous)
 
@@ -149,10 +151,12 @@ class Runner:
             if self._is_time_to_evaluate():
                 self._evaluate()
                 if self._time_step != 0:
-                    self._csv_logger.dump()
-                    logging.info(f"saved evaluation results")
+                    self._save_results()
                     if self._do_checkpoint:
                         self._save_checkpoint()
+
+            if self._is_time_to_record():
+                self.record_video()
 
             start_time = time.time()
             experience = self._step()
@@ -161,8 +165,12 @@ class Runner:
             self._elapsed_time_measure += time.time() - start_time
 
         self._csv_logger.close()
-        if self._record:
+        if self._record_end:
             self.record_video()
+
+    def _save_results(self):
+        self._csv_logger.dump()
+        logging.info(f"saved evaluation results in {self._log_dir}")
 
     def _step(self) -> List[Tuple[Union[int, float], np.array, float, float, bool, bool]]:
         actions, policies = self._agent.predict_action(self._current_obs)
@@ -259,29 +267,37 @@ class Runner:
         )
 
     def record_video(self):
-        logging.info(f"saving video of the current model performance...")
+        self._next_record_timestamp += self._record_time_steps
+        logging.info(f"saving video...")
+        try:
+            env = wrappers.Monitor(gym.make(self._env_name), self._log_dir / f'video-{self._time_step}',
+                                   force=True, video_callable=lambda x: True)
+            is_end = False
+            time_step = 0
+            current_obs = np.array([env.reset()])
 
-        env = wrappers.Monitor(gym.make(self._env_name), self._log_dir / 'video',
-                               force=True, video_callable=lambda x: True)
-        is_end = False
-        time_step = 0
-        current_obs = np.array([env.reset()])
+            while not is_end:
+                time_step += 1
+                actions, _ = self._agent.predict_action(current_obs, is_deterministic=True)
+                steps = env.step(actions[0])
+                current_obs = np.array([steps[0]])
+                is_done_gym = steps[2]
+                is_maximum_number_of_steps_reached = self._max_steps_in_episode is not None\
+                    and self._max_steps_in_episode == time_step
 
-        while not is_end:
-            time_step += 1
-            actions, _ = self._agent.predict_action(current_obs, is_deterministic=True)
-            steps = env.step(actions[0])
-            current_obs = np.array([steps[0]])
-            is_done_gym = steps[2]
-            is_maximum_number_of_steps_reached = self._max_steps_in_episode is not None\
-                and self._max_steps_in_episode == time_step
+                is_end = is_done_gym or is_maximum_number_of_steps_reached
 
-            is_end = is_done_gym or is_maximum_number_of_steps_reached
-
-        env.close()
+            env.close()
+            logging.info(f"saved video in {str(self._log_dir / f'video-{self._time_step}')}")
+        except Exception as e:
+            logging.error(f"Error while recording the video. Make sure you've got proper drivers"
+                          f"and libraries installed (i.e ffmpeg). Error message:\n {e}")
 
     def _is_time_to_evaluate(self):
         return self._evaluate_time_steps_interval != -1 and self._time_step >= self._next_evaluation_timestamp
+
+    def _is_time_to_record(self):
+        return self._record_time_steps is not None and self._time_step >= self._next_record_timestamp
 
     def _measure_time(self):
         with tf.name_scope('acer'):
