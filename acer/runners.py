@@ -75,7 +75,8 @@ class Runner:
     def __init__(self, environment_name: str, algorithm: str = 'acer', algorithm_parameters: Optional[dict] = None,
                  num_parallel_envs: int = 5, evaluate_time_steps_interval: int = 1500,
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
-                 record: bool = True, experiment_name: str = None, asynchronous: bool = True):
+                 record: bool = True, experiment_name: str = None, asynchronous: bool = True,
+                 log_tensorboard: bool = True, do_checkpoint: bool = True):
         """Trains and evaluates the agent.
 
         Args:
@@ -90,6 +91,8 @@ class Runner:
             max_time_steps: maximum number of training time steps
             record: True if video should be recorded after training
             asynchronous: True to use concurrent envs
+            log_tensorboard: True to create TensorBoard logs
+            do_checkpoint: True to save checkpoints over the training
         """
         self._elapsed_time_measure = 0
         self._time_step = 0
@@ -99,6 +102,8 @@ class Runner:
         self._evaluate_time_steps_interval = evaluate_time_steps_interval
         self._num_evaluation_runs = num_evaluation_runs
         self._max_time_steps = max_time_steps
+        self._log_tensorboard = log_tensorboard
+        self._do_checkpoint = do_checkpoint
         self._env_name = environment_name
         if experiment_name:
             self._log_dir = Path(
@@ -122,8 +127,9 @@ class Runner:
         dummy_env = self._env.env_fns[0]()
         self._max_steps_in_episode = dummy_env.spec.max_episode_steps
 
-        tensor_board_writer = tf.summary.create_file_writer(str(self._log_dir))
-        tensor_board_writer.set_as_default()
+        if self._log_tensorboard:
+            tensor_board_writer = tf.summary.create_file_writer(str(self._log_dir))
+            tensor_board_writer.set_as_default()
 
         self._csv_logger = CSVLogger(
             self._log_dir / 'results.csv',
@@ -143,7 +149,10 @@ class Runner:
             if self._is_time_to_evaluate():
                 self._evaluate()
                 if self._time_step != 0:
-                    self._save_checkpoint()
+                    self._csv_logger.dump()
+                    logging.info(f"saved evaluation results")
+                    if self._do_checkpoint:
+                        self._save_checkpoint()
 
             start_time = time.time()
             experience = self._step()
@@ -301,6 +310,4 @@ class Runner:
 
         self._agent.save(checkpoint_dir / 'model')
 
-        self._csv_logger.dump()
-        logging.info(f"saved evaluation results")
         logging.info(f"saved checkpoint in '{str(checkpoint_dir)}'")
