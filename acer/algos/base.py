@@ -502,12 +502,12 @@ class BaseACERAgent(ABC):
             with tf.name_scope('observations'):
                 tf.summary.scalar(
                     f'obs_running_mean_norm',
-                    tf.linalg.global_norm(self._running_mean_obs.mean),
+                    tf.linalg.norm(self._running_mean_obs.mean),
                     step=self._tf_time_step
                 )
                 tf.summary.scalar(
                     f'obs_running_std_norm',
-                    tf.linalg.global_norm(tf.sqrt(self._running_mean_obs.var)),
+                    tf.linalg.norm(tf.sqrt(self._running_mean_obs.var)),
                     step=self._tf_time_step
                 )
 
