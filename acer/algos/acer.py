@@ -12,8 +12,6 @@ Wawrzyński, Paweł. "Real-time reinforcement learning by sequential actor–cri
 and experience replay." Neural Networks 22.10 (2009): 1484-1497.
 """
 from typing import Optional, List, Union, Dict, Tuple
-# import os
-# os.environ["CUDA_VISIBLE_DEVICES"]="-1"
 import gym
 import tensorflow as tf
 import numpy as np
@@ -72,6 +70,11 @@ class ACER(BaseACERAgent):
 
         See Equation (8) and Equation (9) in the paper (1).
         """
+
+        obs = self._process_observations(obs)
+        obs_next = self._process_observations(obs_next)
+        rewards = self._process_rewards(rewards)
+
         batches_indices = tf.RaggedTensor.from_row_lengths(values=tf.range(tf.reduce_sum(lengths)), row_lengths=lengths)
         values = tf.squeeze(self._critic.value(obs))
         values_next = tf.squeeze(self._critic.value(obs_next)) * (1.0 - tf.cast(dones, tf.dtypes.float32))

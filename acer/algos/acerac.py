@@ -216,6 +216,11 @@ class ACERAC(BaseACERAgent):
         """Performs single learning step. Padded tensors are used here, final results
          are masked out with zeros"""
 
+        obs = self._process_observations(obs)
+        obs_next = self._process_observations(obs_next)
+        prev_obs = self._process_observations(prev_obs)
+        rewards = self._process_rewards(rewards)
+
         # TODO whole (tiled) matrices in init
         is_prev_noise_mask = tf.cast(tf.expand_dims(is_prev_noise, 1), tf.float32)
 
@@ -398,17 +403,12 @@ class ACERAC(BaseACERAgent):
                 prev_actions[i, :] = batch['actions'][0]
                 prev_means[i, :] = batch['policies'][0]
 
-            obs = self._process_observations(obs)
-            obs_next = self._process_observations(obs_next)
-            prev_obs = self._process_observations(prev_obs)
-            rewards_flatten = self._process_rewards(rewards)
-
             yield (
                 obs,
                 obs_next,
                 actions,
                 means,
-                rewards_flatten,
+                rewards,
                 dones,
                 lengths,
                 is_prev_noise,

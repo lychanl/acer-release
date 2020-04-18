@@ -487,20 +487,35 @@ class BaseACERAgent(ABC):
         self._memory.put(steps)
 
         if self._running_mean_obs:
-            self._running_mean_obs.update(np.array([step[1] for step in steps]))
-            with tf.name_scope('observations'):
-                for i in range(self._running_mean_obs.mean.shape[0]):
-                    tf.summary.scalar(
-                        f'obs_{i}_running_mean', self._running_mean_obs.mean[i], step=self._tf_time_step
-                    )
-                    tf.summary.scalar(
-                        f'obs_{i}_running_std', np.sqrt(self._running_mean_obs.var[i]), step=self._tf_time_step
-                    )
+            obs = np.array([step[1] for step in steps])
+            self._update_obs_rms(obs)
         if self._running_mean_rewards:
-            with tf.name_scope('rewards'):
-                self._running_mean_rewards.update(np.expand_dims([step[2] for step in steps], axis=1))
+            rewards = np.array([step[2] for step in steps])
+            self._update_rewards_rms(rewards)
+
+    @tf.function(experimental_relax_shapes=True)
+    def _update_obs_rms(self, obs):
+        if self._running_mean_obs:
+            self._running_mean_obs.update(obs)
+            with tf.name_scope('observations'):
                 tf.summary.scalar(
-                    f'rewards_running_std', np.sqrt(self._running_mean_rewards.var[0]), step=self._tf_time_step
+                    f'obs_running_mean_norm',
+                    tf.linalg.global_norm(self._running_mean_obs.mean),
+                    step=self._tf_time_step
+                )
+                tf.summary.scalar(
+                    f'obs_running_std_norm',
+                    tf.linalg.global_norm(tf.sqrt(self._running_mean_obs.var)),
+                    step=self._tf_time_step
+                )
+
+    @tf.function(experimental_relax_shapes=True)
+    def _update_rewards_rms(self, rewards):
+        if self._running_mean_rewards:
+            self._running_mean_rewards.update(tf.expand_dims(tf.cast(rewards, dtype=tf.float32), axis=1))
+            with tf.name_scope('rewards'):
+                tf.summary.scalar(
+                    f'rewards_running_std', tf.sqrt(self._running_mean_rewards.var[0]), step=self._tf_time_step
                 )
 
     def predict_action(self, observations: np.array, is_deterministic: bool = False) \
@@ -531,11 +546,7 @@ class BaseACERAgent(ABC):
 
             lengths = [len(batch[0]['observations']) for batch in offline_batch]
 
-            obs_flatten = self._process_observations(obs_flatten)
-            obs_next_flatten = self._process_observations(obs_next_flatten)
-            rewards_flatten = self._process_rewards(rewards_flatten)
-
-            first_obs = self._process_observations([batch[0]['observations'][0] for batch in offline_batch])
+            first_obs = [batch[0]['observations'][0] for batch in offline_batch]
             first_actions = [batch[0]['actions'][0] for batch in offline_batch]
 
             yield (
@@ -550,36 +561,36 @@ class BaseACERAgent(ABC):
                 lengths
             )
 
-    def _process_observations(self, observations: np.array) -> np.array:
+    def _process_observations(self, observations: tf.Tensor) -> tf.Tensor:
         """If standardization is turned on, observations are being standardized with running mean and variance.
         Additional clipping is used to prevent performance spikes."""
         if self._running_mean_obs:
-            centered = tf.cast(observations, dtype=tf.float32) - tf.cast(self._running_mean_obs.mean, dtype=tf.float32)
-            standardized = centered / tf.cast(tf.sqrt(self._running_mean_obs.var + 1e-8), dtype=tf.float32)
+            centered = observations - self._running_mean_obs.mean
+            standardized = centered / tf.sqrt(self._running_mean_obs.var + 1e-8)
             return tf.clip_by_value(
                 standardized,
-                tf.constant(-10.0),
-                tf.constant(10.0)
+                -10.0,
+                10.0
             )
         else:
             return observations
 
-    def _process_rewards(self, rewards: np.array) -> np.array:
+    def _process_rewards(self, rewards: tf.Tensor) -> tf.Tensor:
         """Rescales returns with standard deviation. Additional clipping is used to prevent performance spikes."""
         if self._rescale_rewards == 0:
             rewards = rewards / tf.sqrt(self._running_mean_rewards.var + 1e-8)
             if not self._limit_reward_tanh:
                 rewards = tf.clip_by_value(
                     rewards / tf.sqrt(self._running_mean_rewards.var + 1e-8),
-                    tf.constant(-5.0),
-                    tf.constant(5.0),
+                    -5.0,
+                    5.0
                 )
         elif self._rescale_rewards >= 0:
             rewards = rewards / self._rescale_rewards
-        
+
         if self._limit_reward_tanh:
             rewards = tf.tanh(rewards / self._limit_reward_tanh) * self._limit_reward_tanh
-        
+
         return rewards
 
     @abstractmethod
