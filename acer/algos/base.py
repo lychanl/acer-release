@@ -371,7 +371,8 @@ class BaseACERAgent(ABC):
                  actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999, actor_adam_epsilon: float = 1e-5,
                  critic_lr: float = 0.001, critic_adam_beta1: float = 0.9, critic_adam_beta2: float = 0.999,
                  critic_adam_epsilon: float = 1e-5, standardize_obs: bool = False, rescale_rewards: int = -1,
-                 limit_reward_tanh: float = 3., time_step: int = 1, gradient_norm: float = None, **kwargs):
+                 limit_reward_tanh: float = 3., time_step: int = 1, gradient_norm: float = None,
+                 gradient_norm_median_threshold: float = 4, **kwargs):
 
         self._tf_time_step = tf.Variable(
             initial_value=time_step, name='tf_time_step', dtype=tf.dtypes.int64, trainable=False
@@ -390,6 +391,7 @@ class BaseACERAgent(ABC):
         self._num_parallel_envs = num_parallel_envs
         self._limit_reward_tanh = limit_reward_tanh
         self._gradient_norm = gradient_norm
+        self._gradient_norm_median_threshold = gradient_norm_median_threshold
 
         self._actor_gradient_norm_median = tf.Variable(initial_value=1.0, trainable=False)
         self._critic_gradient_norm_median = tf.Variable(initial_value=1.0, trainable=False)
@@ -455,7 +457,7 @@ class BaseACERAgent(ABC):
         if self._gradient_norm == 0:
             grads_clipped, grads_norm = tf.clip_by_global_norm(
                 grads,
-                norm_variable * 4
+                norm_variable * self._gradient_norm_median_threshold
             )
             update_sign = tf.pow(
                 -1.0, tf.cast(tf.less(grads_norm, norm_variable), dtype=tf.float32)
