@@ -351,8 +351,7 @@ class GaussianActor(BaseActor):
         actions_probs = dist.prob(actions)
 
         with tf.name_scope('actor'):
-            for i in range(self.actions_dim):
-                tf.summary.scalar(f'batch_action_{i}_mean', tf.reduce_mean(actions[:, i]), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_action_mean', tf.reduce_mean(actions), step=self._tf_time_step)
 
         return actions, actions_probs
 

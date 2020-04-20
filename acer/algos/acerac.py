@@ -108,10 +108,9 @@ class NoiseGaussianActor(GaussianActor):
         actions = mean + noise
 
         with tf.name_scope('actor'):
-            for i in range(self.actions_dim):
-                tf.summary.scalar(f'batch_action_{i}_mean', tf.reduce_mean(actions[:, i]), step=self._tf_time_step)
-                tf.summary.scalar(f'batch_action_{i}_min', tf.reduce_min(actions[:, i]), step=self._tf_time_step)
-                tf.summary.scalar(f'batch_action_{i}_max', tf.reduce_max(actions[:, i]), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_action_mean', tf.reduce_mean(actions), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_action_min', tf.reduce_min(actions), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_action_max', tf.reduce_max(actions), step=self._tf_time_step)
             tf.summary.scalar(f'batch_noise_mean', tf.reduce_mean(noise), step=self._tf_time_step)
             tf.summary.scalar(f'batch_noise_min', tf.reduce_min(noise), step=self._tf_time_step)
             tf.summary.scalar(f'batch_noise_max', tf.reduce_max(noise), step=self._tf_time_step)
