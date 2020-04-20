@@ -120,7 +120,8 @@ class NoiseGaussianActor(GaussianActor):
 
 class ACERAC(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
-                 critic_layers: Optional[Tuple[int]], b: float = 3, tau: int = 2, alpha: int = None, *args, **kwargs):
+                 critic_layers: Optional[Tuple[int]], b: float = 3, tau: int = 2, alpha: int = None,
+                 td_clip: float = None, *args, **kwargs):
         """Actor-Critic with Experience Replay and autocorrelated actions.
 
         Args:
@@ -138,6 +139,7 @@ class ACERAC(BaseACERAgent):
             self._alpha = 1 - (1 / tau)
         else:
             self._alpha = alpha
+        self._td_clip = td_clip
 
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
         self._b = b
@@ -278,10 +280,14 @@ class ACERAC(BaseACERAgent):
 
             values_first_repeated = tf.repeat(values_first, self._tau, 1)
             pows = tf.tile(tf.expand_dims(tf.range(1, self._tau + 1), axis=0), [actions.shape[0], 1])
-            d = truncated_density * (-values_first_repeated
-                                     + td_rewards
-                                     + tf.pow(self._gamma, tf.cast(pows, tf.float32)) * values_next)
-            d = d * tf.squeeze(zeros_mask)  # remove artifacts from cumsum and cumprod
+            td = (-values_first_repeated
+                  + td_rewards
+                  + tf.pow(self._gamma, tf.cast(pows, tf.float32)) * values_next)
+
+            if self._td_clip is not None:
+                td = tf.clip_by_value(td, -self._td_clip, self._td_clip)
+
+            d = td * truncated_density * tf.squeeze(zeros_mask)  # remove artifacts from cumsum and cumprod
 
             c_mu = tf.matmul(c_invs, tf.transpose(actions_mu_diff_current, [0, 1, 3, 2]))
             c_mu_d = c_mu * tf.expand_dims(tf.expand_dims(d, axis=2), 3)
@@ -307,6 +313,9 @@ class ACERAC(BaseACERAgent):
         grads_actor = tape.gradient(actor_loss, self._actor.trainable_variables)
         if self._gradient_norm is not None:
             grads_actor = self._clip_gradient(grads_actor, self._actor_gradient_norm_median, 'actor')
+        else:
+            with tf.name_scope('actor'):
+                tf.summary.scalar(f'gradient_norm', tf.linalg.global_norm(grads_actor), step=self._tf_time_step)
         grads_var_actor = zip(grads_actor, self._actor.trainable_variables)
         self._actor_optimizer.apply_gradients(grads_var_actor)
 
@@ -317,6 +326,9 @@ class ACERAC(BaseACERAgent):
         grads_critic = tape.gradient(critic_loss, self._critic.trainable_variables)
         if self._gradient_norm is not None:
             grads_critic = self._clip_gradient(grads_critic, self._critic_gradient_norm_median, 'critic')
+        else:
+            with tf.name_scope('critic'):
+                tf.summary.scalar(f'gradient_norm', tf.linalg.global_norm(grads_critic), step=self._tf_time_step)
         grads_var_critic = zip(grads_critic, self._critic.trainable_variables)
         self._critic_optimizer.apply_gradients(grads_var_critic)
 

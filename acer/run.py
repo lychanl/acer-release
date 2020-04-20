@@ -60,6 +60,8 @@ parser.add_argument('--rescale_rewards', help='-1 to turn rescaling off, 0 to re
 parser.add_argument('--limit_reward_tanh', help='limits reward to [-value, value] using tanh function'
                                                 '0 to disable',
                     type=float, default=None)
+parser.add_argument('--td_clip', help='Temporal difference clipping threshold (ACERAC only)',
+                    type=float, default=None)
 parser.add_argument('--gradient_norm', help='Global gradient clip norm, 0 to use learned median of the gradient',
                     type=float, default=None)
 parser.add_argument('--gradient_norm_median_threshold', help='Number of medians used to clip gradients by their norm',
