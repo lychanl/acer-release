@@ -121,7 +121,7 @@ class NoiseGaussianActor(GaussianActor):
 class ACERAC(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Optional[Tuple[int]], b: float = 3, tau: int = 2, alpha: int = None,
-                 td_clip: float = None, *args, **kwargs):
+                 td_clip: float = None, use_normalized_density_ratio: bool = False, *args, **kwargs):
         """Actor-Critic with Experience Replay and autocorrelated actions.
 
         Args:
@@ -143,6 +143,8 @@ class ACERAC(BaseACERAgent):
 
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
         self._b = b
+
+        self._use_normalized_density_ratio = use_normalized_density_ratio
 
         self._cov_matrix = tf.linalg.diag(tf.square(tf.exp(self._actor.log_std)))
 
@@ -264,17 +266,19 @@ class ACERAC(BaseACERAgent):
                 axis=2
             )
 
-            exp_current = tf.matmul(
-                tf.matmul(actions_mu_diff_current, c_invs),
-                tf.transpose(actions_mu_diff_current, [0, 1, 3, 2])
-            )
-            exp_old = tf.matmul(
-                tf.matmul(actions_mu_diff_old, c_invs),
-                tf.transpose(actions_mu_diff_old, [0, 1, 3, 2])
-            )
-            density_ratio = tf.squeeze(tf.exp(-0.5 * exp_current + 0.5 * exp_old))
+            if self._use_normalized_density_ratio:
+                density_ratio = self._compute_normalized_density_ratio(
+                    actions_mu_diff_current, actions_mu_diff_old, c_invs
+                )
+            else:
+                density_ratio = self._compute_soft_truncated_density_ratio(
+                    actions_mu_diff_current, actions_mu_diff_old, c_invs
+                )
 
-            truncated_density = tf.tanh(density_ratio / self._b) * self._b
+            with tf.name_scope('acerac'):
+                tf.summary.scalar('mean_density_ratio', tf.reduce_mean(density_ratio), step=self._tf_time_step)
+                tf.summary.scalar('max_density_ratio', tf.reduce_max(density_ratio), step=self._tf_time_step)
+
             gamma_coeffs = tf.math.cumprod(tf.ones_like(rewards) * self._gamma, exclusive=True, axis=1)
             td_rewards = tf.math.cumsum(rewards * gamma_coeffs, axis=1)
 
@@ -287,7 +291,7 @@ class ACERAC(BaseACERAgent):
             if self._td_clip is not None:
                 td = tf.clip_by_value(td, -self._td_clip, self._td_clip)
 
-            d = td * truncated_density * tf.squeeze(zeros_mask)  # remove artifacts from cumsum and cumprod
+            d = td * density_ratio * tf.squeeze(zeros_mask)  # remove artifacts from cumsum and cumprod
 
             c_mu = tf.matmul(c_invs, tf.transpose(actions_mu_diff_current, [0, 1, 3, 2]))
             c_mu_d = c_mu * tf.expand_dims(tf.expand_dims(d, axis=2), 3)
@@ -335,6 +339,39 @@ class ACERAC(BaseACERAgent):
         with tf.name_scope('critic'):
             tf.summary.scalar(f'batch_critic_loss', critic_loss, step=self._tf_time_step)
             tf.summary.scalar(f'batch_value_mean', tf.reduce_mean(values), step=self._tf_time_step)
+
+    def _compute_soft_truncated_density_ratio(
+            self, actions_mu_diff_current: tf.Tensor, actions_mu_diff_old: tf.Tensor, c_invs: tf.Tensor
+    ):
+        exp_current = tf.matmul(
+            tf.matmul(actions_mu_diff_current, c_invs),
+            tf.transpose(actions_mu_diff_current, [0, 1, 3, 2])
+        )
+        exp_old = tf.matmul(
+            tf.matmul(actions_mu_diff_old, c_invs),
+            tf.transpose(actions_mu_diff_old, [0, 1, 3, 2])
+        )
+        density_ratio = tf.squeeze(tf.exp(-0.5 * exp_current + 0.5 * exp_old))
+        return tf.tanh(density_ratio / self._b) * self._b
+
+    def _compute_normalized_density_ratio(
+            self, actions_mu_diff_current: tf.Tensor, actions_mu_diff_old: tf.Tensor, c_invs: tf.Tensor
+    ):
+        exp_current = tf.matmul(
+            tf.matmul(actions_mu_diff_current, c_invs),
+            tf.transpose(actions_mu_diff_current, [0, 1, 3, 2])
+        )
+        exp_old = tf.matmul(
+            tf.matmul(actions_mu_diff_old, c_invs),
+            tf.transpose(actions_mu_diff_old, [0, 1, 3, 2])
+        )
+        noise_diff = actions_mu_diff_current - actions_mu_diff_old
+        exp_kappa = tf.matmul(
+            tf.matmul(noise_diff, c_invs),
+            tf.transpose(noise_diff, [0, 1, 3, 2])
+        )
+        density_ratio = tf.squeeze(tf.exp(-0.5 * exp_current + 0.5 * exp_old - exp_kappa))
+        return density_ratio
 
     def _get_prev_noise(self, actions: tf.Tensor, is_prev_noise_mask: tf.Tensor, prev_actions: tf.Tensor,
                         prev_means: tf.Tensor, prev_obs: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:

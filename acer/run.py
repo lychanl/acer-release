@@ -62,6 +62,8 @@ parser.add_argument('--limit_reward_tanh', help='limits reward to [-value, value
                     type=float, default=None)
 parser.add_argument('--td_clip', help='Temporal difference clipping threshold (ACERAC only)',
                     type=float, default=None)
+parser.add_argument('--use_normalized_density_ratio', help='True to use ',
+                    action='store_true')
 parser.add_argument('--gradient_norm', help='Global gradient clip norm, 0 to use learned median of the gradient',
                     type=float, default=None)
 parser.add_argument('--gradient_norm_median_threshold', help='Number of medians used to clip gradients by their norm',
