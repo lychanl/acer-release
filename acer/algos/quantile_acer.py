@@ -176,7 +176,7 @@ class QACER(BaseACERAgent):
         if self._kappa < 0.:
             loss1_gradient_parts = u
         elif self._kappa > 0.:
-            loss1_gradient_parts = tf.abs(tau - tf.cast(tf.less(u, 0), tf.float32)) * tf.where(tf.abs(u) < self._kappa, u, self._kappa * tf.sign(u))
+            loss1_gradient_parts = tf.abs(tau - tf.cast(tf.less(u, 0), tf.float32)) * tf.where(tf.abs(u) < self._kappa, u / self._kappa, tf.sign(u))
         else:
             loss1_gradient_parts = (tau - tf.cast(tf.less(u, 0), tf.float32))
         loss1_gradient = tf.reduce_mean(loss1_gradient_parts, axis=1)
