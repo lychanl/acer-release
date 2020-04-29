@@ -131,6 +131,10 @@ class QACER(BaseACERAgent):
 
         See Equation (8) and Equation (9) in the paper (1).
         """
+        obs = self._process_observations(obs)
+        obs_next = self._process_observations(obs_next)
+        rewards = self._process_rewards(rewards)
+
         batches_indices = tf.RaggedTensor.from_row_lengths(values=tf.range(tf.reduce_sum(lengths)), row_lengths=lengths)
         values = self._critic.value(obs)
         values_next = self._critic.value(obs_next) * tf.expand_dims((1.0 - tf.cast(dones, tf.dtypes.float32)), axis=1)

@@ -267,7 +267,8 @@ class Runner:
         )
 
     def record_video(self):
-        self._next_record_timestamp += self._record_time_steps
+        if self._record_time_steps:
+            self._next_record_timestamp += self._record_time_steps
         logging.info(f"saving video...")
         try:
             env = wrappers.Monitor(gym.make(self._env_name), self._log_dir / f'video-{self._time_step}',

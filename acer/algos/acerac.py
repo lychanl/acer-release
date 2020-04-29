@@ -108,10 +108,9 @@ class NoiseGaussianActor(GaussianActor):
         actions = mean + noise
 
         with tf.name_scope('actor'):
-            for i in range(self.actions_dim):
-                tf.summary.scalar(f'batch_action_{i}_mean', tf.reduce_mean(actions[:, i]), step=self._tf_time_step)
-                tf.summary.scalar(f'batch_action_{i}_min', tf.reduce_min(actions[:, i]), step=self._tf_time_step)
-                tf.summary.scalar(f'batch_action_{i}_max', tf.reduce_max(actions[:, i]), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_action_mean', tf.reduce_mean(actions), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_action_min', tf.reduce_min(actions), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_action_max', tf.reduce_max(actions), step=self._tf_time_step)
             tf.summary.scalar(f'batch_noise_mean', tf.reduce_mean(noise), step=self._tf_time_step)
             tf.summary.scalar(f'batch_noise_min', tf.reduce_min(noise), step=self._tf_time_step)
             tf.summary.scalar(f'batch_noise_max', tf.reduce_max(noise), step=self._tf_time_step)
@@ -121,7 +120,8 @@ class NoiseGaussianActor(GaussianActor):
 
 class ACERAC(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
-                 critic_layers: Optional[Tuple[int]], b: float = 3, tau: int = 2, alpha: int = None, *args, **kwargs):
+                 critic_layers: Optional[Tuple[int]], b: float = 3, tau: int = 2, alpha: int = None,
+                 td_clip: float = None, use_normalized_density_ratio: bool = False, *args, **kwargs):
         """Actor-Critic with Experience Replay and autocorrelated actions.
 
         Args:
@@ -139,9 +139,12 @@ class ACERAC(BaseACERAgent):
             self._alpha = 1 - (1 / tau)
         else:
             self._alpha = alpha
+        self._td_clip = td_clip
 
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
         self._b = b
+
+        self._use_normalized_density_ratio = use_normalized_density_ratio
 
         self._cov_matrix = tf.linalg.diag(tf.square(tf.exp(self._actor.log_std)))
 
@@ -216,6 +219,11 @@ class ACERAC(BaseACERAgent):
         """Performs single learning step. Padded tensors are used here, final results
          are masked out with zeros"""
 
+        obs = self._process_observations(obs)
+        obs_next = self._process_observations(obs_next)
+        prev_obs = self._process_observations(prev_obs)
+        rewards = self._process_rewards(rewards)
+
         # TODO whole (tiled) matrices in init
         is_prev_noise_mask = tf.cast(tf.expand_dims(is_prev_noise, 1), tf.float32)
 
@@ -258,26 +266,32 @@ class ACERAC(BaseACERAgent):
                 axis=2
             )
 
-            exp_current = tf.matmul(
-                tf.matmul(actions_mu_diff_current, c_invs),
-                tf.transpose(actions_mu_diff_current, [0, 1, 3, 2])
-            )
-            exp_old = tf.matmul(
-                tf.matmul(actions_mu_diff_old, c_invs),
-                tf.transpose(actions_mu_diff_old, [0, 1, 3, 2])
-            )
-            density_ratio = tf.squeeze(tf.exp(-0.5 * exp_current + 0.5 * exp_old))
+            if self._use_normalized_density_ratio:
+                density_ratio = self._compute_normalized_density_ratio(
+                    actions_mu_diff_current, actions_mu_diff_old, c_invs
+                )
+            else:
+                density_ratio = self._compute_soft_truncated_density_ratio(
+                    actions_mu_diff_current, actions_mu_diff_old, c_invs
+                )
 
-            truncated_density = tf.tanh(density_ratio / self._b) * self._b
+            with tf.name_scope('acerac'):
+                tf.summary.scalar('mean_density_ratio', tf.reduce_mean(density_ratio), step=self._tf_time_step)
+                tf.summary.scalar('max_density_ratio', tf.reduce_max(density_ratio), step=self._tf_time_step)
+
             gamma_coeffs = tf.math.cumprod(tf.ones_like(rewards) * self._gamma, exclusive=True, axis=1)
             td_rewards = tf.math.cumsum(rewards * gamma_coeffs, axis=1)
 
             values_first_repeated = tf.repeat(values_first, self._tau, 1)
             pows = tf.tile(tf.expand_dims(tf.range(1, self._tau + 1), axis=0), [actions.shape[0], 1])
-            d = truncated_density * (-values_first_repeated
-                                     + td_rewards
-                                     + tf.pow(self._gamma, tf.cast(pows, tf.float32)) * values_next)
-            d = d * tf.squeeze(zeros_mask)  # remove artifacts from cumsum and cumprod
+            td = (-values_first_repeated
+                  + td_rewards
+                  + tf.pow(self._gamma, tf.cast(pows, tf.float32)) * values_next)
+
+            if self._td_clip is not None:
+                td = tf.clip_by_value(td, -self._td_clip, self._td_clip)
+
+            d = td * density_ratio * tf.squeeze(zeros_mask)  # remove artifacts from cumsum and cumprod
 
             c_mu = tf.matmul(c_invs, tf.transpose(actions_mu_diff_current, [0, 1, 3, 2]))
             c_mu_d = c_mu * tf.expand_dims(tf.expand_dims(d, axis=2), 3)
@@ -303,6 +317,9 @@ class ACERAC(BaseACERAgent):
         grads_actor = tape.gradient(actor_loss, self._actor.trainable_variables)
         if self._gradient_norm is not None:
             grads_actor = self._clip_gradient(grads_actor, self._actor_gradient_norm_median, 'actor')
+        else:
+            with tf.name_scope('actor'):
+                tf.summary.scalar(f'gradient_norm', tf.linalg.global_norm(grads_actor), step=self._tf_time_step)
         grads_var_actor = zip(grads_actor, self._actor.trainable_variables)
         self._actor_optimizer.apply_gradients(grads_var_actor)
 
@@ -313,12 +330,48 @@ class ACERAC(BaseACERAgent):
         grads_critic = tape.gradient(critic_loss, self._critic.trainable_variables)
         if self._gradient_norm is not None:
             grads_critic = self._clip_gradient(grads_critic, self._critic_gradient_norm_median, 'critic')
+        else:
+            with tf.name_scope('critic'):
+                tf.summary.scalar(f'gradient_norm', tf.linalg.global_norm(grads_critic), step=self._tf_time_step)
         grads_var_critic = zip(grads_critic, self._critic.trainable_variables)
         self._critic_optimizer.apply_gradients(grads_var_critic)
 
         with tf.name_scope('critic'):
             tf.summary.scalar(f'batch_critic_loss', critic_loss, step=self._tf_time_step)
             tf.summary.scalar(f'batch_value_mean', tf.reduce_mean(values), step=self._tf_time_step)
+
+    def _compute_soft_truncated_density_ratio(
+            self, actions_mu_diff_current: tf.Tensor, actions_mu_diff_old: tf.Tensor, c_invs: tf.Tensor
+    ):
+        exp_current = tf.matmul(
+            tf.matmul(actions_mu_diff_current, c_invs),
+            tf.transpose(actions_mu_diff_current, [0, 1, 3, 2])
+        )
+        exp_old = tf.matmul(
+            tf.matmul(actions_mu_diff_old, c_invs),
+            tf.transpose(actions_mu_diff_old, [0, 1, 3, 2])
+        )
+        density_ratio = tf.squeeze(tf.exp(-0.5 * exp_current + 0.5 * exp_old))
+        return tf.tanh(density_ratio / self._b) * self._b
+
+    def _compute_normalized_density_ratio(
+            self, actions_mu_diff_current: tf.Tensor, actions_mu_diff_old: tf.Tensor, c_invs: tf.Tensor
+    ):
+        exp_current = tf.matmul(
+            tf.matmul(actions_mu_diff_current, c_invs),
+            tf.transpose(actions_mu_diff_current, [0, 1, 3, 2])
+        )
+        exp_old = tf.matmul(
+            tf.matmul(actions_mu_diff_old, c_invs),
+            tf.transpose(actions_mu_diff_old, [0, 1, 3, 2])
+        )
+        noise_diff = actions_mu_diff_current - actions_mu_diff_old
+        exp_kappa = tf.matmul(
+            tf.matmul(noise_diff, c_invs),
+            tf.transpose(noise_diff, [0, 1, 3, 2])
+        )
+        density_ratio = tf.squeeze(tf.exp(-0.5 * exp_current + 0.5 * exp_old - exp_kappa))
+        return density_ratio
 
     def _get_prev_noise(self, actions: tf.Tensor, is_prev_noise_mask: tf.Tensor, prev_actions: tf.Tensor,
                         prev_means: tf.Tensor, prev_obs: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
@@ -398,17 +451,12 @@ class ACERAC(BaseACERAgent):
                 prev_actions[i, :] = batch['actions'][0]
                 prev_means[i, :] = batch['policies'][0]
 
-            obs = self._process_observations(obs)
-            obs_next = self._process_observations(obs_next)
-            prev_obs = self._process_observations(prev_obs)
-            rewards_flatten = self._process_rewards(rewards)
-
             yield (
                 obs,
                 obs_next,
                 actions,
                 means,
-                rewards_flatten,
+                rewards,
                 dones,
                 lengths,
                 is_prev_noise,
