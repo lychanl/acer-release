@@ -55,7 +55,7 @@ class ACER(BaseACERAgent):
         That means at the beginning experience replay intensity increases linearly with number of samples
         collected till c value is reached.
         """
-        experience_replay_iterations = min([round(self._c0 * self._time_step / self._num_parallel_envs), self._c])
+        experience_replay_iterations = min([round(self._c0 * self._time_step), self._c])
 
         for batch in self._data_loader.take(experience_replay_iterations):
             self._learn_from_experience_batch(*batch)
