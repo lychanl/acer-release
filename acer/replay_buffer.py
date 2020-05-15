@@ -30,6 +30,7 @@ class ReplayBuffer:
 
         self._actions = self._init_field(action_spec)
         self._obs = self._init_field(obs_spec)
+        self._obs_next = self._init_field(obs_spec)
         self._rewards = self._init_field(BufferFieldSpec((), np.float32))
         self._policies = self._init_field(BufferFieldSpec((), np.float32))
         self._dones = self._init_field(BufferFieldSpec((), bool))
@@ -39,7 +40,7 @@ class ReplayBuffer:
         shape = (self._max_size, *field_spec.shape)
         return np.zeros(shape=shape, dtype=field_spec.dtype)
 
-    def put(self, action: Union[int, float, list], observation: np.array,
+    def put(self, action: Union[int, float, list], observation: np.array, next_observation: np.array,
             reward: float, policy: float, is_done: bool,
             end: bool):
         """Stores one experience tuple in the buffer.
@@ -47,6 +48,7 @@ class ReplayBuffer:
         Args:
             action: performed action
             observation: state in which action was performed
+            next_observation: next state
             reward: earned reward
             policy: probability/probability density of executing stored action
             is_done: True if episode ended and was not terminated by reaching
@@ -56,6 +58,7 @@ class ReplayBuffer:
         """
         self._actions[self._pointer] = action
         self._obs[self._pointer] = observation
+        self._obs_next[self._pointer] = next_observation
         self._rewards[self._pointer] = reward
         self._policies[self._pointer] = policy
         self._dones[self._pointer] = is_done
@@ -99,21 +102,9 @@ class ReplayBuffer:
         return batch
 
     def _fetch_batch(self, end_index: int, sample_index: int, start_index: int) -> Tuple[Dict[str, np.array], int]:
-        start_index_next = start_index + 1
-        end_index_next = end_index + 1
-
-        if start_index_next == self._max_size:
-            start_index_next = 0
-
-        if end_index_next == self._max_size + 1:
-            end_index_next = 1
 
         middle_index = sample_index - start_index \
             if sample_index >= start_index else self._max_size - start_index + sample_index
-        if start_index_next >= end_index_next:
-            buffer_slice_next = np.r_[0: end_index_next, start_index_next: self._max_size]
-        else:
-            buffer_slice_next = np.r_[start_index_next: end_index_next]
         if start_index >= end_index:
             buffer_slice = np.r_[0: end_index, start_index: self._max_size]
         else:
@@ -122,7 +113,7 @@ class ReplayBuffer:
         actions = self._actions[buffer_slice]
         observations = self._obs[buffer_slice]
         rewards = self._rewards[buffer_slice]
-        next_observations = self._obs[buffer_slice_next]
+        next_observations = self._obs_next[buffer_slice]
         policies = self._policies[buffer_slice]
         done = self._dones[buffer_slice]
         end = self._ends[buffer_slice]
