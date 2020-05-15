@@ -135,6 +135,7 @@ class BaseCritic(ABC, tf.keras.Model):
     def call(self, inputs, training=None, mask=None):
         return self.value(inputs)
 
+    @tf.function
     def value(self, observations: tf.Tensor,  **kwargs) -> tf.Tensor:
         """Calculates value function given observations batch
 
@@ -227,6 +228,7 @@ class CategoricalActor(BaseActor):
 
         return total_loss
 
+    @tf.function
     def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         # TODO: remove hardcoded '10' and '20'
         logits = tf.divide(self._forward(observations), 10)
@@ -236,6 +238,7 @@ class CategoricalActor(BaseActor):
         action_log_probs = tf.gather_nd(log_probs, actions, batch_dims=1)
         return action_probs, action_log_probs
 
+    @tf.function
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
 
         # TODO: remove hardcoded '10' and '20'
@@ -251,6 +254,7 @@ class CategoricalActor(BaseActor):
             tf.summary.histogram('action', actions, step=self._tf_time_step)
         return tf.squeeze(actions, axis=[1]), actions_probs
 
+    @tf.function
     def act_deterministic(self, observations: np.array, **kwargs) -> tf.Tensor:
         """Performs most probable action"""
         logits = tf.divide(self._forward(observations), 10)
@@ -330,6 +334,7 @@ class GaussianActor(BaseActor):
 
         return total_loss
 
+    @tf.function
     def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         mean = self._forward(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
@@ -339,6 +344,7 @@ class GaussianActor(BaseActor):
 
         return dist.prob(actions), dist.log_prob(actions)
 
+    @tf.function
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
         mean = self._forward(observations)
 
@@ -355,6 +361,7 @@ class GaussianActor(BaseActor):
 
         return actions, actions_probs
 
+    @tf.function
     def act_deterministic(self, observations: np.array, **kwargs) -> tf.Tensor:
         """Returns mean of the Gaussian"""
         mean = self._forward(observations)

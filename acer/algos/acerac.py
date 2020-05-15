@@ -84,6 +84,7 @@ class NoiseGaussianActor(GaussianActor):
         else:
             self._noise_init_mask = tf.cast(ends, dtype=tf.float32)
 
+    @tf.function
     def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         mean = self._forward(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
@@ -92,6 +93,7 @@ class NoiseGaussianActor(GaussianActor):
 
         return dist.prob(actions - mean), dist.log_prob(actions - mean)
 
+    @tf.function
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
         mean = self._forward(observations)
 
@@ -106,15 +108,6 @@ class NoiseGaussianActor(GaussianActor):
             self._noise_init_mask = tf.zeros_like(self._noise_init_mask)
 
         actions = mean + noise
-
-        with tf.name_scope('actor'):
-            tf.summary.scalar(f'batch_action_mean', tf.reduce_mean(actions), step=self._tf_time_step)
-            tf.summary.scalar(f'batch_action_min', tf.reduce_min(actions), step=self._tf_time_step)
-            tf.summary.scalar(f'batch_action_max', tf.reduce_max(actions), step=self._tf_time_step)
-            tf.summary.scalar(f'batch_noise_mean', tf.reduce_mean(noise), step=self._tf_time_step)
-            tf.summary.scalar(f'batch_noise_min', tf.reduce_min(noise), step=self._tf_time_step)
-            tf.summary.scalar(f'batch_noise_max', tf.reduce_max(noise), step=self._tf_time_step)
-
         return actions, mean
 
 

@@ -220,12 +220,6 @@ class Runner:
                 self._done_steps_in_a_episode[i] = 0
 
         self._current_obs = np.array(self._current_obs)
-
-        with tf.name_scope('rewards'):
-            tf.summary.scalar('mean_reward', np.mean(rewards), self._time_step)
-            tf.summary.scalar('max_reward', np.max(rewards), self._time_step)
-            tf.summary.scalar('min_reward', np.min(rewards), self._time_step)
-
         return experience
 
     def _evaluate(self):
