@@ -21,6 +21,7 @@ from algos.acerce import ACERCE
 from algos.pessimistic_acer import PACER
 from algos.representative_acer import RepresentativeACER
 from algos.quantile_acer import QACER
+from algos.qacerac import QACERAC
 from algos.weighted_acer import WeightedACER
 from logger import CSVLogger
 from utils import is_atari
@@ -40,6 +41,7 @@ ALGOS = {
     'pacer': PACER,
     'racer': RepresentativeACER,
     'qacer': QACER,
+    'qacerac': QACERAC,
     'wacer': WeightedACER
 }
 
