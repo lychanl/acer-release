@@ -1,3 +1,8 @@
+"""
+Sample usage:
+
+tools/refinder.py --logdir logs --algo qacer --env Pendulum-v0 --diff --params kappa=1.0 critic_lr=0.05
+"""
 import argparse
 import json
 import os
@@ -8,7 +13,7 @@ def check_name(fname, algo, env):
 
 
 def load_params(params_file_path):
-    with open(params_file_path) as file:
+    with open(params_file_path, mode='r') as file:
         return json.load(file)
 
 
