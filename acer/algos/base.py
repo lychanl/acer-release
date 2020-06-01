@@ -135,7 +135,6 @@ class BaseCritic(ABC, tf.keras.Model):
     def call(self, inputs, training=None, mask=None):
         return self.value(inputs)
 
-    @tf.function
     def value(self, observations: tf.Tensor,  **kwargs) -> tf.Tensor:
         """Calculates value function given observations batch
 
@@ -228,7 +227,6 @@ class CategoricalActor(BaseActor):
 
         return total_loss
 
-    @tf.function
     def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         # TODO: remove hardcoded '10' and '20'
         logits = tf.divide(self._forward(observations), 10)
@@ -238,7 +236,6 @@ class CategoricalActor(BaseActor):
         action_log_probs = tf.gather_nd(log_probs, actions, batch_dims=1)
         return action_probs, action_log_probs
 
-    @tf.function
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
 
         # TODO: remove hardcoded '10' and '20'
@@ -254,7 +251,6 @@ class CategoricalActor(BaseActor):
             tf.summary.histogram('action', actions, step=self._tf_time_step)
         return tf.squeeze(actions, axis=[1]), actions_probs
 
-    @tf.function
     def act_deterministic(self, observations: np.array, **kwargs) -> tf.Tensor:
         """Performs most probable action"""
         logits = tf.divide(self._forward(observations), 10)
@@ -334,7 +330,6 @@ class GaussianActor(BaseActor):
 
         return total_loss
 
-    @tf.function
     def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         mean = self._forward(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
@@ -344,7 +339,6 @@ class GaussianActor(BaseActor):
 
         return dist.prob(actions), dist.log_prob(actions)
 
-    @tf.function
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
         mean = self._forward(observations)
 
@@ -361,7 +355,6 @@ class GaussianActor(BaseActor):
 
         return actions, actions_probs
 
-    @tf.function
     def act_deterministic(self, observations: np.array, **kwargs) -> tf.Tensor:
         """Returns mean of the Gaussian"""
         mean = self._forward(observations)
@@ -374,7 +367,9 @@ class BaseACERAgent(ABC):
                  critic_layers: Tuple[int], gamma: int = 0.99, actor_beta_penalty: float = 0.001,
                  std: Optional[float] = None, memory_size: int = 1e6, num_parallel_envs: int = 10,
                  batches_per_env: int = 5, c: int = 10, c0: float = 0.3, actor_lr: float = 0.001,
-                 critic_lr: float = 0.001, standardize_obs: bool = False, rescale_rewards: int = -1,
+                 actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999, actor_adam_epsilon: float = 1e-5,
+                 critic_lr: float = 0.001, critic_adam_beta1: float = 0.9, critic_adam_beta2: float = 0.999,
+                 critic_adam_epsilon: float = 1e-5, standardize_obs: bool = False, rescale_rewards: int = -1,
                  limit_reward_tanh: float = 3., time_step: int = 1, gradient_norm: float = None,
                  gradient_norm_median_threshold: float = 4, **kwargs):
 
@@ -418,11 +413,17 @@ class BaseACERAgent(ABC):
         ).prefetch(2)
 
         self._actor_optimizer = tf.keras.optimizers.Adam(
-            lr=actor_lr
+            lr=actor_lr,
+            beta_1=actor_adam_beta1,
+            beta_2=actor_adam_beta2,
+            epsilon=actor_adam_epsilon
         )
 
         self._critic_optimizer = tf.keras.optimizers.Adam(
-            lr=critic_lr
+            lr=critic_lr,
+            beta_1=critic_adam_beta1,
+            beta_2=critic_adam_beta2,
+            epsilon=critic_adam_epsilon
         )
 
         if standardize_obs:
