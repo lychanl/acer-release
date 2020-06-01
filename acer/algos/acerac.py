@@ -84,7 +84,6 @@ class NoiseGaussianActor(GaussianActor):
         else:
             self._noise_init_mask = tf.cast(ends, dtype=tf.float32)
 
-    @tf.function
     def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         mean = self._forward(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
@@ -93,7 +92,6 @@ class NoiseGaussianActor(GaussianActor):
 
         return dist.prob(actions - mean), dist.log_prob(actions - mean)
 
-    @tf.function
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
         mean = self._forward(observations)
 
