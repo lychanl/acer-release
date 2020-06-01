@@ -374,7 +374,9 @@ class BaseACERAgent(ABC):
                  critic_layers: Tuple[int], gamma: int = 0.99, actor_beta_penalty: float = 0.001,
                  std: Optional[float] = None, memory_size: int = 1e6, num_parallel_envs: int = 10,
                  batches_per_env: int = 5, c: int = 10, c0: float = 0.3, actor_lr: float = 0.001,
-                 critic_lr: float = 0.001, standardize_obs: bool = False, rescale_rewards: int = -1,
+                 actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999, actor_adam_epsilon: float = 1e-5,
+                 critic_lr: float = 0.001, critic_adam_beta1: float = 0.9, critic_adam_beta2: float = 0.999,
+                 critic_adam_epsilon: float = 1e-5, standardize_obs: bool = False, rescale_rewards: int = -1,
                  limit_reward_tanh: float = 3., time_step: int = 1, gradient_norm: float = None,
                  gradient_norm_median_threshold: float = 4, **kwargs):
 
@@ -418,11 +420,17 @@ class BaseACERAgent(ABC):
         ).prefetch(2)
 
         self._actor_optimizer = tf.keras.optimizers.Adam(
-            lr=actor_lr
+            lr=actor_lr,
+            beta_1=actor_adam_beta1,
+            beta_2=actor_adam_beta2,
+            epsilon=actor_adam_epsilon
         )
 
         self._critic_optimizer = tf.keras.optimizers.Adam(
-            lr=critic_lr
+            lr=critic_lr,
+            beta_1=critic_adam_beta1,
+            beta_2=critic_adam_beta2,
+            epsilon=critic_adam_epsilon
         )
 
         if standardize_obs:
