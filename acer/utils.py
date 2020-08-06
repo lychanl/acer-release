@@ -2,10 +2,13 @@ import pickle
 from functools import wraps
 from time import time
 from typing import Tuple, List, Union, Dict
+import importlib
 
 import gym
 import numpy as np
 import tensorflow as tf
+import pybullet_envs  # make sure bullet envs are registered
+from pybullet_envs.scene_stadium import SinglePlayerStadiumScene
 
 
 def normc_initializer():
@@ -49,6 +52,8 @@ def is_atari(env_id: str) -> bool:
         True if its is Atari env
     """
     env_spec = [env for env in gym.envs.registry.all() if env.id == env_id][0]
+    if not isinstance(env_spec.entry_point, str):
+        return False
     env_type = env_spec.entry_point.split(':')[0].split('.')[-1]
     return env_type == 'atari'
 
@@ -125,3 +130,35 @@ def timing(f):
         print('func:%r took: %2.4f sec' % (f.__name__, te-ts))
         return result
     return wrap
+
+
+def registerDTChangedEnv(base_env_name, timesteps_increase):
+    base_spec = gym.envs.registry.env_specs[base_env_name]
+
+    mod_name, attr_name = base_spec.entry_point.split(":")
+    mod = importlib.import_module(mod_name)
+    base_class = getattr(mod, attr_name)
+
+    class TimeStepChangedEnv(base_class):
+        def create_single_player_scene(self, bullet_client):
+            self.stadium_scene = SinglePlayerStadiumScene(bullet_client,
+                                                        gravity=9.8,
+                                                        timestep=0.0165 / timesteps_increase / 4,
+                                                        frame_skip=4)
+            return self.stadium_scene
+    
+    name = str.join('TS' + str(timesteps_increase) + '-', base_env_name.split('-'))
+
+    gym.envs.register(
+        name,
+        entry_point=TimeStepChangedEnv,
+        max_episode_steps=int(1000 * timesteps_increase),
+        reward_threshold=base_spec.reward_threshold,
+        nondeterministic=base_spec.nondeterministic,
+    )
+
+    return name
+
+
+def calculate_gamma(gamma0, timesteps_increase):
+    return gamma0 ** (1 / timesteps_increase)

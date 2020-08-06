@@ -1,9 +1,13 @@
 import argparse
 import signal
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="-1"
+
 import tensorflow as tf
 
 from runners import Runner, ALGOS
+from utils import calculate_gamma, registerDTChangedEnv
 
 parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
 parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer", choices=ALGOS)
@@ -88,6 +92,7 @@ parser.add_argument('--use_cpu', action='store_true',
                     help='True if CPU (instead of GPU) should be used')
 parser.add_argument('--synchronous', action='store_true',
                     help='True if not use asynchronous envs')
+parser.add_argument('--timesteps_increase', help='Timesteps per second increase. Affects gamma and max time steps', type=int, default=None)
 
 
 def main():
@@ -112,12 +117,20 @@ def main():
     log_dir = parameters.pop('log_dir')
     use_cpu = parameters.pop('use_cpu')
     synchronous = parameters.pop('synchronous')
+    env_name = cmd_parameters.env_name
+
+    timesteps_increase = parameters.pop('timesteps_increase')
+    if timesteps_increase:
+        parameters['gamma'] = calculate_gamma(parameters['gamma'], timesteps_increase)
+        env_name = registerDTChangedEnv(env_name, timesteps_increase)
+        max_time_steps *= timesteps_increase
+        evaluate_time_steps_interval *= timesteps_increase
 
     if use_cpu:
         tf.config.set_visible_devices([], 'GPU')
 
     runner = Runner(
-        environment_name=cmd_parameters.env_name,
+        environment_name=env_name,
         algorithm=algorithm,
         algorithm_parameters=parameters,
         num_parallel_envs=cmd_parameters.num_parallel_envs,
