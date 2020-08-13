@@ -47,9 +47,8 @@ class BaseActor(ABC, tf.keras.Model):
 
         if len(observations_space.shape) > 1:
             self._hidden_layers.extend(build_cnn_network())
-            self._hidden_layers.extend(build_mlp_network(layers_sizes=layers))
-        else:
-            self._hidden_layers.extend(build_mlp_network(layers_sizes=(observations_space.shape[0], ) + layers))
+        
+        self._hidden_layers.extend(build_mlp_network(layers_sizes=layers))
 
         self._hidden_layers.append(tf.keras.layers.Dense(actions_dim, kernel_initializer=utils.normc_initializer()))
 
@@ -125,9 +124,8 @@ class BaseCritic(ABC, tf.keras.Model):
         self._hidden_layers = []
         if len(observations_space.shape) > 1:
             self._hidden_layers.extend(build_cnn_network())
-            self._hidden_layers.extend(build_mlp_network(layers_sizes=layers))
-        else:
-            self._hidden_layers.extend(build_mlp_network(layers_sizes=(observations_space.shape[0], ) + layers))
+
+        self._hidden_layers.extend(build_mlp_network(layers_sizes=layers))
 
         self._v = tf.keras.layers.Dense(1, kernel_initializer=utils.normc_initializer())
         self._tf_time_step = tf_time_step

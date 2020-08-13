@@ -119,7 +119,7 @@ def main():
     synchronous = parameters.pop('synchronous')
     env_name = cmd_parameters.env_name
 
-    timesteps_increase = parameters.pop('timesteps_increase')
+    timesteps_increase = parameters.pop('timesteps_increase', None)
     if timesteps_increase:
         parameters['gamma'] = calculate_gamma(parameters['gamma'], timesteps_increase)
         env_name = registerDTChangedEnv(env_name, timesteps_increase)
