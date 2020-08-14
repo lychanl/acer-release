@@ -112,7 +112,8 @@ class NoiseGaussianActor(GaussianActor):
 class ACERAC(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Optional[Tuple[int]], b: float = 3, tau: int = 2, alpha: int = None,
-                 td_clip: float = None, use_normalized_density_ratio: bool = False, *args, **kwargs):
+                 td_clip: float = None, use_normalized_density_ratio: bool = False, use_v: bool = False,
+                 *args, **kwargs):
         """Actor-Critic with Experience Replay and autocorrelated actions.
 
         Args:
@@ -131,6 +132,7 @@ class ACERAC(BaseACERAgent):
         else:
             self._alpha = alpha
         self._td_clip = td_clip
+        self._use_q = not use_v
 
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
         self._b = b
@@ -188,7 +190,7 @@ class ACERAC(BaseACERAgent):
             )
 
     def _init_critic(self) -> Critic:
-        return Critic(self._observations_space, self._critic_layers, self._tf_time_step)
+        return Critic(self._observations_space, self._critic_layers, self._tf_time_step, use_additional_input=self._use_q)
 
     def save_experience(self, steps: List[
         Tuple[Union[int, float, list], np.array, np.array, np.array, bool, bool]
@@ -218,12 +220,29 @@ class ACERAC(BaseACERAgent):
         # TODO whole (tiled) matrices in init
         is_prev_noise_mask = tf.cast(tf.expand_dims(is_prev_noise, 1), tf.float32)
 
+        if self._use_q:
+            noise = actions - self._actor.act_deterministic(obs)
+            prev_noise = tf.where(
+                tf.expand_dims(is_prev_noise, 1),
+                prev_actions - self._actor.act_deterministic(prev_obs),
+                noise[:,0,:] / self._alpha
+            )
+
+            q_noise = tf.concat([
+                tf.concat([tf.expand_dims(prev_noise, 1), noise[:,:-1,:]], axis=1),
+                noise
+            ], axis=0)
+        else:
+            q_noise = None
+
+
         c_invs = self._get_c_invs(actions, is_prev_noise_mask)
         eta_repeated, mu_repeated = self._get_prev_noise(actions, is_prev_noise_mask, prev_actions, prev_means, prev_obs)
 
         with tf.GradientTape(persistent=True) as tape:
+            critic_out = self._critic.value(tf.concat([obs, obs_next], axis=0), additional_input=q_noise)
             means = self._actor.act_deterministic(obs)
-            values, values_next = tf.split(tf.squeeze(self._critic.value(tf.concat([obs, obs_next], axis=0))), 2)
+            values, values_next = tf.split(tf.squeeze(critic_out), 2)
             values_next = values_next * (1 - tf.cast(dones, tf.float32))
             values_first = tf.slice(values, [0, 0], [actions.shape[0], 1])
 

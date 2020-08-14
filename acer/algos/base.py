@@ -111,7 +111,7 @@ class BaseActor(ABC, tf.keras.Model):
 
 class BaseCritic(ABC, tf.keras.Model):
     def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]],
-                 tf_time_step: tf.Variable, *args, **kwargs):
+                 tf_time_step: tf.Variable, use_additional_input: bool = False, *args, **kwargs):
         """Value function approximation as MLP network neural network.
 
         Args:
@@ -119,32 +119,37 @@ class BaseCritic(ABC, tf.keras.Model):
             layers: list of hidden layers sizes, eg: for neural network with two layers with 10 and 20 hidden units
                 pass: [10, 20]
             tf_time_step: time step as TensorFlow variable, required for TensorBoard summaries
+            additional_input_shape: shape of additional input variables
         """
         super().__init__(*args, **kwargs)
         self._hidden_layers = []
         if len(observations_space.shape) > 1:
+            assert not use_additional_input
             self._hidden_layers.extend(build_cnn_network())
 
         self._hidden_layers.extend(build_mlp_network(layers_sizes=layers))
 
         self._v = tf.keras.layers.Dense(1, kernel_initializer=utils.normc_initializer())
         self._tf_time_step = tf_time_step
+        self._use_additional_input = use_additional_input
 
-    def call(self, inputs, training=None, mask=None):
-        return self.value(inputs)
+    def call(self, inputs, training=None, mask=None, additional_input=None):
+        return self.value(inputs, additional_input=additional_input)
 
-    def value(self, observations: tf.Tensor,  **kwargs) -> tf.Tensor:
+    def value(self, observations: tf.Tensor, additional_input: tf.Tensor=None, **kwargs) -> tf.Tensor:
         """Calculates value function given observations batch
 
         Args:
             observations: batch [batch_size, observations_dim] of observations vectors
 
+
         Returns:
             Tensor [batch_size, 1] with value function estimations
 
         """
-        x = self._hidden_layers[0](observations)
-        for layer in self._hidden_layers[1:]:
+        x = tf.concat([observations, additional_input], axis=-1) if self._use_additional_input else observations
+
+        for layer in self._hidden_layers:
             x = layer(x)
 
         value = self._v(x)
@@ -154,12 +159,12 @@ class BaseCritic(ABC, tf.keras.Model):
 
 class Critic(BaseCritic):
 
-    def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]], tf_time_step: tf.Variable, *args,
-                 **kwargs):
+    def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]], tf_time_step: tf.Variable,
+                 use_additional_input: bool = False, *args, **kwargs):
         """Basic Critic that outputs single value"""
-        super().__init__(observations_space, layers, tf_time_step, *args, **kwargs)
+        super().__init__(observations_space, layers, tf_time_step, *args, use_additional_input=use_additional_input, **kwargs)
 
-    def loss(self, observations: np.array, d: np.array) -> tf.Tensor:
+    def loss(self, observations: np.array, d: np.array, additional_input=None) -> tf.Tensor:
         """Computes Critic's loss.
 
         Args:
@@ -168,7 +173,7 @@ class Critic(BaseCritic):
                 the paper (1))
         """
 
-        value = self.value(observations)
+        value = self.value(observations, additional_input=additional_input)
         loss = tf.reduce_mean(-tf.math.multiply(value, d))
 
         with tf.name_scope('critic'):
