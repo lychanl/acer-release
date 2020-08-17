@@ -24,7 +24,7 @@ from algos.quantile_acer import QACER
 from algos.qacerac import QACERAC
 from algos.weighted_acer import WeightedACER
 from logger import CSVLogger
-from utils import is_atari
+from utils import is_atari, getPossiblyDTChangedEnvBuilder
 
 logging.basicConfig(
     level=logging.INFO,
@@ -63,10 +63,12 @@ def _get_env(env_id: str, num_parallel_envs: int, asynchronous: bool = True) -> 
             return wrappers.AtariPreprocessing(
                 gym.make(env_id),
             )
-        builders = [get_env_fn for _ in range(num_parallel_envs)]
-        env = gym.vector.AsyncVectorEnv(builders) if asynchronous else gym.vector.SyncVectorEnv(builders)
+        builder = get_env_fn
     else:
-        env = gym.vector.make(env_id, num_envs=num_parallel_envs, asynchronous=asynchronous)
+        builder = getPossiblyDTChangedEnvBuilder(env_id)
+    
+    builders = [builder for _ in range(num_parallel_envs)]
+    env = gym.vector.AsyncVectorEnv(builders) if asynchronous else gym.vector.SyncVectorEnv(builders)
     return env
 
 
@@ -129,7 +131,9 @@ class Runner:
         self._rewards = [[] for _ in range(self._n_envs)]
 
         dummy_env = self._env.env_fns[0]()
-        self._max_steps_in_episode = dummy_env.spec.max_episode_steps
+        self._max_steps_in_episode = dummy_env._max_episode_steps \
+            if isinstance(dummy_env, gym.wrappers.TimeLimit) \
+            else dummy_env.spec.max_episode_steps
 
         if self._log_tensorboard:
             tensor_board_writer = tf.summary.create_file_writer(str(self._log_dir))

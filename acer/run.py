@@ -7,7 +7,7 @@ import os
 import tensorflow as tf
 
 from runners import Runner, ALGOS
-from utils import calculate_gamma, registerDTChangedEnv
+from utils import calculate_gamma, getDTChangedEnvName
 
 parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
 parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer", choices=ALGOS)
@@ -124,7 +124,7 @@ def main():
     timesteps_increase = parameters.pop('timesteps_increase', None)
     if timesteps_increase:
         parameters['gamma'] = calculate_gamma(parameters['gamma'], timesteps_increase)
-        env_name = registerDTChangedEnv(env_name, timesteps_increase)
+        env_name = getDTChangedEnvName(env_name, timesteps_increase)
         max_time_steps *= timesteps_increase
         evaluate_time_steps_interval *= timesteps_increase
 

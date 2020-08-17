@@ -1,8 +1,9 @@
 import pickle
-from functools import wraps
+from functools import partial, wraps
 from time import time
 from typing import Tuple, List, Union, Dict
 import importlib
+import re
 
 import gym
 import numpy as np
@@ -51,7 +52,11 @@ def is_atari(env_id: str) -> bool:
     Returns:
         True if its is Atari env
     """
-    env_spec = [env for env in gym.envs.registry.all() if env.id == env_id][0]
+    env_specs = [env for env in gym.envs.registry.all() if env.id == env_id]
+    if not env_specs:
+        return False
+    env_spec = env_specs[0]
+
     if not isinstance(env_spec.entry_point, str):
         return False
     env_type = env_spec.entry_point.split(':')[0].split('.')[-1]
@@ -132,8 +137,23 @@ def timing(f):
     return wrap
 
 
-def registerDTChangedEnv(base_env_name, timesteps_increase):
-    base_spec = gym.envs.registry.env_specs[base_env_name]
+def getDTChangedEnvName(base_env_name, timesteps_increase):
+    return str.join('TS' + str(timesteps_increase) + '-', base_env_name.split('-'))
+
+
+def getPossiblyDTChangedEnvBuilder(env_name):
+    prog = re.compile(r'(\w+)TS(\d+)\-v(\d+)')
+    match = prog.fullmatch(env_name)
+    if not match:
+        return partial(gym.make, env_name)
+
+    name = match.group(1)
+    timesteps_increase = int(match.group(2))
+    version = match.group(3)
+
+    base_name = f'{name}-v{version}'
+    
+    base_spec = gym.envs.registry.env_specs[base_name]
 
     mod_name, attr_name = base_spec.entry_point.split(":")
     mod = importlib.import_module(mod_name)
@@ -147,17 +167,15 @@ def registerDTChangedEnv(base_env_name, timesteps_increase):
                                                         frame_skip=4)
             return self.stadium_scene
     
-    name = str.join('TS' + str(timesteps_increase) + '-', base_env_name.split('-'))
+    def builder():
+        env = TimeStepChangedEnv()
 
-    gym.envs.register(
-        name,
-        entry_point=TimeStepChangedEnv,
-        max_episode_steps=int(1000 * timesteps_increase),
-        reward_threshold=base_spec.reward_threshold,
-        nondeterministic=base_spec.nondeterministic,
-    )
-
-    return name
+        if base_spec.max_episode_steps:
+            env = gym.wrappers.TimeLimit(env, base_spec.max_episode_steps * timesteps_increase)
+        
+        return env
+    
+    return builder
 
 
 def calculate_gamma(gamma0, timesteps_increase):
