@@ -200,9 +200,20 @@ class ACERAC(BaseACERAgent):
         self._actor.update_ends(np.array([[step[5]] for step in steps]))
 
     def learn(self):
-        experience_replay_iterations = min([round(self._c0 * self._time_step), self._c])
-        for batch in self._data_loader.take(experience_replay_iterations):
-            self._learn_from_experience_batch(*batch)
+        """
+        Performs experience replay learning. Experience trajectory is sampled from every replay buffer once, thus
+        single backwards pass batch consists of 'num_parallel_envs' trajectories.
+
+        Every call executes N of backwards passes, where: N = min(c0 * time_step / num_parallel_envs, c).
+        That means at the beginning experience replay intensity increases linearly with number of samples
+        collected till c value is reached.
+        """
+
+        if self._time_step > self._learning_starts:
+            experience_replay_iterations = min([round(self._c0 * self._time_step), self._c])
+            
+            for batch in self._data_loader.take(experience_replay_iterations):
+                self._learn_from_experience_batch(*batch)
 
     @tf.function(experimental_relax_shapes=True)
     def _learn_from_experience_batch(self, obs: tf.Tensor, obs_next: tf.Tensor, actions: tf.Tensor,

@@ -55,10 +55,11 @@ class ACER(BaseACERAgent):
         That means at the beginning experience replay intensity increases linearly with number of samples
         collected till c value is reached.
         """
-        experience_replay_iterations = min([round(self._c0 * self._time_step), self._c])
-
-        for batch in self._data_loader.take(experience_replay_iterations):
-            self._learn_from_experience_batch(*batch)
+        if self._time_step > self._learning_starts:
+            experience_replay_iterations = min([round(self._c0 * self._time_step), self._c])
+            
+            for batch in self._data_loader.take(experience_replay_iterations):
+                self._learn_from_experience_batch(*batch)
 
     @tf.function(experimental_relax_shapes=True)
     def _learn_from_experience_batch(self, obs, obs_next, actions, old_policies,

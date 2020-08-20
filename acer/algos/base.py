@@ -239,6 +239,7 @@ class CategoricalActor(BaseActor):
         action_log_probs = tf.gather_nd(log_probs, actions, batch_dims=1)
         return action_probs, action_log_probs
 
+    @tf.function
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
 
         # TODO: remove hardcoded '10' and '20'
@@ -254,7 +255,8 @@ class CategoricalActor(BaseActor):
             tf.summary.histogram('action', actions, step=self._tf_time_step)
         return tf.squeeze(actions, axis=[1]), actions_probs
 
-    def act_deterministic(self, observations: np.array, **kwargs) -> tf.Tensor:
+    @tf.function
+    def act_deterministic(self, observations: tf.Tensor, **kwargs) -> tf.Tensor:
         """Performs most probable action"""
         logits = tf.divide(self._forward(observations), 10)
         probs = tf.nn.softmax(logits)
@@ -342,6 +344,7 @@ class GaussianActor(BaseActor):
 
         return dist.prob(actions), dist.log_prob(actions)
 
+    @tf.function
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
         mean = self._forward(observations)
 
@@ -358,7 +361,8 @@ class GaussianActor(BaseActor):
 
         return actions, actions_probs
 
-    def act_deterministic(self, observations: np.array, **kwargs) -> tf.Tensor:
+    @tf.function
+    def act_deterministic(self, observations: tf.Tensor, **kwargs) -> tf.Tensor:
         """Returns mean of the Gaussian"""
         mean = self._forward(observations)
         return mean
@@ -370,11 +374,11 @@ class BaseACERAgent(ABC):
                  critic_layers: Tuple[int], gamma: int = 0.99, actor_beta_penalty: float = 0.001,
                  std: Optional[float] = None, memory_size: int = 1e6, num_parallel_envs: int = 10,
                  batches_per_env: int = 5, c: int = 10, c0: float = 0.3, actor_lr: float = 0.001,
-                 actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999, actor_adam_epsilon: float = 1e-5,
+                 actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999, actor_adam_epsilon: float = 1e-7,
                  critic_lr: float = 0.001, critic_adam_beta1: float = 0.9, critic_adam_beta2: float = 0.999,
-                 critic_adam_epsilon: float = 1e-5, standardize_obs: bool = False, rescale_rewards: int = -1,
+                 critic_adam_epsilon: float = 1e-7, standardize_obs: bool = False, rescale_rewards: int = -1,
                  limit_reward_tanh: float = 3., time_step: int = 1, gradient_norm: float = None,
-                 gradient_norm_median_threshold: float = 4, **kwargs):
+                 gradient_norm_median_threshold: float = 4, learning_starts: int = 1000, **kwargs):
 
         self._tf_time_step = tf.Variable(
             initial_value=time_step, name='tf_time_step', dtype=tf.dtypes.int64, trainable=False
@@ -385,6 +389,7 @@ class BaseACERAgent(ABC):
         self._actor_beta_penalty = actor_beta_penalty
         self._c = c
         self._c0 = c0
+        self._learning_starts = learning_starts
         self._actor_layers = tuple(actor_layers)
         self._critic_layers = tuple(critic_layers)
         self._gamma = gamma
@@ -413,7 +418,7 @@ class BaseACERAgent(ABC):
             self._experience_replay_generator,
             (tf.dtypes.float32, tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.float32, tf.dtypes.float32,
              tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.bool, tf.dtypes.int32)
-        ).prefetch(2)
+        ).prefetch(1)
 
         self._actor_optimizer = tf.keras.optimizers.Adam(
             lr=actor_lr,
@@ -534,11 +539,11 @@ class BaseACERAgent(ABC):
             Tuple of sampled actions and corresponding probabilities (probability densities) if action was sampled
                 from the distribution, None otherwise
         """
-        processed_obs = self._process_observations(observations)
+        processed_obs = tf.convert_to_tensor(self._process_observations(observations))
         if is_deterministic:
             return self._actor.act_deterministic(processed_obs).numpy(), None
         else:
-            actions, policies = self._actor.act(tf.convert_to_tensor(processed_obs))
+            actions, policies = self._actor.act(processed_obs)
             return actions.numpy(), policies.numpy()
 
     def _experience_replay_generator(self):

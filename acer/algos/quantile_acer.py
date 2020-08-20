@@ -117,20 +117,6 @@ class QACER(BaseACERAgent):
         outputs = self._atoms + 1 if self._border_atoms else self._atoms
         return QuantileCritic(self._observations_space, self._critic_layers, self._tf_time_step, outputs, self._kappa)
 
-    def learn(self):
-        """
-        Performs experience replay learning. Experience trajectory is sampled from every replay buffer once, thus
-        single backwards pass batch consists of 'num_parallel_envs' trajectories.
-
-        Every call executes N of backwards passes, where: N = min(c0 * time_step / num_parallel_envs, c).
-        That means at the beginning experience replay intensity increases linearly with number of samples
-        collected till c value is reached.
-        """
-        experience_replay_iterations = min([round(self._c0 * self._time_step / self._num_parallel_envs), self._c])
-
-        for batch in self._data_loader.take(experience_replay_iterations):
-            self._learn_from_experience_batch(*batch)
-
     @tf.function
     def _quantile_loss(self, u, reduce_dim):
         if self._kappa < 0.:

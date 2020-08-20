@@ -45,11 +45,6 @@ class QACERAC(ACERAC, QACER):
     def _init_critic(self) -> Critic:
         return QACER._init_critic(self)
     
-    def learn(self):
-        experience_replay_iterations = min([round(self._c0 * self._time_step), self._c])
-        for batch in self._data_loader.take(experience_replay_iterations):
-            self._learn_from_experience_batch(*batch)
-
     @tf.function(experimental_relax_shapes=True)
     def _learn_from_experience_batch(self, obs: tf.Tensor, obs_next: tf.Tensor, actions: tf.Tensor,
                                      old_means: tf.Tensor, rewards: tf.Tensor, dones: tf.Tensor,

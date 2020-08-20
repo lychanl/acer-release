@@ -17,13 +17,13 @@ parser.add_argument('--lam', type=float, help='lambda parameter', required=False
 parser.add_argument('--b', type=float, help='probability density truncation coefficient',
                     required=False, default=3)
 parser.add_argument('--actor_adam_epsilon', type=float, help='ADAM optimizer epsilon parameter (BaseActor)',
-                    required=False, default=1e-5)
+                    required=False, default=None)
 parser.add_argument('--actor_adam_beta1', type=float, help='ADAM optimizer beta1 (BaseActor)',
                     required=False, default=0.9)
 parser.add_argument('--actor_adam_beta2', type=float, help='ADAM optimizer beta2 (BaseActor)',
                     required=False, default=0.999)
 parser.add_argument('--critic_adam_epsilon', type=float, help='ADAM optimizer epsilon (Critic)',
-                    required=False, default=1e-5)
+                    required=False, default=None)
 parser.add_argument('--critic_adam_beta1', type=float, help='ADAM optimizer beta1 (Critic)',
                     required=False, default=0.9)
 parser.add_argument('--critic_adam_beta2', type=float, help='ADAM optimizer beta2 (Critic)',
@@ -43,6 +43,7 @@ parser.add_argument('--noise_type', type=str, help='Type of noise for OldACERAC'
 parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
                                               '0.4 * actions_bound is set.',
                     required=False, default=None)
+parser.add_argument('--learning_starts', type=int, help='experience replay warm start coefficient', default=1000)
 parser.add_argument('--memory_size', type=int, help='memory buffer size (sum of all of the buffers from every env',
                     required=False, default=1e6)
 parser.add_argument('--actor_layers', nargs='+', type=int, help='List of BaseActor\'s neural network hidden layers sizes',
