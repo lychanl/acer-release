@@ -12,106 +12,12 @@ from algos.base import BaseActor, Critic, BaseACERAgent, GaussianActor
 from replay_buffer import BufferFieldSpec, PrevReplayBuffer, MultiReplayBuffer
 
 
-def get_lambda_1(n: int, alpha: float) -> np.array:
-    """Computes Lambda^n_1 matrix.
-
-    Args:
-        n: size of the matrix
-        alpha: autocorrelation coefficient
-
-    Returns:
-        Lambda^n_1 matrix
-    """
-    lam = np.zeros(shape=(n + 1, n + 1), dtype=np.float32)
-    for i in range(n + 1):
-        for j in range(i, n + 1):
-            lam[i][j] = lam[j][i] = alpha ** abs(i - j) - alpha ** (i + j + 2)
-    return lam
+from algos.acerac import get_lambda_0, get_lambda_1, NoiseGaussianActor
 
 
-def get_lambda_0(n: int, alpha: float) -> np.array:
-    """Computes Lambda^n_0 matrix.
-
-    Args:
-        n: size of the matrix
-        alpha: autocorrelation coefficient
-
-    Returns:
-        Lambda^n_1 matrix
-    """
-    lam = np.zeros(shape=(n + 1, n + 1), dtype=np.float32)
-    for i in range(n + 1):
-        for j in range(i, n + 1):
-            lam[i][j] = lam[j][i] = alpha ** abs(i - j)
-    return lam
-
-
-class NoiseGaussianActor(GaussianActor):
-
-    def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 beta_penalty: float, actions_bound: float, tau: int = 2, alpha: float = 0.8,
-                 num_parallel_envs: int = 1, noise_type: str = 'mean', *args, **kwargs):
-        super().__init__(observations_space, actions_space, layers, beta_penalty, actions_bound, *args, **kwargs)
-
-        self._num_parallel_envs = num_parallel_envs
-        self._tau = tau
-        self._alpha = alpha
-        self._noise_dist = tfp.distributions.MultivariateNormalDiag(
-            scale_diag=tf.exp(self.log_std),
-        )
-        self._noise_type = noise_type
-        if noise_type == 'mean':
-            self._noise_buffer = [self._init_noise_buffer() for _ in range(self._num_parallel_envs)]
-        else:
-            self._last_noise = self._sample_noise()
-            self._noise_init_mask = tf.ones(shape=(self._num_parallel_envs, 1))
-
-    def _init_noise_buffer(self):
-        buffer = deque(maxlen=self._tau)
-        for _ in range(self._tau):
-            buffer.append(self._noise_dist.sample())
-        return buffer
-
-    def _sample_noise(self):
-        return self._noise_dist.sample(sample_shape=(self._num_parallel_envs, ))
-
-    def update_ends(self, ends: np.array):
-        """Updates noise buffers at the end of an episode"""
-        if self._noise_type == 'mean':
-            self._noise_buffer = [
-                buffer if not end else self._init_noise_buffer() for buffer, end in zip(self._noise_buffer, ends)
-            ]
-        else:
-            self._noise_init_mask = tf.cast(ends, dtype=tf.float32)
-
-    def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
-        mean = self._forward(observations)
-        dist = tfp.distributions.MultivariateNormalDiag(
-            scale_diag=tf.exp(self.log_std)
-        )
-
-        return dist.prob(actions - mean), dist.log_prob(actions - mean)
-
-    def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
-        mean = self._forward(observations)
-
-        noise_init = self._sample_noise()
-        if self._noise_type == 'mean':
-            [buffer.append(noise) for buffer, noise in zip(self._noise_buffer, noise_init)]
-            noise = tf.convert_to_tensor([np.sum(buffer, axis=0) / np.sqrt(self._tau) for buffer in self._noise_buffer])
-        else:
-            noise_cont = self._alpha * self._last_noise + tf.sqrt(1 - tf.square(self._alpha)) * noise_init
-            noise = noise_init * self._noise_init_mask + noise_cont * (1 - self._noise_init_mask)
-            self._last_noise = noise
-            self._noise_init_mask = tf.zeros_like(self._noise_init_mask)
-
-        actions = mean + noise
-        return actions, mean
-
-
-class ACERAC(BaseACERAgent):
+class fACERAC(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
-                 critic_layers: Optional[Tuple[int]], b: float = 3, tau: int = 2, alpha: int = None,
+                 critic_layers: Optional[Tuple[int]], b: float = 3, n: int = 2, alpha: int = None,
                  td_clip: float = None, use_normalized_density_ratio: bool = False, use_v: bool = False,
                  *args, **kwargs):
         """Actor-Critic with Experience Replay and autocorrelated actions.
@@ -122,13 +28,13 @@ class ACERAC(BaseACERAgent):
             actor_layers: number of units in Actor's hidden layers
             critic_layers: number of units in Critic's hidden layers
             b: density ratio truncating coefficient
-            tau: update window size
-            alpha: autocorrelation coefficient. If None, 1 - (1 / tau) is set
+            n: update window size
+            alpha: autocorrelation coefficient. If None, 1 - (1 / n) is set
         """
 
-        self._tau = tau
+        self._n = n
         if alpha is None:
-            self._alpha = 1 - (1 / tau)
+            self._alpha = 1 - (1 / n)
         else:
             self._alpha = alpha
         self._td_clip = td_clip
@@ -150,10 +56,11 @@ class ACERAC(BaseACERAgent):
              tf.dtypes.float32, self._actor.action_dtype, self._actor.action_dtype)
         ).prefetch(2)
 
+
     def _init_inverse_covariance_matrices(self):
         lam0_c_prod_invs = []
         lam1_c_prod_invs = []
-        for i in range(0, self._tau):
+        for i in range(0, self._n):
             lam0 = get_lambda_0(i, self._alpha)
             lam1 = get_lambda_1(i, self._alpha)
             lam0_c_prod = tf_utils.kronecker_prod(lam0, self._cov_matrix)
@@ -164,6 +71,7 @@ class ACERAC(BaseACERAgent):
             lam1_c_prod_invs.append(inv1.numpy())
         self._lam1_c_prod_invs = tf.ragged.constant(lam1_c_prod_invs).to_tensor()
         self._lam0_c_prod_invs = tf.ragged.constant(lam0_c_prod_invs).to_tensor()
+
 
     def _init_replay_buffer(self, memory_size: int):
         if type(self._actions_space) == gym.spaces.Discrete:
@@ -185,7 +93,7 @@ class ACERAC(BaseACERAgent):
         else:
             return NoiseGaussianActor(
                 self._observations_space, self._actions_space, self._actor_layers,
-                self._actor_beta_penalty, self._actions_bound, self._tau, self._alpha, self._num_parallel_envs,
+                self._actor_beta_penalty, self._actions_bound, self._n, self._alpha, self._num_parallel_envs,
                 'autocor', self._std, self._tf_time_step
             )
 
@@ -261,9 +169,9 @@ class ACERAC(BaseACERAgent):
             means_flatten = tf.reshape(means, (actions.shape[0], -1))
             old_means_flatten = tf.reshape(old_means, (actions.shape[0], -1))
 
-            actions_repeated = tf.repeat(tf.expand_dims(actions_flatten, axis=1), self._tau, axis=1)
-            means_repeated = tf.repeat(tf.expand_dims(means_flatten, axis=1), self._tau, axis=1)
-            old_means_repeated = tf.repeat(tf.expand_dims(old_means_flatten, axis=1), self._tau, axis=1)
+            actions_repeated = tf.repeat(tf.expand_dims(actions_flatten, axis=1), self._n, axis=1)
+            means_repeated = tf.repeat(tf.expand_dims(means_flatten, axis=1), self._n, axis=1)
+            old_means_repeated = tf.repeat(tf.expand_dims(old_means_flatten, axis=1), self._n, axis=1)
 
             # 1, 2, ..., n trajectories mask over repeated action tensors
             actions_mask = tf.expand_dims(
@@ -275,8 +183,8 @@ class ACERAC(BaseACERAgent):
                 axis=0
             )
 
-            # trajectories shorter than tau mask
-            zeros_mask = tf.expand_dims(tf.sequence_mask(lengths, maxlen=self._tau, dtype=tf.float32), 2)
+            # trajectories shorter than n mask
+            zeros_mask = tf.expand_dims(tf.sequence_mask(lengths, maxlen=self._n, dtype=tf.float32), 2)
 
             actions_mu_diff_current = tf.expand_dims(
                 (actions_repeated - means_repeated - eta_repeated) * zeros_mask * actions_mask,
@@ -301,13 +209,12 @@ class ACERAC(BaseACERAgent):
                 tf.summary.scalar('max_density_ratio', tf.reduce_max(density_ratio), step=self._tf_time_step)
 
             gamma_coeffs = tf.math.cumprod(tf.ones_like(rewards) * self._gamma, exclusive=True, axis=1)
-            td_rewards = tf.math.cumsum(rewards * gamma_coeffs, axis=1)
+            td_rewards = tf.reduce_sum(rewards * gamma_coeffs, axis=1, keepdims=True)
 
-            values_first_repeated = tf.repeat(values_first, self._tau, 1)
-            pows = tf.tile(tf.expand_dims(tf.range(1, self._tau + 1), axis=0), [actions.shape[0], 1])
+            values_first_repeated = tf.repeat(values_first, self._n, 1)
             td = (-values_first_repeated
                   + td_rewards
-                  + tf.pow(self._gamma, tf.cast(pows, tf.float32)) * values_next)
+                  + tf.pow(self._gamma, self._n) * values_next)
 
             if self._td_clip is not None:
                 td = tf.clip_by_value(td, -self._td_clip, self._td_clip)
@@ -399,52 +306,52 @@ class ACERAC(BaseACERAgent):
         current_prev_means = self._actor.act_deterministic(prev_obs)
         alpha_coeffs = tf.pow(
             self._alpha,
-            tf.tile(tf.range(1, self._tau + 1, dtype=tf.float32), (prev_actions.shape[0],))
+            tf.tile(tf.range(1, self._n + 1, dtype=tf.float32), (prev_actions.shape[0],))
         )
         alpha_coeffs = tf.expand_dims(alpha_coeffs, axis=1)
         mu_diff = (prev_actions - prev_means) * is_prev_noise_mask
         eta_diff = (prev_actions - current_prev_means) * is_prev_noise_mask
-        mu = tf.reshape(tf.repeat(mu_diff, self._tau, axis=0) * alpha_coeffs, (actions.shape[0], -1))
-        eta = tf.reshape(tf.repeat(eta_diff, self._tau, axis=0) * alpha_coeffs, (actions.shape[0], -1))
+        mu = tf.reshape(tf.repeat(mu_diff, self._n, axis=0) * alpha_coeffs, (actions.shape[0], -1))
+        eta = tf.reshape(tf.repeat(eta_diff, self._n, axis=0) * alpha_coeffs, (actions.shape[0], -1))
         mu_repeated = tf.repeat(
             tf.expand_dims(mu, axis=1),
-            self._tau,
+            self._n,
             axis=1
         )
         eta_repeated = tf.repeat(
             tf.expand_dims(eta, axis=1),
-            self._tau,
+            self._n,
             axis=1
         )
         return eta_repeated, mu_repeated
 
     def _get_c_invs(self, actions: tf.Tensor, is_prev_noise_mask: tf.Tensor) -> tf.Tensor:
-        is_prev_noise_mask_repeated = tf.expand_dims(tf.repeat(is_prev_noise_mask, self._tau, axis=0), 1)
+        is_prev_noise_mask_repeated = tf.expand_dims(tf.repeat(is_prev_noise_mask, self._n, axis=0), 1)
         c_invs_0 = tf.tile(self._lam0_c_prod_invs, (actions.shape[0], 1, 1))
         c_invs_1 = tf.tile(self._lam1_c_prod_invs, (actions.shape[0], 1, 1))
         c_invs = c_invs_1 * is_prev_noise_mask_repeated + c_invs_0 * (1 - is_prev_noise_mask_repeated)
-        c_invs = tf.reshape(c_invs, (actions.shape[0], self._tau, c_invs.shape[2], -1))
+        c_invs = tf.reshape(c_invs, (actions.shape[0], self._n, c_invs.shape[2], -1))
         return c_invs
 
     def _fetch_offline_batch(self) -> List[Tuple[Dict[str, Union[np.array, list]], int]]:
-        trajectory_lens = [[self._tau for _ in range(self._num_parallel_envs)] for _ in range(self._batches_per_env)]
+        trajectory_lens = [[self._n for _ in range(self._num_parallel_envs)] for _ in range(self._batches_per_env)]
         batch = []
         [batch.extend(self._memory.get(trajectories)) for trajectories in trajectory_lens]
         return batch
 
     def _experience_replay_generator(self):
-        """Generates trajectories batches. All tensors are padded with zeros to match self._tau number of
+        """Generates trajectories batches. All tensors are padded with zeros to match self._n number of
         experience tuples in a single trajectory.
-        Trajectories are returned in shape [batch, self._tau, <obs/actions/etc shape>]
+        Trajectories are returned in shape [batch, self._n, <obs/actions/etc shape>]
         """
         while True:
             offline_batches = self._fetch_offline_batch()
-            obs = np.zeros(shape=(len(offline_batches), self._tau, self._observations_space.shape[0]))
-            obs_next = np.zeros(shape=(len(offline_batches), self._tau, self._observations_space.shape[0]))
-            actions = np.zeros(shape=(len(offline_batches), self._tau, self._actions_space.shape[0]))
-            rewards = np.zeros(shape=(len(offline_batches), self._tau))
-            means = np.zeros(shape=(len(offline_batches), self._tau, self._actions_space.shape[0]))
-            dones = np.zeros(shape=(len(offline_batches), self._tau))
+            obs = np.zeros(shape=(len(offline_batches), self._n, self._observations_space.shape[0]))
+            obs_next = np.zeros(shape=(len(offline_batches), self._n, self._observations_space.shape[0]))
+            actions = np.zeros(shape=(len(offline_batches), self._n, self._actions_space.shape[0]))
+            rewards = np.zeros(shape=(len(offline_batches), self._n))
+            means = np.zeros(shape=(len(offline_batches), self._n, self._actions_space.shape[0]))
+            dones = np.zeros(shape=(len(offline_batches), self._n))
             lengths = np.zeros(shape=(len(offline_batches)))
             is_prev_noise = np.zeros(shape=(len(offline_batches)))
 
@@ -454,17 +361,17 @@ class ACERAC(BaseACERAgent):
 
             for i, batch_and_first_index in enumerate(offline_batches):
                 batch, first_index = batch_and_first_index
-                obs[i * self._tau:, :len(batch['observations'][first_index:]), :]\
+                obs[i * self._n:, :len(batch['observations'][first_index:]), :]\
                     = batch['observations'][first_index:]
-                obs_next[i * self._tau:, :len(batch['next_observations'][first_index:]), :]\
+                obs_next[i * self._n:, :len(batch['next_observations'][first_index:]), :]\
                     = batch['next_observations'][first_index:]
-                actions[i * self._tau:, :len(batch['actions'][first_index:]), :]\
+                actions[i * self._n:, :len(batch['actions'][first_index:]), :]\
                     = batch['actions'][first_index:]
-                means[i * self._tau:, :len(batch['policies'][first_index:]), :]\
+                means[i * self._n:, :len(batch['policies'][first_index:]), :]\
                     = batch['policies'][first_index:]
-                rewards[i * self._tau:, :len(batch['rewards'][first_index:])]\
+                rewards[i * self._n:, :len(batch['rewards'][first_index:])]\
                     = batch['rewards'][first_index:]
-                dones[i * self._tau:, :len(batch['dones'][first_index:])]\
+                dones[i * self._n:, :len(batch['dones'][first_index:])]\
                     = batch['dones'][first_index:]
                 is_prev_noise[i] = first_index
                 lengths[i] = len(batch['observations'][first_index:])
