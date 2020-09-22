@@ -1,7 +1,8 @@
 from __future__ import annotations
 import pickle
 from dataclasses import dataclass
-from typing import Optional, Union, Tuple, List, Dict, Type
+import functools
+from typing import Optional, Union, Tuple, List, Dict, Type, Callable
 
 import numpy as np
 
@@ -221,22 +222,28 @@ class WindowReplayBuffer(ReplayBuffer):
         return start_index, end_index
 
 
-class PrevReplayBuffer(ReplayBuffer):
+def PrevReplayBuffer(n: int = 1):
+    return functools.partial(_PrevReplayBuffer, n)
 
-    def __init__(self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
-        """Extends ReplayBuffer to fetch one experience tuple before selected index.
+
+class _PrevReplayBuffer(ReplayBuffer):
+
+    def __init__(self, n: int, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
+        """Extends ReplayBuffer to fetch a number of experience tuples before selected index.
         If selected index indicates first time step in a episode, no additional tuples are attached.
 
         Also policies buffer is replaced to store data in same specification as actions
         (used in algorithms with autocorrelated actions).
 
         Args:
+            n: Number of previous experience tuples to be fetched
             max_size: maximum number of entries to be stored in the buffer - only newest entries are stored.
             action_spec: BufferFieldSpec with actions space specification
             obs_spec: BufferFieldSpec with observations space specification
         """
         super().__init__(max_size, action_spec, obs_spec)
         self._policies = self._init_field(action_spec)
+        self._n = n
 
     def get(self, trajectory_len: Optional[int] = None) -> Tuple[Dict[str, np.array], int]:
         if self._current_size == 0:
@@ -251,16 +258,24 @@ class PrevReplayBuffer(ReplayBuffer):
                 "ends": np.array([])
             }, -1)
 
-        start = sample_index = self._sample_random_index()
-        trajectory_len_adjusted = trajectory_len
-        if self._pointer != sample_index:
-            if sample_index > 0 and not self._ends[sample_index - 1]:
-                start = sample_index - 1
-                trajectory_len_adjusted = trajectory_len + 1
-            elif self._current_size == self._max_size and sample_index == 0 and not self._ends[- 1]:
-                start = self._max_size - 1
-                trajectory_len_adjusted = trajectory_len + 1
+        sample_index = self._sample_random_index()
+        start = sample_index
+        
+        n = 0
+        for _n in range(1, self._n + 1):
+            index = sample_index - _n
+            if index < 0:
+                if self._current_size < self._max_size:
+                    break
+                index = self._max_size + index
+            if self._ends[index] or self._pointer == sample_index:
+                break
 
+            n = _n
+        
+        start = (start - n) % self._max_size
+        trajectory_len_adjusted = trajectory_len + n
+        
         start_index, end_index = self._get_indices(start, trajectory_len_adjusted)
         batch = self._fetch_batch(end_index, sample_index, start_index)
         return batch
@@ -269,7 +284,7 @@ class PrevReplayBuffer(ReplayBuffer):
 class MultiReplayBuffer:
 
     def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec,
-                 obs_spec: BufferFieldSpec, buffer_class: type = ReplayBuffer):
+                 obs_spec: BufferFieldSpec, buffer_class: Callable[[int, BufferFieldSpec, BufferFieldSpec], ReplayBuffer]):
         """Encapsulates ReplayBuffers from multiple environments.
 
         Args:
@@ -281,7 +296,7 @@ class MultiReplayBuffer:
         self._n_buffers = num_buffers
         self._max_size = max_size
 
-        assert issubclass(buffer_class, ReplayBuffer), "Buffer class should derive from ReplayBuffer"
+        # assert issubclass(buffer_class, ReplayBuffer), "Buffer class should derive from ReplayBuffer"
 
         self._buffers = [buffer_class(int(max_size / num_buffers), action_spec, obs_spec) for _ in range(num_buffers)]
 

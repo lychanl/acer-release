@@ -399,6 +399,7 @@ class BaseACERAgent(ABC):
         self._limit_reward_tanh = limit_reward_tanh
         self._gradient_norm = gradient_norm
         self._gradient_norm_median_threshold = gradient_norm_median_threshold
+        self._batch_size = self._num_parallel_envs * self._batches_per_env
 
         self._actor_gradient_norm_median = tf.Variable(initial_value=1.0, trainable=False)
         self._critic_gradient_norm_median = tf.Variable(initial_value=1.0, trainable=False)

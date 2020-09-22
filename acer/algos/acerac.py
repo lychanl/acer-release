@@ -176,7 +176,7 @@ class ACERAC(BaseACERAgent):
             obs_spec=BufferFieldSpec(shape=self._observations_space.shape, dtype=self._observations_space.dtype),
             max_size=memory_size,
             num_buffers=self._num_parallel_envs,
-            buffer_class=PrevReplayBuffer
+            buffer_class=PrevReplayBuffer(1)
         )
 
     def _init_actor(self) -> BaseActor:
@@ -215,7 +215,7 @@ class ACERAC(BaseACERAgent):
             for batch in self._data_loader.take(experience_replay_iterations):
                 self._learn_from_experience_batch(*batch)
 
-    # @tf.function(experimental_relax_shapes=True)
+    @tf.function(experimental_relax_shapes=True)
     def _learn_from_experience_batch(self, obs: tf.Tensor, obs_next: tf.Tensor, actions: tf.Tensor,
                                      old_means: tf.Tensor, rewards: tf.Tensor, dones: tf.Tensor,
                                      lengths: tf.Tensor, is_prev_noise: tf.Tensor,
