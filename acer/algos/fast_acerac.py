@@ -138,7 +138,7 @@ class IntegratedNoiseGaussianActor(AutocorrelatedActor):
         )
         
         self._last_noise = self._sample_noise()
-        self._last_integrated_noise = self._last_noise * self._alpha0 + (1 - self._alpha0 ** 2) ** 0.5 * self._sample_noise()
+        self._last_integrated_noise = self._last_noise * self._alpha0 + self._sample_noise() * self._sub_alpha0
         self._noise_init_mask = tf.ones(shape=(self._num_parallel_envs, 1))
 
     def _init_noise(self):
@@ -181,9 +181,14 @@ class IntegratedNoiseGaussianActor(AutocorrelatedActor):
 
         actions = mean + integrated
         return actions, mean
-    
+
     def init_inverse_covariance_matrices(self, n: int, batch_size: int) -> Tuple[tf.Tensor, tf.Tensor]:
-        lam0 = get_lambda_0(n - 1, self._alpha)
+        lam0 = np.zeros((n,n))
+        for i in range(n):
+            for j in range(n):
+                lam0[i][j] = (1 + np.abs(i - j) * self._alpha0 * self._alpha1) * self._alpha ** np.abs(i - j)
+        lam0 = tf.constant(lam0, dtype=tf.float32)
+
         lam1 = get_lambda_1(n - 1, self._alpha)
         lam0_c_prod = tf_utils.kronecker_prod(lam0, self._cov_matrix)
         lam1_c_prod = tf_utils.kronecker_prod(lam1, self._cov_matrix)
@@ -196,12 +201,11 @@ class IntegratedNoiseGaussianActor(AutocorrelatedActor):
         d_n = tf.constant(d_n, dtype=tf.float32)
 
         self._d_n = tf_utils.kronecker_prod(d_n, tf.eye(self.actions_dim) * self._alpha1)
-        d_n_inv = tf.linalg.inv(self._d_n)
+        d_n_T = tf.transpose(self._d_n)
 
-        lam0_c_d_prod = tf.matmul(tf.matmul(self._d_n, lam0_c_prod), d_n_inv)
-        lam1_c_d_prod = tf.matmul(tf.matmul(self._d_n, lam1_c_prod), d_n_inv)
+        lam1_c_d_prod = tf.matmul(tf.matmul(self._d_n, lam1_c_prod), d_n_T)
 
-        lam0_c_prod_inv = tf.linalg.inv(lam0_c_d_prod)
+        lam0_c_prod_inv = tf.linalg.inv(lam0_c_prod)
         lam1_c_prod_inv = tf.linalg.inv(lam1_c_d_prod)
         rep_lam0_c_prod_inv = tf.repeat(tf.expand_dims(lam0_c_prod_inv, axis=0), batch_size, axis=0)
         rep_lam1_c_prod_inv = tf.repeat(tf.expand_dims(lam1_c_prod_inv, axis=0), batch_size, axis=0)
@@ -261,20 +265,16 @@ class IntegratedNoiseGaussianActor(AutocorrelatedActor):
         diff = prev_actions - prev_actor_outs
         diff_old = prev_actions - old_prev_actor_outs
 
-        xi2 = tf.gather_nd(diff, prev_samples_len_expanded, batch_dims=1)
+        xi2 = diff[:,1]
         xi1 = (xi2 - self._alpha * diff[:,0]) / self._alpha1
-        xi1_1 = xi2 / self._alpha0
         
-        xi1_masked = tf.where(prev_samples_len_expanded == 0, tf.zeros_like(xi1),
-            tf.where(prev_samples_len_expanded == 1, xi1_1, xi1))
+        xi1_masked = tf.where(prev_samples_len_expanded == 0, tf.zeros_like(xi1), xi1)
         xi2_masked = tf.where(prev_samples_len_expanded == 0, tf.zeros_like(xi2), xi2)
 
-        xi2_old = tf.gather_nd(diff_old, prev_samples_len_expanded, batch_dims=1)
+        xi2_old = diff_old[:,1]
         xi1_old = (xi2_old - self._alpha * diff_old[:,0]) / self._alpha1
-        xi1_1_old = xi2_old / self._alpha0
 
         xi1_old_masked = tf.where(prev_samples_len_expanded == 0, tf.zeros_like(xi1_old), xi1_old)
-        #     tf.where(prev_samples_len_expanded == 1, xi1_1_old, xi1_old))
         xi2_old_masked = tf.where(prev_samples_len_expanded == 0, tf.zeros_like(xi2_old), xi2_old)
 
         eta = tf.reshape(
@@ -294,7 +294,7 @@ AUTOCORRELATED_ACTORS = {
 }
 
 
-class fACERAC(BaseACERAgent):
+class ACERAC(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Optional[Tuple[int]], b: float = 3, n: int = 2, alpha: int = None,
                  td_clip: float = None, use_v: bool = False, noise_type='integrated',
@@ -331,7 +331,7 @@ class fACERAC(BaseACERAgent):
         self._data_loader = tf.data.Dataset.from_generator(
             self._experience_replay_generator,
             (tf.dtypes.float32, tf.dtypes.float32, self._actor.action_dtype, self._actor.action_dtype, tf.dtypes.float32,
-             tf.dtypes.bool, tf.dtypes.int32, tf.dtypes.bool,
+             tf.dtypes.bool, tf.dtypes.int32, tf.dtypes.int32,
              tf.dtypes.float32, self._actor.action_dtype, self._actor.action_dtype)
         ).prefetch(2)
 
@@ -397,7 +397,6 @@ class fACERAC(BaseACERAgent):
         obs_next = self._process_observations(obs_next)
         prev_obs = self._process_observations(prev_obs)
         rewards = self._process_rewards(rewards)
-        prev_samples_len = tf.cast(prev_samples_len, tf.int32)
 
         with tf.GradientTape(persistent=True) as tape:
             actor_outs = self._actor.act_deterministic(obs)
@@ -426,10 +425,6 @@ class fACERAC(BaseACERAgent):
             density_ratio = self._compute_soft_truncated_density_ratio(
                 actions_mu_diff_current, actions_mu_diff_old, c_invs
             )
-
-            with tf.name_scope('acerac'):
-                tf.summary.scalar('mean_density_ratio', tf.reduce_mean(density_ratio), step=self._tf_time_step)
-                tf.summary.scalar('max_density_ratio', tf.reduce_max(density_ratio), step=self._tf_time_step)
 
             gamma_coeffs = tf.expand_dims(tf.pow(self._gamma, tf.range(1., self._n + 1)), axis=0)
             td_rewards = tf.reduce_sum(rewards * gamma_coeffs, axis=1, keepdims=True)
@@ -504,7 +499,20 @@ class fACERAC(BaseACERAgent):
             actions_mu_diff_old_flatten
         )
         density_ratio = tf.squeeze(tf.exp(-0.5 * exp_current + 0.5 * exp_old))
-        return tf.tanh(density_ratio / self._b) * self._b
+        density_ratio = tf.tanh(density_ratio / self._b) * self._b
+
+        with tf.name_scope('acerac'):
+            """tf.summary.scalar('mean_prob_current',
+                tf.reduce_mean(tf.squeeze(tf.exp(-0.5 * exp_old)) / tf.sqrt(tf.linalg.det(c_invs) * (2 * np.pi) ** actions_mu_diff_current.shape[1])),
+                step=self._tf_time_step)
+            tf.summary.scalar('mean_prob_old',
+                tf.reduce_mean(tf.squeeze(tf.exp(-0.5 * exp_old)) / tf.sqrt(tf.linalg.det(c_invs) * (2 * np.pi) ** actions_mu_diff_current.shape[1])),
+                step=self._tf_time_step)
+            """
+            tf.summary.scalar('mean_density_ratio', tf.reduce_mean(density_ratio), step=self._tf_time_step)
+            tf.summary.scalar('max_density_ratio', tf.reduce_max(density_ratio), step=self._tf_time_step)
+
+        return density_ratio
         # return tf.minimum(density_ratio, self._b)
     
     def _get_c_invs(self, prev_samples_len: tf.Tensor) -> tf.Tensor:
@@ -531,7 +539,7 @@ class fACERAC(BaseACERAgent):
             means = np.zeros(shape=(len(offline_batches), self._n, self._actions_space.shape[0]))
             dones = np.zeros(shape=(len(offline_batches),))
             lengths = np.zeros(shape=len(offline_batches))
-            prev_samples_len = np.zeros(shape=len(offline_batches))
+            prev_samples_len = np.zeros(shape=len(offline_batches), dtype=np.int32)
 
             prev_obs = np.zeros(shape=(len(offline_batches), self._actor.required_prev_samples, self._observations_space.shape[0]))
             prev_actions = np.zeros(shape=(len(offline_batches), self._actor.required_prev_samples, self._actions_space.shape[0]))
@@ -539,20 +547,17 @@ class fACERAC(BaseACERAgent):
 
             for i, batch_and_first_index in enumerate(offline_batches):
                 batch, first_index = batch_and_first_index
-                obs[i * self._n:, :len(batch['observations'][first_index:]), :]\
-                    = batch['observations'][first_index:]
-                obs_next[i * self._n:, :]\
-                    = batch['next_observations'][first_index:][-1, :]  #TODO better indexing?
-                actions[i * self._n:, :len(batch['actions'][first_index:]), :]\
-                    = batch['actions'][first_index:]
-                means[i * self._n:, :len(batch['policies'][first_index:]), :]\
-                    = batch['policies'][first_index:]
-                rewards[i * self._n:, :len(batch['rewards'][first_index:])]\
-                    = batch['rewards'][first_index:]
-                dones[i * self._n:]\
-                    = batch['dones'][first_index:][-1]  #TODO better indexing?
+                length = len(batch['observations']) - first_index
+                assert (length > 0 and len(batch['observations'][first_index:]) > 0),\
+                    f'length {length} fi {first_index} l {len(batch["observations"])}'
+                obs[i, :length] = batch['observations'][first_index:]
+                obs_next[i] = batch['next_observations'][-1]
+                actions[i, :length] = batch['actions'][first_index:]
+                means[i, :length] = batch['policies'][first_index:]
+                rewards[i, :length] = batch['rewards'][first_index:]
+                dones[i] = batch['dones'][-1]
                 prev_samples_len[i] = first_index
-                lengths[i] = len(batch['observations'][first_index:])
+                lengths[i] = length
                 prev_obs[i, :first_index] = batch['observations'][:first_index]
                 prev_actions[i, :first_index] = batch['actions'][:first_index]
                 prev_means[i, :first_index] = batch['policies'][:first_index]

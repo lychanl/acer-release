@@ -107,7 +107,7 @@ class ReplayBuffer:
         middle_index = sample_index - start_index \
             if sample_index >= start_index else self._max_size - start_index + sample_index
         if start_index >= end_index:
-            buffer_slice = np.r_[0: end_index, start_index: self._max_size]
+            buffer_slice = np.r_[start_index: self._max_size, 0: end_index]
         else:
             buffer_slice = np.r_[start_index: end_index]
 
@@ -259,7 +259,6 @@ class _PrevReplayBuffer(ReplayBuffer):
             }, -1)
 
         sample_index = self._sample_random_index()
-        start = sample_index
         
         n = 0
         for _n in range(1, self._n + 1):
@@ -268,15 +267,15 @@ class _PrevReplayBuffer(ReplayBuffer):
                 if self._current_size < self._max_size:
                     break
                 index = self._max_size + index
-            if self._ends[index] or self._pointer == sample_index:
+            if self._ends[index] or self._pointer == index:
                 break
 
             n = _n
         
-        start = (start - n) % self._max_size
-        trajectory_len_adjusted = trajectory_len + n
+        start_index, end_index = self._get_indices(sample_index, trajectory_len)
         
-        start_index, end_index = self._get_indices(start, trajectory_len_adjusted)
+        start_index = (start_index - n) % self._max_size
+
         batch = self._fetch_batch(end_index, sample_index, start_index)
         return batch
 
