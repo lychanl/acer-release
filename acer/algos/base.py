@@ -11,7 +11,7 @@ import tf_utils
 import utils
 from models.cnn import build_cnn_network
 from models.mlp import build_mlp_network
-from replay_buffer import MultiReplayBuffer, BufferFieldSpec
+from replay_buffer import MultiReplayBuffer, BufferFieldSpec, ReplayBuffer
 
 from tensorflow.compat.v1 import ConfigProto
 from tensorflow.compat.v1 import InteractiveSession
@@ -453,6 +453,7 @@ class BaseACERAgent(ABC):
             actions_shape = self._actions_space.shape
 
         self._memory = MultiReplayBuffer(
+            buffer_class=ReplayBuffer,
             action_spec=BufferFieldSpec(shape=actions_shape, dtype=self._actor.action_dtype_np),
             obs_spec=BufferFieldSpec(shape=self._observations_space.shape, dtype=self._observations_space.dtype),
             max_size=memory_size,

@@ -101,6 +101,9 @@ class ReplayBuffer:
 
         batch = self._fetch_batch(end_index, sample_index, start_index)
         return batch
+    
+    def get_vec(self, length: int, trajectory_len: int) -> Tuple[Dict[str, np.array], int]:
+        raise NotImplementedError()
 
     def _fetch_batch(self, end_index: int, sample_index: int, start_index: int) -> Tuple[Dict[str, np.array], int]:
 
@@ -109,8 +112,11 @@ class ReplayBuffer:
         if start_index >= end_index:
             buffer_slice = np.r_[start_index: self._max_size, 0: end_index]
         else:
-            buffer_slice = np.r_[start_index: end_index]
+            buffer_slice = np.r_[start_index: end_index]\
+        
+        return self._fetch_slice(buffer_slice), middle_index
 
+    def _fetch_slice(self, buffer_slice) -> Dict[str, np.array]:
         actions = self._actions[buffer_slice]
         observations = self._obs[buffer_slice]
         rewards = self._rewards[buffer_slice]
@@ -119,7 +125,7 @@ class ReplayBuffer:
         done = self._dones[buffer_slice]
         end = self._ends[buffer_slice]
 
-        return ({
+        return {
             "actions": actions,
             "observations": observations,
             "rewards": rewards,
@@ -127,7 +133,7 @@ class ReplayBuffer:
             "policies": policies,
             "dones": done,
             "ends": end
-        }, middle_index)
+        }
 
     def _get_indices(self, sample_index: int, trajectory_len: int) -> Tuple[int, int]:
         start_index = sample_index
@@ -148,9 +154,9 @@ class ReplayBuffer:
             current_length += 1
         return start_index, end_index
 
-    def _sample_random_index(self) -> int:
+    def _sample_random_index(self, size=None) -> int:
         """Uniformly samples one index from the buffer"""
-        return np.random.randint(low=0, high=self._current_size)
+        return np.random.randint(low=0, high=self._current_size, size=size)
 
     @property
     def size(self) -> int:
@@ -261,6 +267,7 @@ class _PrevReplayBuffer(ReplayBuffer):
         sample_index = self._sample_random_index()
         
         n = 0
+        """
         for _n in range(1, self._n + 1):
             index = sample_index - _n
             if index < 0:
@@ -271,7 +278,27 @@ class _PrevReplayBuffer(ReplayBuffer):
                 break
 
             n = _n
+        """
+
+        n = self._n
+
+        if sample_index - n < self._pointer <= sample_index:
+            n = sample_index - self._pointer
+
+        if sample_index - n < 0:
+            if self._current_size < self._max_size:
+                n = sample_index
+            elif self._pointer > sample_index - n + self._max_size:
+                n = self._max_size + sample_index - self._pointer
         
+        if sample_index - n >= 0:
+            r = np.r_[sample_index - n]
+        else:
+            r = np.r_[sample_index:self._max_size, 0:self._max_size]
+        ends = self._ends[r]
+        if ends.any():
+            n = n - np.nonzero(ends)[-1][0] - 1
+
         start_index, end_index = self._get_indices(sample_index, trajectory_len)
         
         start_index = (start_index - n) % self._max_size
@@ -282,8 +309,8 @@ class _PrevReplayBuffer(ReplayBuffer):
 
 class MultiReplayBuffer:
 
-    def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec,
-                 obs_spec: BufferFieldSpec, buffer_class: Callable[[int, BufferFieldSpec, BufferFieldSpec], ReplayBuffer]):
+    def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec,
+                buffer_class: Callable[[int, BufferFieldSpec, BufferFieldSpec], ReplayBuffer] = ReplayBuffer):
         """Encapsulates ReplayBuffers from multiple environments.
 
         Args:
@@ -332,6 +359,18 @@ class MultiReplayBuffer:
             samples = [buffer.get() for buffer in self._buffers]
 
         return samples
+    
+    def get_vec(self, length_per_buffer: int, trajectory_len: int) -> Tuple[Dict[str, np.array], np.array]:
+        vecs = [buffer.get_vec(length_per_buffer, trajectory_len) for buffer in self._buffers]
+        
+        return (
+            {
+                key: np.concatenate([vec[0][key] for vec in vecs])
+                for key in vecs[0][0].keys()
+            },
+            np.concatenate([vec[1] for vec in vecs]),
+            np.concatenate([vec[2] for vec in vecs])
+        )
 
     @property
     def size(self) -> List[int]:
@@ -372,3 +411,117 @@ class MultiReplayBuffer:
         with open(path, 'rb') as f:
             buffer = pickle.load(f)
         return buffer
+
+
+class _PrevReplayBuffer(ReplayBuffer):
+
+    def __init__(self, n: int, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
+        """Extends ReplayBuffer to fetch a number of experience tuples before selected index.
+        If selected index indicates first time step in a episode, no additional tuples are attached.
+
+        Also policies buffer is replaced to store data in same specification as actions
+        (used in algorithms with autocorrelated actions).
+
+        Args:
+            n: Number of previous experience tuples to be fetched
+            max_size: maximum number of entries to be stored in the buffer - only newest entries are stored.
+            action_spec: BufferFieldSpec with actions space specification
+            obs_spec: BufferFieldSpec with observations space specification
+        """
+        super().__init__(max_size, action_spec, obs_spec)
+        self._policies = self._init_field(action_spec)
+        self._n = n
+
+    def get(self, trajectory_len: Optional[int] = None) -> Tuple[Dict[str, np.array], int]:
+        if self._current_size == 0:
+            # empty buffer
+            return ({
+                "actions": np.array([]),
+                "observations": np.array([]),
+                "rewards": np.array([]),
+                "next_observations": np.array([]),
+                "policies": np.array([]),
+                "dones": np.array([]),
+                "ends": np.array([])
+            }, -1)
+
+        sample_index = self._sample_random_index()
+        n = self._n
+
+        if sample_index - n < self._pointer <= sample_index:
+            n = sample_index - self._pointer
+
+        if sample_index - n < 0:
+            if self._current_size < self._max_size:
+                n = sample_index
+            elif self._pointer > sample_index - n + self._max_size:
+                n = self._max_size + sample_index - self._pointer
+        
+        if sample_index - n >= 0:
+            r = np.r_[sample_index - n:sample_index]
+        else:
+            r = np.r_[sample_index:self._max_size, 0:self._max_size]
+        ends = self._ends[r]
+        if ends.any():
+            n = n - np.nonzero(ends)[-1][0] - 1
+
+        start_index, end_index = self._get_indices(sample_index, trajectory_len)
+        
+        start_index = (start_index - n) % self._max_size
+
+        batch = self._fetch_batch(end_index, sample_index, start_index)
+        return batch
+
+    def get_vec(self, length: int, trajectory_len: int) -> Tuple[Dict[str, np.array], np.array]:
+        if self._current_size == 0:
+            # empty buffer
+            return ({
+                "actions": np.zeros((length, 0)),
+                "observations": np.zeros((length, 0)),
+                "rewards": np.zeros((length, 0)),
+                "next_observations": np.zeros((length, 0)),
+                "policies": np.zeros((length, 0)),
+                "dones": np.zeros((length, 0)),
+                "ends": np.zeros((length, 0))
+            }, np.repeat(-1, length))
+
+        sample_indices = self._sample_random_index(length)
+        prev_lens = np.repeat(self._n, length)
+        lens = np.repeat(trajectory_len, length)
+
+        prev_pointer_ind = np.logical_and(sample_indices - prev_lens < self._pointer, self._pointer <= sample_indices)
+        prev_lens[prev_pointer_ind] = sample_indices[prev_pointer_ind] - self._pointer
+
+        if self._current_size < self._max_size:
+            prev_current_size_ind = sample_indices - prev_lens < 0
+            prev_lens[prev_current_size_ind] = sample_indices[prev_current_size_ind]
+
+        prev_pointer_ovf_ind = np.logical_and(sample_indices - prev_lens < 0, self._pointer > sample_indices - prev_lens + self._max_size)
+        prev_lens[prev_pointer_ovf_ind] = (self._max_size - self._pointer) + sample_indices[prev_pointer_ovf_ind]
+
+        pointer_ind = np.logical_and(sample_indices < self._pointer, self._pointer < sample_indices + lens)
+        lens[pointer_ind] = sample_indices[pointer_ind] - self._pointer
+
+        if self._current_size < self._max_size:
+            current_size_ind = np.logical_and(sample_indices + lens > self._current_size, self._current_size < self._max_size)
+            lens[current_size_ind] = self._current_size - sample_indices[current_size_ind]
+
+        pointer_ovf_ind = np.logical_and(sample_indices + lens > self._max_size, self._pointer < sample_indices + lens - self._max_size)
+        lens[pointer_ovf_ind] = (self._pointer + self._max_size) - sample_indices[pointer_ovf_ind]
+
+        selection = (np.repeat(np.expand_dims(sample_indices, 1), self._n + trajectory_len, axis=1) + np.arange(self._n + trajectory_len))
+        selection = selection % self._max_size
+
+        batch = self._fetch_slice(selection)
+
+        ends_mask = np.cumsum(batch['ends'][:,self._n:-1], axis=1) == 0
+        prev_ends_mask = np.flip(np.cumsum(np.flip(batch['ends'][:,:self._n], 1), axis=1), 1) == 0
+        mask = np.concatenate([ends_mask, np.ones((length, 1)), prev_ends_mask], axis=1)
+
+        for k, v in batch.items():
+            m = mask
+            while len(m.shape) < len(v.shape):
+                m = np.expand_dims(m, -1)
+            batch[k] = v * m
+
+        return batch, lens, prev_lens

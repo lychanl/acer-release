@@ -121,7 +121,7 @@ def main():
     env_name = cmd_parameters.env_name
 
     timesteps_increase = parameters.pop('timesteps_increase', None)
-    if timesteps_increase:
+    if timesteps_increase and timesteps_increase != 1:
         parameters['gamma'] = calculate_gamma(parameters['gamma'], timesteps_increase)
         env_name = getDTChangedEnvName(env_name, timesteps_increase)
         max_time_steps *= timesteps_increase

@@ -12,7 +12,39 @@ from algos.base import BaseActor, Critic, BaseACERAgent, GaussianActor
 from replay_buffer import BufferFieldSpec, PrevReplayBuffer, MultiReplayBuffer
 
 
-from algos.acerac import get_lambda_0, get_lambda_1
+
+def get_lambda_1(n: int, alpha: float) -> np.array:
+    """Computes Lambda^n_1 matrix.
+
+    Args:
+        n: size of the matrix
+        alpha: autocorrelation coefficient
+
+    Returns:
+        Lambda^n_1 matrix
+    """
+    lam = np.zeros(shape=(n + 1, n + 1), dtype=np.float32)
+    for i in range(n + 1):
+        for j in range(i, n + 1):
+            lam[i][j] = lam[j][i] = alpha ** abs(i - j) - alpha ** (i + j + 2)
+    return lam
+
+
+def get_lambda_0(n: int, alpha: float) -> np.array:
+    """Computes Lambda^n_0 matrix.
+
+    Args:
+        n: size of the matrix
+        alpha: autocorrelation coefficient
+
+    Returns:
+        Lambda^n_1 matrix
+    """
+    lam = np.zeros(shape=(n + 1, n + 1), dtype=np.float32)
+    for i in range(n + 1):
+        for j in range(i, n + 1):
+            lam[i][j] = lam[j][i] = alpha ** abs(i - j)
+    return lam
 
 
 class AutocorrelatedActor(GaussianActor):
@@ -334,6 +366,8 @@ class ACERAC(BaseACERAgent):
              tf.dtypes.bool, tf.dtypes.int32, tf.dtypes.int32,
              tf.dtypes.float32, self._actor.action_dtype, self._actor.action_dtype)
         ).prefetch(2)
+        
+        self.logged_graph = False
 
     def _init_replay_buffer(self, memory_size: int):
         if type(self._actions_space) == gym.spaces.Discrete:
@@ -385,7 +419,7 @@ class ACERAC(BaseACERAgent):
             for batch in self._data_loader.take(experience_replay_iterations):
                 self._learn_from_experience_batch(*batch)
 
-    @tf.function(experimental_relax_shapes=True)
+    @tf.function #(experimental_relax_shapes=True)
     def _learn_from_experience_batch(self, obs: tf.Tensor, obs_next: tf.Tensor, actions: tf.Tensor,
                                      old_actor_outs: tf.Tensor, rewards: tf.Tensor, dones: tf.Tensor,
                                      lengths: tf.Tensor, prev_samples_len: tf.Tensor,
@@ -520,9 +554,7 @@ class ACERAC(BaseACERAgent):
         return c_invs
 
     def _fetch_offline_batch(self) -> List[Tuple[Dict[str, Union[np.array, list]], int]]:
-        trajectory_lens = [[self._n for _ in range(self._num_parallel_envs)] for _ in range(self._batches_per_env)]
-        batch = []
-        [batch.extend(self._memory.get(trajectories)) for trajectories in trajectory_lens]
+        batch = self._memory.get_vec(self._batches_per_env, self._n)
         return batch
 
     def _experience_replay_generator(self):
@@ -530,37 +562,28 @@ class ACERAC(BaseACERAgent):
         experience tuples in a single trajectory.
         Trajectories are returned in shape [batch, self._n, <obs/actions/etc shape>]
         """
+        prev_n = self._actor.required_prev_samples
         while True:
-            offline_batches = self._fetch_offline_batch()
-            obs = np.zeros(shape=(len(offline_batches), self._n, self._observations_space.shape[0]))
-            obs_next = np.zeros(shape=(len(offline_batches), self._observations_space.shape[0]))
-            actions = np.zeros(shape=(len(offline_batches), self._n, self._actions_space.shape[0]))
-            rewards = np.zeros(shape=(len(offline_batches), self._n))
-            means = np.zeros(shape=(len(offline_batches), self._n, self._actions_space.shape[0]))
-            dones = np.zeros(shape=(len(offline_batches),))
-            lengths = np.zeros(shape=len(offline_batches))
-            prev_samples_len = np.zeros(shape=len(offline_batches), dtype=np.int32)
+            offline_batches, lens, prev_lens = self._fetch_offline_batch()
+            
+            lengths = lens
+            obs = offline_batches['observations'][:,prev_n:]
+            obs_next = offline_batches['next_observations'][np.arange(self._batch_size),prev_n + lens - 1]
+            actions = offline_batches['actions'][:,prev_n:]
+            rewards = offline_batches['rewards'][:,prev_n:]
+            means = offline_batches['policies'][:,prev_n:]
+            dones = offline_batches['dones'][np.arange(self._batch_size),prev_n + lens - 1]
 
-            prev_obs = np.zeros(shape=(len(offline_batches), self._actor.required_prev_samples, self._observations_space.shape[0]))
-            prev_actions = np.zeros(shape=(len(offline_batches), self._actor.required_prev_samples, self._actions_space.shape[0]))
-            prev_means = np.zeros(shape=(len(offline_batches), self._actor.required_prev_samples, self._actions_space.shape[0]))
+            prev_samples_len = prev_lens
 
-            for i, batch_and_first_index in enumerate(offline_batches):
-                batch, first_index = batch_and_first_index
-                length = len(batch['observations']) - first_index
-                assert (length > 0 and len(batch['observations'][first_index:]) > 0),\
-                    f'length {length} fi {first_index} l {len(batch["observations"])}'
-                obs[i, :length] = batch['observations'][first_index:]
-                obs_next[i] = batch['next_observations'][-1]
-                actions[i, :length] = batch['actions'][first_index:]
-                means[i, :length] = batch['policies'][first_index:]
-                rewards[i, :length] = batch['rewards'][first_index:]
-                dones[i] = batch['dones'][-1]
-                prev_samples_len[i] = first_index
-                lengths[i] = length
-                prev_obs[i, :first_index] = batch['observations'][:first_index]
-                prev_actions[i, :first_index] = batch['actions'][:first_index]
-                prev_means[i, :first_index] = batch['policies'][:first_index]
+            # shift prev samples so that at 0 is the first actual sample
+            i1, i2 = np.ogrid[:self._batch_size, :prev_n]
+            i2 = i2 - prev_lens[:, np.newaxis]
+            i2 = i2 % prev_n
+
+            prev_obs = offline_batches['observations'][i1, i2]
+            prev_actions = offline_batches['actions'][i1, i2]
+            prev_means = offline_batches['policies'][i1, i2]
 
             yield (
                 obs,
