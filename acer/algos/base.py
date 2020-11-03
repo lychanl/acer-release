@@ -11,7 +11,7 @@ import tf_utils
 import utils
 from models.cnn import build_cnn_network
 from models.mlp import build_mlp_network
-from replay_buffer import MultiReplayBuffer, BufferFieldSpec
+from replay_buffer import MultiReplayBuffer, BufferFieldSpec, ReplayBuffer
 
 from tensorflow.compat.v1 import ConfigProto
 from tensorflow.compat.v1 import InteractiveSession
@@ -399,6 +399,7 @@ class BaseACERAgent(ABC):
         self._limit_reward_tanh = limit_reward_tanh
         self._gradient_norm = gradient_norm
         self._gradient_norm_median_threshold = gradient_norm_median_threshold
+        self._batch_size = self._num_parallel_envs * self._batches_per_env
 
         self._actor_gradient_norm_median = tf.Variable(initial_value=1.0, trainable=False)
         self._critic_gradient_norm_median = tf.Variable(initial_value=1.0, trainable=False)
@@ -452,6 +453,7 @@ class BaseACERAgent(ABC):
             actions_shape = self._actions_space.shape
 
         self._memory = MultiReplayBuffer(
+            buffer_class=ReplayBuffer,
             action_spec=BufferFieldSpec(shape=actions_shape, dtype=self._actor.action_dtype_np),
             obs_spec=BufferFieldSpec(shape=self._observations_space.shape, dtype=self._observations_space.dtype),
             max_size=memory_size,

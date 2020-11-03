@@ -42,7 +42,7 @@ ALGOS = {
     'racer': RepresentativeACER,
     'qacer': QACER,
     'qacerac': QACERAC,
-    'wacer': WeightedACER
+    'wacer': WeightedACER,
 }
 
 

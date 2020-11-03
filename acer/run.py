@@ -38,8 +38,9 @@ parser.add_argument('--kappa', type=float, help='kappa parameter for qacer', def
 parser.add_argument('--atoms', type=int, help='number of atoms for qacer', default=50)
 parser.add_argument('--alpha', type=float, help='Alpha parameter for acerac. None will set 1-(1/tau)', default=None)
 parser.add_argument('--tau', type=int, help='Tau parameter for acerac', default=2)
-parser.add_argument('--noise_type', type=str, help='Type of noise for OldACERAC',
-                    default='mean', choices=['mean', 'autocor'])
+parser.add_argument('--n', type=int, help='N parameter for fast acerac', default=2)
+parser.add_argument('--noise_type', type=str, help='Type of noise for ACERAC',
+                    default='autocor', choices=['autocor', 'integrated'])
 parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
                                               '0.4 * actions_bound is set.',
                     required=False, default=None)
@@ -50,8 +51,7 @@ parser.add_argument('--actor_layers', nargs='+', type=int, help='List of BaseAct
                     required=False, default=(100, 100))
 parser.add_argument('--critic_layers', nargs='+', type=int, help='List of Critic\'s neural network hidden layers sizes',
                     required=False, default=(100, 100))
-parser.add_argument('--num_parallel_envs', type=int, help='Number of environments to be run in a parallel', default=10,
-                    required=True)
+parser.add_argument('--num_parallel_envs', type=int, help='Number of environments to be run in a parallel', default=1)
 parser.add_argument('--batches_per_env', type=int, help='Number of batches sampled from one environment buffer in one'
                                                         'backward pass',
                     default=5)
@@ -67,8 +67,6 @@ parser.add_argument('--limit_reward_tanh', help='limits reward to [-value, value
                     type=float, default=None)
 parser.add_argument('--td_clip', help='Temporal difference clipping threshold (ACERAC only)',
                     type=float, default=None)
-parser.add_argument('--use_normalized_density_ratio', help='True to use ',
-                    action='store_true')
 parser.add_argument('--gradient_norm', help='Global gradient clip norm, 0 to use learned median of the gradient',
                     type=float, default=None)
 parser.add_argument('--gradient_norm_median_threshold', help='Number of medians used to clip gradients by their norm',
@@ -123,7 +121,7 @@ def main():
     env_name = cmd_parameters.env_name
 
     timesteps_increase = parameters.pop('timesteps_increase', None)
-    if timesteps_increase:
+    if timesteps_increase and timesteps_increase != 1:
         parameters['gamma'] = calculate_gamma(parameters['gamma'], timesteps_increase)
         env_name = getDTChangedEnvName(env_name, timesteps_increase)
         max_time_steps *= timesteps_increase
