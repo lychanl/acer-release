@@ -500,7 +500,7 @@ class _PrevReplayBuffer(ReplayBuffer):
         prev_lens[prev_pointer_ovf_ind] = (self._max_size - self._pointer) + sample_indices[prev_pointer_ovf_ind]
 
         pointer_ind = np.logical_and(sample_indices < self._pointer, self._pointer < sample_indices + lens)
-        lens[pointer_ind] = sample_indices[pointer_ind] - self._pointer
+        lens[pointer_ind] = self._pointer - sample_indices[pointer_ind]
 
         if self._current_size < self._max_size:
             current_size_ind = np.logical_and(sample_indices + lens > self._current_size, self._current_size < self._max_size)
