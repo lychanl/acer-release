@@ -133,7 +133,7 @@ class NoiseGaussianActor(AutocorrelatedActor):
             noise[:,0] / self._alpha
         )
 
-        return tf.stack([prev_noise, tf.gather_nd(noise ,tf.expand_dims(lengths, 1) - 1, batch_dims=1)], axis=1)
+        return tf.stack([prev_noise, tf.gather_nd(noise ,tf.maximum(0, tf.expand_dims(lengths, 1) - 1), batch_dims=1)], axis=1)
     
     @tf.function
     def estimate_noise_from_prev(self, actions: tf.Tensor, prev_samples_len: tf.Tensor, prev_actions: tf.Tensor,
@@ -253,7 +253,7 @@ class IntegratedNoiseGaussianActor(AutocorrelatedActor):
         prev_diff = prev_actions - prev_actor_outs
         diff = actions - actor_outs
 
-        prev_diff_last = tf.gather_nd(prev_diff, tf.expand_dims(prev_samples_len, 1) - 1, batch_dims=1)
+        prev_diff_last = tf.gather_nd(prev_diff, tf.maximum(0, tf.expand_dims(prev_samples_len, 1) - 1), batch_dims=1)
 
         xi1_prev = tf.where(
             prev_samples_len_expanded == 0,
@@ -272,7 +272,7 @@ class IntegratedNoiseGaussianActor(AutocorrelatedActor):
 
         xi2_last = tf.gather_nd(diff, lengths_expanded - 1, batch_dims=1)
         xi1_last = tf.where(lengths_expanded > 1,
-            (xi2_last - self._alpha * tf.gather_nd(diff, lengths_expanded - 2, batch_dims=1)) / self._alpha1,
+            (xi2_last - self._alpha * tf.gather_nd(diff, tf.maximum(0, lengths_expanded - 2), batch_dims=1)) / self._alpha1,
             tf.where(prev_samples_len_expanded > 0,
                 xi2_last - self._alpha1 * prev_diff_last,
                 xi2_last / self._alpha0
