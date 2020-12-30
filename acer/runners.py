@@ -77,7 +77,7 @@ class Runner:
     MEASURE_TIME_TIME_STEPS = 1000
 
     def __init__(self, environment_name: str, algorithm: str = 'acer', algorithm_parameters: Optional[dict] = None,
-                 num_parallel_envs: int = 5, evaluate_time_steps_interval: int = 1500,
+                 num_parallel_envs: int = 5, evaluate_time_steps_interval: int = 1500, n_step: int = 1,
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
                  record_end: bool = True, experiment_name: str = None, asynchronous: bool = True,
                  log_tensorboard: bool = True, do_checkpoint: bool = True, record_time_steps: int = None):
@@ -105,6 +105,7 @@ class Runner:
         self._next_record_timestamp = 0
         self._n_envs = num_parallel_envs
         self._evaluate_time_steps_interval = evaluate_time_steps_interval
+        self._n_step = n_step
         self._num_evaluation_runs = num_evaluation_runs
         self._max_time_steps = max_time_steps
         self._log_tensorboard = log_tensorboard

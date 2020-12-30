@@ -32,11 +32,12 @@ parser.add_argument('--actor_lr', type=float, help='BaseActor learning rate', re
 parser.add_argument('--critic_lr', type=float, help='Critic learning rate', required=False, default=0.001)
 parser.add_argument('--explorer_lr', type=float, help='Explorer (eacer) learning rate', required=False, default=0.001)
 parser.add_argument('--actor_beta_penalty', type=float, help='BaseActor penalty coefficient', default=0.001)
-parser.add_argument('--c', type=int, help='experience replay intensity', required=False, default=10)
-parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=0.3)
+parser.add_argument('--n_step', type=int, help='experience replay frequency', required=False, default=1)
+parser.add_argument('--c', type=int, help='experience replay intensity', required=False, default=1)
+parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=1)
 parser.add_argument('--kappa', type=float, help='kappa parameter for qacer', default=0.)
 parser.add_argument('--atoms', type=int, help='number of atoms for qacer', default=50)
-parser.add_argument('--alpha', type=float, help='Alpha parameter for acerac. None will set 1-(1/tau)', default=None)
+parser.add_argument('--alpha', type=float, help='Alpha parameter for acerac.', default=0.5)
 parser.add_argument('--tau', type=int, help='Tau parameter for acerac', default=2)
 parser.add_argument('--n', type=int, help='N parameter for fast acerac', default=2)
 parser.add_argument('--noise_type', type=str, help='Type of noise for ACERAC',
@@ -44,9 +45,9 @@ parser.add_argument('--noise_type', type=str, help='Type of noise for ACERAC',
 parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
                                               '0.4 * actions_bound is set.',
                     required=False, default=None)
-parser.add_argument('--learning_starts', type=int, help='experience replay warm start coefficient', default=1000)
+parser.add_argument('--learning_starts', type=int, help='experience replay warm start coefficient', default=10000)
 parser.add_argument('--memory_size', type=int, help='memory buffer size (sum of all of the buffers from every env',
-                    required=False, default=1e6)
+                    required=False, default=1e5)
 parser.add_argument('--actor_layers', nargs='+', type=int, help='List of BaseActor\'s neural network hidden layers sizes',
                     required=False, default=(100, 100))
 parser.add_argument('--critic_layers', nargs='+', type=int, help='List of Critic\'s neural network hidden layers sizes',
@@ -107,6 +108,7 @@ def main():
     parameters = {k: v for k, v in vars(cmd_parameters).items() if v is not None}
     parameters.pop('env_name')
     evaluate_time_steps_interval = parameters.pop('evaluate_time_steps_interval')
+    n_step = parameters.pop('n_step')
     num_evaluation_runs = parameters.pop('num_evaluation_runs')
     max_time_steps = parameters.pop('max_time_steps')
     save_video_on_kill = parameters.pop('save_video_on_kill')
@@ -123,9 +125,23 @@ def main():
     timesteps_increase = parameters.pop('timesteps_increase', None)
     if timesteps_increase and timesteps_increase != 1:
         parameters['gamma'] = calculate_gamma(parameters['gamma'], timesteps_increase)
+        print(f'Auto-adapted gamma to {parameters["gamma"]}')
+        parameters['memory_size'] = parameters['memory_size'] * timesteps_increase
+        print(f'Auto-adapted memory_size to {parameters["memory_size"]}')
+        parameters['learning_starts'] = parameters['learning_starts'] * timesteps_increase
+        print(f'Auto-adapted learning_starts to {parameters["learning_starts"]}')
+        parameters['n'] = parameters['n'] * timesteps_increase
+        print(f'Auto-adapted n to {parameters["n"]}')
+        if 'alpha' in parameters:
+            parameters['alpha'] = parameters['alpha'] ** (1 / timesteps_increase)
+            print(f'Auto-adapted alpha to {parameters["alpha"]}')
         env_name = getDTChangedEnvName(env_name, timesteps_increase)
         max_time_steps *= timesteps_increase
+        print(f'Auto-adapted max_time_steps to {max_time_steps}')
         evaluate_time_steps_interval *= timesteps_increase
+        print(f'Auto-adapted evaluate_time_steps_interval to {evaluate_time_steps_interval}')
+        n_step = n_step * timesteps_increase
+        print(f'Auto-adapted n_step to {n_step}')
 
     if use_cpu:
         tf.config.set_visible_devices([], 'GPU')

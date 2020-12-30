@@ -171,7 +171,10 @@ def getPossiblyDTChangedEnvBuilder(env_name):
         env = TimeStepChangedEnv()
 
         if base_spec.max_episode_steps:
-            env = gym.wrappers.TimeLimit(env, base_spec.max_episode_steps * timesteps_increase)
+            env = gym.wrappers.TimeLimit(
+                gym.wrappers.TransformReward(env, lambda r: r / 3),
+                base_spec.max_episode_steps * timesteps_increase
+            )
         
         return env
     
