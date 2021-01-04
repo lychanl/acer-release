@@ -516,8 +516,11 @@ class _PrevReplayBuffer(ReplayBuffer):
 
         ends_mask = np.cumsum(batch['ends'][:,self._n:-1], axis=1) == 0
         prev_ends_mask = np.flip(np.cumsum(np.flip(batch['ends'][:,:self._n], 1), axis=1), 1) == 0
-        mask = np.concatenate([ends_mask, np.ones((length, 1)), prev_ends_mask], axis=1)
+        mask = np.concatenate([prev_ends_mask, np.ones((length, 1)), ends_mask], axis=1)
 
+        lens = ends_mask.sum(axis=1) + 1
+        prev_lens = prev_ends_mask.sum(axis=1)
+        
         for k, v in batch.items():
             m = mask
             while len(m.shape) < len(v.shape):

@@ -96,6 +96,7 @@ parser.add_argument('--synchronous', action='store_true',
                     help='True if not use asynchronous envs')
 parser.add_argument('--timesteps_increase', help='Timesteps per second increase. Affects gamma and max time steps', type=int, default=None)
 
+parser.add_argument('--dump', help='Dump memory and models on given timesteps', nargs='*', type=int)
 
 def main():
     args = parser.parse_args()
@@ -121,6 +122,7 @@ def main():
     use_cpu = parameters.pop('use_cpu')
     synchronous = parameters.pop('synchronous')
     env_name = cmd_parameters.env_name
+    dump = args.dump or ()
 
     timesteps_increase = parameters.pop('timesteps_increase', None)
     if timesteps_increase and timesteps_increase != 1:
@@ -159,7 +161,9 @@ def main():
         asynchronous=not synchronous,
         log_tensorboard=not no_tensorboard,
         do_checkpoint=not no_checkpoint,
-        record_time_steps=record_time_steps
+        record_time_steps=record_time_steps,
+        n_step=n_step,
+        dump=dump
     )
 
     def handle_sigint(sig, frame):

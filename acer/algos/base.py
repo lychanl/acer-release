@@ -377,7 +377,7 @@ class BaseACERAgent(ABC):
                  actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999, actor_adam_epsilon: float = 1e-7,
                  critic_lr: float = 0.001, critic_adam_beta1: float = 0.9, critic_adam_beta2: float = 0.999,
                  critic_adam_epsilon: float = 1e-7, standardize_obs: bool = False, rescale_rewards: int = -1,
-                 limit_reward_tanh: float = 3., time_step: int = 1, gradient_norm: float = None,
+                 limit_reward_tanh: float = None, time_step: int = 1, gradient_norm: float = None,
                  gradient_norm_median_threshold: float = 4, learning_starts: int = 1000, **kwargs):
 
         self._tf_time_step = tf.Variable(

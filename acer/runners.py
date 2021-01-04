@@ -80,7 +80,7 @@ class Runner:
                  num_parallel_envs: int = 5, evaluate_time_steps_interval: int = 1500, n_step: int = 1,
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
                  record_end: bool = True, experiment_name: str = None, asynchronous: bool = True,
-                 log_tensorboard: bool = True, do_checkpoint: bool = True, record_time_steps: int = None):
+                 log_tensorboard: bool = True, do_checkpoint: bool = True, record_time_steps: int = None, dump=()):
         """Trains and evaluates the agent.
 
         Args:
@@ -148,13 +148,13 @@ class Runner:
         self._save_parameters(algorithm_parameters)
         self._agent = _get_agent(algorithm, algorithm_parameters, dummy_env.observation_space, dummy_env.action_space)
         self._current_obs = self._env.reset()
+        self._dump = dump
 
     def run(self):
         """Performs training. If 'evaluate' is True, evaluation of the policy is performed. The evaluation
         uses policy that is being optimized, not the one used in training (i.e. randomness is turned off)
         """
         while self._max_time_steps == -1 or self._time_step <= self._max_time_steps:
-
             if self._is_time_to_evaluate():
                 self._evaluate()
                 if self._time_step != 0:
@@ -168,8 +168,12 @@ class Runner:
             start_time = time.time()
             experience = self._step()
             self._agent.save_experience(experience)
-            self._agent.learn()
+            if self._time_step % self._n_step == 0:
+                self._agent.learn()
             self._elapsed_time_measure += time.time() - start_time
+
+            if self._time_step in self._dump:
+                self.dump()
 
         self._csv_logger.close()
         if self._record_end:
@@ -329,3 +333,9 @@ class Runner:
         self._agent.save(checkpoint_dir / 'model')
 
         logging.info(f"saved checkpoint in '{str(checkpoint_dir)}'")
+
+    def dump(self):
+        dump_dir = self._log_dir / f'dump_{self._time_step}'
+        dump_dir.mkdir()
+
+        self._agent.save(dump_dir / 'model')
