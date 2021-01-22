@@ -128,7 +128,7 @@ def main():
     if timesteps_increase and timesteps_increase != 1:
         parameters['gamma'] = calculate_gamma(parameters['gamma'], timesteps_increase)
         print(f'Auto-adapted gamma to {parameters["gamma"]}')
-        parameters['lam'] = 1 - (1 - (1 - parameters['lam']) / timesteps_increase)
+        parameters['lam'] = (1 - (1 - parameters['lam']) / timesteps_increase)
         print(f'Auto-adapted lam to {parameters["lam"]}')
         parameters['memory_size'] = parameters['memory_size'] * timesteps_increase
         print(f'Auto-adapted memory_size to {parameters["memory_size"]}')
