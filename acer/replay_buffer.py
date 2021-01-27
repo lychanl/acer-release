@@ -509,7 +509,7 @@ class _PrevReplayBuffer(ReplayBuffer):
         pointer_ovf_ind = np.logical_and(sample_indices + lens > self._max_size, self._pointer < sample_indices + lens - self._max_size)
         lens[pointer_ovf_ind] = (self._pointer + self._max_size) - sample_indices[pointer_ovf_ind]
 
-        selection = (np.repeat(np.expand_dims(sample_indices, 1), self._n + trajectory_len, axis=1) + np.arange(self._n + trajectory_len))
+        selection = (np.repeat(np.expand_dims(sample_indices, 1), self._n + trajectory_len, axis=1) + np.arange(-self._n, trajectory_len))
         selection = selection % self._max_size
 
         batch = self._fetch_slice(selection)
@@ -518,8 +518,8 @@ class _PrevReplayBuffer(ReplayBuffer):
         prev_ends_mask = np.flip(np.cumsum(np.flip(batch['ends'][:,:self._n], 1), axis=1), 1) == 0
         mask = np.concatenate([prev_ends_mask, np.ones((length, 1)), ends_mask], axis=1)
 
-        lens = ends_mask.sum(axis=1) + 1
-        prev_lens = prev_ends_mask.sum(axis=1)
+        lens = np.minimum(lens, ends_mask.sum(axis=1) + 1)
+        prev_lens = np.minimum(prev_lens, prev_ends_mask.sum(axis=1))
         
         for k, v in batch.items():
             m = mask
