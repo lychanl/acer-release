@@ -136,17 +136,15 @@ class NoiseGaussianActor(AutocorrelatedActor):
         return tf.stack([prev_noise, tf.gather_nd(noise ,tf.maximum(0, tf.expand_dims(lengths, 1) - 1), batch_dims=1)], axis=1)
     
     @tf.function
-    def estimate_noise_from_prev(self, actions: tf.Tensor, prev_samples_len: tf.Tensor, prev_actions: tf.Tensor,
-            old_prev_actor_outs: tf.Tensor, prev_actor_outs: tf.Tensor, n: int, batch_size: int) -> Tuple[tf.Tensor, tf.Tensor]:
+    def estimate_noise_trajectory(self, prev_samples_len: tf.Tensor, prev_actions: tf.Tensor,
+            prev_actor_outs: tf.Tensor, n: int, batch_size: int) -> Tuple[tf.Tensor, tf.Tensor]:
         alpha_coeffs = tf.pow(
             self._alpha,
             tf.range(1, n + 1, dtype=tf.float32)
         )
         noise_mask = tf.cast(prev_samples_len, tf.float32)
         mask = tf.expand_dims(tf.expand_dims(noise_mask, 1) * tf.expand_dims(alpha_coeffs, 0), 2)
-        mu = (prev_actions - old_prev_actor_outs) * mask
-        eta = (prev_actions - prev_actor_outs) * mask
-        return eta, mu
+        return (prev_actions - prev_actor_outs) * mask
 
 
 class IntegratedNoiseGaussianActor(AutocorrelatedActor):
@@ -284,6 +282,30 @@ class IntegratedNoiseGaussianActor(AutocorrelatedActor):
         return tf.stack([xi_prev, xi_last], axis=1)
     
     @tf.function
+    def estimate_noise_trajectory(self, prev_samples_len: tf.Tensor, prev_actions: tf.Tensor,
+            prev_actor_outs: tf.Tensor, n: int, batch_size: int) -> Tuple[tf.Tensor, tf.Tensor]:        
+        alpha_coeffs = tf.pow(
+            self._alpha,
+            tf.range(1, n + 1, dtype=tf.float32)
+        )
+        alpha_coeffs = tf.expand_dims(tf.expand_dims(alpha_coeffs, 0), 2)
+
+        prev_samples_len_expanded = tf.expand_dims(prev_samples_len, 1)
+
+        diff = prev_actions - prev_actor_outs
+
+        xi2 = diff[:,1]
+        xi1 = (xi2 - self._alpha * diff[:,0]) / self._alpha1
+        
+        xi1_masked = tf.where(prev_samples_len_expanded == 2, xi1, tf.zeros_like(xi1))
+        xi2_masked = tf.where(prev_samples_len_expanded == 2, xi2, tf.zeros_like(xi2))
+
+        return tf.reshape(
+                tf.matmul(tf.reshape(tf.expand_dims(xi1_masked, 1) * alpha_coeffs, (batch_size, -1)), self._d_n, transpose_b=True),
+            (batch_size, n, -1)) + tf.expand_dims(xi2_masked, 1) * alpha_coeffs
+
+
+    @tf.function
     def estimate_noise_from_prev(self, actions: tf.Tensor, prev_samples_len: tf.Tensor, prev_actions: tf.Tensor,
             old_prev_actor_outs: tf.Tensor, prev_actor_outs: tf.Tensor, n: int, batch_size: int) -> Tuple[tf.Tensor, tf.Tensor]:
         alpha_coeffs = tf.pow(
@@ -300,14 +322,14 @@ class IntegratedNoiseGaussianActor(AutocorrelatedActor):
         xi2 = diff[:,1]
         xi1 = (xi2 - self._alpha * diff[:,0]) / self._alpha1
         
-        xi1_masked = tf.where(prev_samples_len_expanded == 0, tf.zeros_like(xi1), xi1)
-        xi2_masked = tf.where(prev_samples_len_expanded == 0, tf.zeros_like(xi2), xi2)
+        xi1_masked = tf.where(prev_samples_len_expanded == 2, xi1, tf.zeros_like(xi1))
+        xi2_masked = tf.where(prev_samples_len_expanded == 2, xi2, tf.zeros_like(xi2))
 
         xi2_old = diff_old[:,1]
         xi1_old = (xi2_old - self._alpha * diff_old[:,0]) / self._alpha1
 
-        xi1_old_masked = tf.where(prev_samples_len_expanded == 0, tf.zeros_like(xi1_old), xi1_old)
-        xi2_old_masked = tf.where(prev_samples_len_expanded == 0, tf.zeros_like(xi2_old), xi2_old)
+        xi1_old_masked = tf.where(prev_samples_len_expanded == 2, xi1_old, tf.zeros_like(xi1_old))
+        xi2_old_masked = tf.where(prev_samples_len_expanded == 2, xi2_old, tf.zeros_like(xi2_old))
 
         eta = tf.reshape(
                 tf.matmul(tf.reshape(tf.expand_dims(xi1_masked, 1) * alpha_coeffs, (batch_size, -1)), self._d_n, transpose_b=True),
@@ -450,8 +472,8 @@ class ACERAC(BaseACERAgent):
             # trajectories shorter than n mask
             mask = tf.expand_dims(tf.sequence_mask(lengths, maxlen=self._n, dtype=tf.float32), 2)
 
-            eta, mu = self._actor.estimate_noise_from_prev(
-                actions, prev_samples_len, prev_actions, old_prev_actor_outs, prev_actor_outs, self._n, self._batch_size)
+            eta = self._actor.estimate_noise_trajectory(prev_samples_len, prev_actions, prev_actor_outs, self._n, self._batch_size)
+            mu = self._actor.estimate_noise_trajectory(prev_samples_len, prev_actions, old_prev_actor_outs, self._n, self._batch_size)
             
             actions_mu_diff_current = (actions - actor_outs - eta) * mask
             actions_mu_diff_old = (actions - old_actor_outs - mu) * mask
@@ -550,7 +572,7 @@ class ACERAC(BaseACERAgent):
         # return tf.minimum(density_ratio, self._b)
     
     def _get_c_invs(self, prev_samples_len: tf.Tensor) -> tf.Tensor:
-        c_invs = tf.where(tf.reshape(prev_samples_len > 0, (-1, 1, 1)), self._lam1_c_prod_inv, self._lam0_c_prod_inv)
+        c_invs = tf.where(tf.reshape(prev_samples_len == self._actor.required_prev_samples, (-1, 1, 1)), self._lam1_c_prod_inv, self._lam0_c_prod_inv)
         return c_invs
 
     def _fetch_offline_batch(self) -> List[Tuple[Dict[str, Union[np.array, list]], int]]:
