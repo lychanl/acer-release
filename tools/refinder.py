@@ -72,7 +72,7 @@ def find_results(logdir, env, algo, ts, steps, params):
                     all_results_props.append(results_props)
             
             except Exception as e:
-                print('Error processing file {fpath}', file=sys.stderr)
+                print(f'Error processing file {fpath}', file=sys.stderr)
                 print(e, file=sys.stderr)
     
     return matches, all_runs_params, all_results_props
