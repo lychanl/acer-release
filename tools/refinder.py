@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import csv
+import sys
 
 
 def getDTChangedEnvName(base_env_name, timesteps_increase):
@@ -62,12 +63,17 @@ def find_results(logdir, env, algo, ts, steps, params):
         params_path = os.path.join(fpath, 'parameters.json')
         results_path = os.path.join(fpath, 'results.csv')
         if os.path.isdir(fpath) and os.path.isfile(params_path) and os.path.isfile(results_path):
-            run_params = load_params(params_path)
-            results_props = get_results_props(load_results(results_path))
-            if check_name(f, algo, env, ts) and check_params(run_params, params) and check_results(results_props, steps):
-                matches.append(f)
-                all_runs_params.append(run_params)
-                all_results_props.append(results_props)
+            try:
+                run_params = load_params(params_path)
+                results_props = get_results_props(load_results(results_path))
+                if check_name(f, algo, env, ts) and check_params(run_params, params) and check_results(results_props, steps):
+                    matches.append(f)
+                    all_runs_params.append(run_params)
+                    all_results_props.append(results_props)
+            
+            except Exception as e:
+                print('Error processing file {fpath}', file=sys.stderr)
+                print(e, file=sys.stderr)
     
     return matches, all_runs_params, all_results_props
 
