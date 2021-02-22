@@ -12,6 +12,8 @@ from algos.base import BaseActor, Critic, BaseACERAgent, GaussianActor
 from replay_buffer import BufferFieldSpec, PrevReplayBuffer, MultiReplayBuffer
 
 
+USE_U = True
+
 
 def get_lambda_1(n: int, alpha: float) -> np.array:
     """Computes Lambda^n_1 matrix.
@@ -57,7 +59,7 @@ class AutocorrelatedActor(GaussianActor):
         raise NotImplementedError()
     
     def calculate_q_noise(self, actions: tf.Tensor, actor_outs: tf.Tensor, lengths: tf.Tensor,
-            prev_actions: tf.Tensor, prev_actor_outs: tf.Tensor, prev_samples_len: tf.Tensor):
+            prev_actions: tf.Tensor, prev_actor_outs: tf.Tensor, prev_samples_len: tf.Tensor, actor_outs_next: tf.Tensor):
         raise NotImplementedError()
     
     def estimate_noise_from_prev(self, actions: tf.Tensor, prev_samples_len: tf.Tensor, prev_actions: tf.Tensor,
@@ -65,7 +67,7 @@ class AutocorrelatedActor(GaussianActor):
         raise NotImplementedError()
 
 
-class NoiseGaussianActor(AutocorrelatedActor):
+class NoiseGaussianActorBase(AutocorrelatedActor):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  beta_penalty: float, actions_bound: float, alpha: float = 0.8,
@@ -122,18 +124,6 @@ class NoiseGaussianActor(AutocorrelatedActor):
 
         return rep_lam0_c_prod_inv, rep_lam1_c_prod_inv
     
-    @tf.function
-    def calculate_q_noise(self, actions: tf.Tensor, actor_outs: tf.Tensor, lengths: tf.Tensor,
-            prev_actions: tf.Tensor, prev_actor_outs: tf.Tensor, prev_samples_len: tf.Tensor):
-        noise = actions - actor_outs
-
-        prev_noise = tf.where(
-            tf.expand_dims(prev_samples_len == 1, axis=1),
-            tf.squeeze(prev_actions - prev_actor_outs, axis=1),
-            noise[:,0] / self._alpha
-        )
-
-        return tf.stack([prev_noise, tf.gather_nd(noise ,tf.maximum(0, tf.expand_dims(lengths, 1) - 1), batch_dims=1)], axis=1)
     
     @tf.function
     def estimate_noise_trajectory(self, prev_samples_len: tf.Tensor, prev_actions: tf.Tensor,
@@ -145,6 +135,37 @@ class NoiseGaussianActor(AutocorrelatedActor):
         noise_mask = tf.cast(prev_samples_len, tf.float32)
         mask = tf.expand_dims(tf.expand_dims(noise_mask, 1) * tf.expand_dims(alpha_coeffs, 0), 2)
         return (prev_actions - prev_actor_outs) * mask
+
+
+class NoiseGaussianActor(NoiseGaussianActorBase):
+    @tf.function
+    def calculate_q_noise(self, actions: tf.Tensor, actor_outs: tf.Tensor, lengths: tf.Tensor,
+            prev_actions: tf.Tensor, prev_actor_outs: tf.Tensor, prev_samples_len: tf.Tensor, actor_outs_next: tf.Tensor):
+        noise = actions - actor_outs
+
+        prev_noise = tf.where(
+            tf.expand_dims(prev_samples_len == 1, axis=1),
+            tf.squeeze(prev_actions - prev_actor_outs, axis=1),
+            noise[:,0] / self._alpha
+        )
+
+        return tf.stack([prev_noise, tf.gather_nd(noise ,tf.maximum(0, tf.expand_dims(lengths, 1) - 1), batch_dims=1)], axis=1)
+
+
+
+class NoiseGaussianActorWithU(NoiseGaussianActorBase):
+    @tf.function
+    def calculate_q_noise(self, actions: tf.Tensor, actor_outs: tf.Tensor, lengths: tf.Tensor,
+            prev_actions: tf.Tensor, prev_actor_outs: tf.Tensor, prev_samples_len: tf.Tensor, actor_outs_next: tf.Tensor):
+        prev_u = tf.where(
+            tf.expand_dims(prev_samples_len == 1, axis=1),
+            actor_outs[:,0] + self._alpha * tf.squeeze(prev_actions - prev_actor_outs, axis=1),
+            actions[:,0]
+        )
+
+        last_noise = tf.gather_nd(actions - actor_outs ,tf.maximum(0, tf.expand_dims(lengths, 1) - 1), batch_dims=1)
+        last_u = actor_outs_next + self._alpha * last_noise
+        return tf.stack([prev_u, last_u], axis=1)
 
 
 class IntegratedNoiseGaussianActor(AutocorrelatedActor):
@@ -244,7 +265,7 @@ class IntegratedNoiseGaussianActor(AutocorrelatedActor):
     
     @tf.function
     def calculate_q_noise(self, actions: tf.Tensor, actor_outs: tf.Tensor, lengths: tf.Tensor,
-            prev_actions: tf.Tensor, prev_actor_outs: tf.Tensor, prev_samples_len: tf.Tensor):      
+            prev_actions: tf.Tensor, prev_actor_outs: tf.Tensor, prev_samples_len: tf.Tensor, actor_outs_next: tf.Tensor):      
         prev_samples_len_expanded = tf.expand_dims(prev_samples_len, 1)
         lengths_expanded = tf.expand_dims(lengths, 1)
 
@@ -344,6 +365,7 @@ class IntegratedNoiseGaussianActor(AutocorrelatedActor):
 
 AUTOCORRELATED_ACTORS = {
     'autocor': NoiseGaussianActor,
+    'autocor+u': NoiseGaussianActorWithU,
     'integrated': IntegratedNoiseGaussianActor
 }
 
@@ -456,10 +478,11 @@ class ACERAC(BaseACERAgent):
 
         with tf.GradientTape(persistent=True) as tape:
             actor_outs = self._actor.act_deterministic(obs)
+            actor_outs_next = self._actor.act_deterministic(obs_next)
             prev_actor_outs = self._actor.act_deterministic(prev_obs)
 
             if self._use_q:
-                q_noise = self._actor.calculate_q_noise(actions, actor_outs, lengths, prev_actions, prev_actor_outs, prev_samples_len)
+                q_noise = self._actor.calculate_q_noise(actions, actor_outs, lengths, prev_actions, prev_actor_outs, prev_samples_len, actor_outs_next)
             else:
                 q_noise = None
                 
@@ -509,8 +532,9 @@ class ACERAC(BaseACERAgent):
             )
 
             bounds_penalty = tf.reduce_sum(bounds_penalty, axis=1) / tf.cast(lengths, tf.float32)
+            actor_loss_critic_part = tf.expand_dims(tf.pow(self._gamma, tf.cast(lengths, tf.float32)), 1) * values_next * tf.stop_gradient(tf.expand_dims(density_ratio, 1))
             actor_loss = tf.matmul(tf.stop_gradient(c_mu_mean), tf.reshape(actor_outs, (self._batch_size, -1, 1)))
-            actor_loss = -tf.reduce_mean(actor_loss) + tf.reduce_mean(bounds_penalty)
+            actor_loss = -tf.reduce_mean(actor_loss) + tf.reduce_mean(bounds_penalty) -tf.reduce_mean(actor_loss_critic_part)
 
             d_mean = d / tf.cast(lengths, tf.float32)
             critic_loss = -tf.reduce_mean(tf.squeeze(values_first, axis=1) * tf.stop_gradient(d_mean))

@@ -9,6 +9,8 @@ import tensorflow as tf
 from runners import Runner, ALGOS
 from utils import calculate_gamma, getDTChangedEnvName
 
+from algos.acerac import AUTOCORRELATED_ACTORS
+
 parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
 parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer", choices=ALGOS)
 parser.add_argument('--env_name', type=str, help='OpenAI Gym environment name', default="CartPole-v0")
@@ -41,7 +43,7 @@ parser.add_argument('--alpha', type=float, help='Alpha parameter for acerac.', d
 parser.add_argument('--tau', type=int, help='Tau parameter for acerac', default=2)
 parser.add_argument('--n', type=int, help='N parameter for fast acerac', default=2)
 parser.add_argument('--noise_type', type=str, help='Type of noise for ACERAC',
-                    default='autocor', choices=['autocor', 'integrated'])
+                    default='autocor', choices=list(AUTOCORRELATED_ACTORS))
 parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
                                               '0.4 * actions_bound is set.',
                     required=False, default=None)
