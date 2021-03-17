@@ -65,6 +65,9 @@ class AutocorrelatedActor(GaussianActor):
     def estimate_noise_from_prev(self, actions: tf.Tensor, prev_samples_len: tf.Tensor, prev_actions: tf.Tensor,
             old_prev_actor_outs: tf.Tensor, prev_actor_outs: tf.Tensor, n: int, batch_size: int) -> Tuple[tf.Tensor, tf.Tensor]:
         raise NotImplementedError()
+    
+    def actor_loss_critic_part(self, values_next_discounted: tf.Tensor, density_ratio: tf.Tensor):
+        raise NotImplementedError()
 
 
 class NoiseGaussianActorBase(AutocorrelatedActor):
@@ -151,6 +154,10 @@ class NoiseGaussianActor(NoiseGaussianActorBase):
 
         return tf.stack([prev_noise, tf.gather_nd(noise ,tf.maximum(0, tf.expand_dims(lengths, 1) - 1), batch_dims=1)], axis=1)
 
+    @tf.function
+    def actor_loss_critic_part(self, values_next_discounted: tf.Tensor, density_ratio: tf.Tensor):
+        return tf.constant(0, dtype=tf.float32)
+
 
 
 class NoiseGaussianActorWithU(NoiseGaussianActorBase):
@@ -166,6 +173,10 @@ class NoiseGaussianActorWithU(NoiseGaussianActorBase):
         last_noise = tf.gather_nd(actions - actor_outs ,tf.maximum(0, tf.expand_dims(lengths, 1) - 1), batch_dims=1)
         last_u = actor_outs_next + self._alpha * last_noise
         return tf.stack([prev_u, last_u], axis=1)
+
+    @tf.function
+    def actor_loss_critic_part(self, values_next_discounted: tf.Tensor, density_ratio: tf.Tensor):
+        return values_next_discounted * tf.stop_gradient(tf.expand_dims(density_ratio, 1))
 
 
 class IntegratedNoiseGaussianActor(AutocorrelatedActor):
@@ -362,6 +373,10 @@ class IntegratedNoiseGaussianActor(AutocorrelatedActor):
 
         return eta, mu
 
+    @tf.function
+    def actor_loss_critic_part(self, values_next_discounted: tf.Tensor, density_ratio: tf.Tensor):
+        return tf.constant(0, dtype=tf.float32)
+
 
 AUTOCORRELATED_ACTORS = {
     'autocor': NoiseGaussianActor,
@@ -508,9 +523,9 @@ class ACERAC(BaseACERAgent):
             gamma_coeffs = tf.expand_dims(tf.pow(self._gamma, tf.range(1., self._n + 1)), axis=0)
             td_rewards = tf.reduce_sum(rewards * gamma_coeffs, axis=1, keepdims=True)
 
-            td = tf.squeeze((-values_first
-                  + td_rewards
-                  + tf.expand_dims(tf.pow(self._gamma, tf.cast(lengths, tf.float32)), 1) * values_next), axis=1)
+            values_next_discounted = tf.expand_dims(tf.pow(self._gamma, tf.cast(lengths, tf.float32)), 1) * values_next
+
+            td = tf.squeeze((-values_first + td_rewards + values_next_discounted), axis=1)
 
             if self._td_clip is not None:
                 td = tf.clip_by_value(td, -self._td_clip, self._td_clip)
@@ -532,7 +547,7 @@ class ACERAC(BaseACERAgent):
             )
 
             bounds_penalty = tf.reduce_sum(bounds_penalty, axis=1) / tf.cast(lengths, tf.float32)
-            actor_loss_critic_part = tf.expand_dims(tf.pow(self._gamma, tf.cast(lengths, tf.float32)), 1) * values_next * tf.stop_gradient(tf.expand_dims(density_ratio, 1))
+            actor_loss_critic_part = self._actor.actor_loss_critic_part(values_next_discounted, density_ratio)
             actor_loss = tf.matmul(tf.stop_gradient(c_mu_mean), tf.reshape(actor_outs, (self._batch_size, -1, 1)))
             actor_loss = -tf.reduce_mean(actor_loss) + tf.reduce_mean(bounds_penalty) -tf.reduce_mean(actor_loss_critic_part)
 
