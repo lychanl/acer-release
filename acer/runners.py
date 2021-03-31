@@ -14,15 +14,9 @@ from gym import wrappers
 
 from algos.acer import ACER
 from algos.acerac import ACERAC
-from algos.old_acerac import OldACERAC
-from algos.acerce2 import ACERCE2
 from algos.base import BaseACERAgent
-from algos.acerce import ACERCE
-from algos.pessimistic_acer import PACER
-from algos.representative_acer import RepresentativeACER
 from algos.quantile_acer import QACER
 from algos.qacerac import QACERAC
-from algos.weighted_acer import WeightedACER
 from logger import CSVLogger
 from utils import is_atari, getPossiblyDTChangedEnvBuilder
 
@@ -34,15 +28,9 @@ logging.basicConfig(
 
 ALGOS = {
     'acer': ACER,
-    'acerce': ACERCE,
-    'acerce2': ACERCE2,
     'acerac': ACERAC,
-    'old_acerac': OldACERAC,
-    'pacer': PACER,
-    'racer': RepresentativeACER,
     'qacer': QACER,
     'qacerac': QACERAC,
-    'wacer': WeightedACER,
 }
 
 
