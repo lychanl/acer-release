@@ -229,7 +229,7 @@ class WindowReplayBuffer(ReplayBuffer):
 
 
 def PrevReplayBuffer(n: int = 1):
-    return functools.partial(_PrevReplayBuffer, n)
+    return functools.partial(VecReplayBuffer, n=n)
 
 
 class _PrevReplayBuffer(ReplayBuffer):
@@ -363,14 +363,17 @@ class MultiReplayBuffer:
     def get_vec(self, length_per_buffer: int, trajectory_len: int) -> Tuple[Dict[str, np.array], np.array]:
         vecs = [buffer.get_vec(length_per_buffer, trajectory_len) for buffer in self._buffers]
         
-        return (
-            {
-                key: np.concatenate([vec[0][key] for vec in vecs])
-                for key in vecs[0][0].keys()
-            },
-            np.concatenate([vec[1] for vec in vecs]),
-            np.concatenate([vec[2] for vec in vecs])
-        )
+        batch = {
+            key: np.concatenate([vec[0][key] for vec in vecs])
+            for key in vecs[0][0].keys()
+        }
+
+        lens = np.concatenate([vec[1] for vec in vecs])
+
+        if len(vecs[0]) == 2:
+            return batch, lens
+        else:
+            return batch, lens, np.concatenate([vec[2] for vec in vecs])
 
     @property
     def size(self) -> List[int]:
@@ -413,9 +416,9 @@ class MultiReplayBuffer:
         return buffer
 
 
-class _PrevReplayBuffer(ReplayBuffer):
+class VecReplayBuffer(ReplayBuffer):
 
-    def __init__(self, n: int, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
+    def __init__(self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, n: int = None):
         """Extends ReplayBuffer to fetch a number of experience tuples before selected index.
         If selected index indicates first time step in a episode, no additional tuples are attached.
 
@@ -486,18 +489,22 @@ class _PrevReplayBuffer(ReplayBuffer):
             }, np.repeat(-1, length))
 
         sample_indices = self._sample_random_index(length)
+
         prev_lens = np.repeat(self._n, length)
+
+        if self._n is not None:
+            prev_pointer_ind = np.logical_and(sample_indices - prev_lens < self._pointer, self._pointer <= sample_indices)
+            prev_lens[prev_pointer_ind] = sample_indices[prev_pointer_ind] - self._pointer
+
+            if self._current_size < self._max_size:
+                prev_current_size_ind = sample_indices - prev_lens < 0
+                prev_lens[prev_current_size_ind] = sample_indices[prev_current_size_ind]
+
+            prev_pointer_ovf_ind = np.logical_and(sample_indices - prev_lens < 0, self._pointer > sample_indices - prev_lens + self._max_size)
+            prev_lens[prev_pointer_ovf_ind] = (self._max_size - self._pointer) + sample_indices[prev_pointer_ovf_ind]
+
+
         lens = np.repeat(trajectory_len, length)
-
-        prev_pointer_ind = np.logical_and(sample_indices - prev_lens < self._pointer, self._pointer <= sample_indices)
-        prev_lens[prev_pointer_ind] = sample_indices[prev_pointer_ind] - self._pointer
-
-        if self._current_size < self._max_size:
-            prev_current_size_ind = sample_indices - prev_lens < 0
-            prev_lens[prev_current_size_ind] = sample_indices[prev_current_size_ind]
-
-        prev_pointer_ovf_ind = np.logical_and(sample_indices - prev_lens < 0, self._pointer > sample_indices - prev_lens + self._max_size)
-        prev_lens[prev_pointer_ovf_ind] = (self._max_size - self._pointer) + sample_indices[prev_pointer_ovf_ind]
 
         pointer_ind = np.logical_and(sample_indices < self._pointer, self._pointer < sample_indices + lens)
         lens[pointer_ind] = self._pointer - sample_indices[pointer_ind]
@@ -509,22 +516,27 @@ class _PrevReplayBuffer(ReplayBuffer):
         pointer_ovf_ind = np.logical_and(sample_indices + lens > self._max_size, self._pointer < sample_indices + lens - self._max_size)
         lens[pointer_ovf_ind] = (self._pointer + self._max_size) - sample_indices[pointer_ovf_ind]
 
-        selection = (np.repeat(np.expand_dims(sample_indices, 1), self._n + trajectory_len, axis=1) + np.arange(-self._n, trajectory_len))
+        n = self._n or 0
+        selection = (np.repeat(np.expand_dims(sample_indices, 1), n + trajectory_len, axis=1) + np.arange(-n, trajectory_len))
         selection = selection % self._max_size
 
         batch = self._fetch_slice(selection)
 
         ends_mask = np.cumsum(batch['ends'][:,self._n:-1], axis=1) == 0
-        prev_ends_mask = np.flip(np.cumsum(np.flip(batch['ends'][:,:self._n], 1), axis=1), 1) == 0
-        mask = np.concatenate([prev_ends_mask, np.ones((length, 1)), ends_mask], axis=1)
-
         lens = np.minimum(lens, ends_mask.sum(axis=1) + 1)
-        prev_lens = np.minimum(prev_lens, prev_ends_mask.sum(axis=1))
+
+        if self._n is not None:
+            prev_ends_mask = np.flip(np.cumsum(np.flip(batch['ends'][:,:self._n], 1), axis=1), 1) == 0
+            prev_lens = np.minimum(prev_lens, prev_ends_mask.sum(axis=1))
+            mask = np.concatenate([prev_ends_mask, np.ones((length, 1)), ends_mask], axis=1)
+        else:
+            mask = np.concatenate([np.ones((length, 1)), ends_mask], axis=1)
         
+
         for k, v in batch.items():
             m = mask
             while len(m.shape) < len(v.shape):
                 m = np.expand_dims(m, -1)
             batch[k] = v * m
 
-        return batch, lens, prev_lens
+        return (batch, lens, prev_lens) if self._n is not None else (batch, lens)

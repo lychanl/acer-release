@@ -6,8 +6,8 @@ import numpy as np
 
 
 class TestBuffer(unittest.TestCase):
-    def _init_data(self):
-        buffer = PrevReplayBuffer(n=2)(max_size=10, action_spec=BufferFieldSpec((1,)), obs_spec=BufferFieldSpec((1,)))
+    def _init_data(self, n=2):
+        buffer = PrevReplayBuffer(n=n)(max_size=10, action_spec=BufferFieldSpec((1,)), obs_spec=BufferFieldSpec((1,)))
         
         buffer._actions = np.arange(0, 10).reshape(-1, 1)
         buffer._obs = np.arange(0, 10).reshape(-1, 1)
@@ -210,6 +210,20 @@ class TestBuffer(unittest.TestCase):
         ], -1)).all()
         )
 
-    # ends tests
+    def test_vector_no_n(self):
+        buffer = self._init_data(None)
+        buffer._pointer = 9
+        buffer._current_size = 9
+        buffer._sample_random_index = lambda n: np.array([2, 3, 4, 5], dtype=np.int32)
 
-    # prev tests: pointer, wrap, pointer wrap underflow
+        batch, l = buffer.get_vec(4, 3)
+
+        self.assertTrue((l == [3, 3, 3, 3]).all())
+
+        self.assertTrue((batch['actions'] == np.expand_dims([
+            np.arange(2, 5),
+            np.arange(3, 6),
+            np.arange(4, 7),
+            np.arange(5, 8),
+        ], -1)).all()
+        )

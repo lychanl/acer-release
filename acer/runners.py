@@ -13,6 +13,7 @@ import tensorflow as tf
 from gym import wrappers
 
 from algos.acer import ACER
+from algos.fast_acer import FastACER
 from algos.acerac import ACERAC
 from algos.base import BaseACERAgent
 from algos.quantile_acer import QACER
@@ -28,6 +29,7 @@ logging.basicConfig(
 
 ALGOS = {
     'acer': ACER,
+    'fastacer': FastACER,
     'acerac': ACERAC,
     'qacer': QACER,
     'qacerac': QACERAC,
@@ -99,16 +101,6 @@ class Runner:
         self._log_tensorboard = log_tensorboard
         self._do_checkpoint = do_checkpoint
         self._env_name = environment_name
-        if experiment_name:
-            self._log_dir = Path(
-                f"{log_dir}/{environment_name}_{algorithm}_{experiment_name}"
-                f"_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
-            )
-        else:
-            self._log_dir = Path(
-                f"{log_dir}/{environment_name}_{algorithm}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
-            )
-        self._log_dir.mkdir(parents=True, exist_ok=True)
 
         self._record_end = record_end
         self._record_time_steps = record_time_steps
@@ -118,6 +110,8 @@ class Runner:
         self._done_steps_in_a_episode = [0] * self._n_envs
         self._returns = [0] * self._n_envs
         self._rewards = [[] for _ in range(self._n_envs)]
+
+        self._prepare_log_dir(experiment_name, log_dir, environment_name, algorithm)
 
         dummy_env = self._env.env_fns[0]()
         self._max_steps_in_episode = dummy_env._max_episode_steps \
@@ -137,6 +131,29 @@ class Runner:
         self._agent = _get_agent(algorithm, algorithm_parameters, dummy_env.observation_space, dummy_env.action_space)
         self._current_obs = self._env.reset()
         self._dump = dump
+
+    def _prepare_log_dir(self, experiment_name, log_dir, environment_name, algorithm, num_try=0):
+        if experiment_name:
+            exp_name = "{experiment_name}_{num_try}" if num_try > 0 else experiment_name
+            
+            log_dir = Path(
+                f"{log_dir}/{environment_name}_{algorithm}_{exp_name}"
+                f"_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            )
+        elif num_try == 0:
+            log_dir = Path(
+                f"{log_dir}/{environment_name}_{algorithm}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            )
+        else:
+            log_dir = Path(
+                f"{log_dir}/{environment_name}_{algorithm}_{num_try}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            )
+        
+        if log_dir.exists():
+            self._prepare_log_dir(experiment_name, log_dir, environment_name, algorithm, num_try + 1)
+        else:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            self._log_dir = log_dir
 
     def run(self):
         """Performs training. If 'evaluate' is True, evaluation of the policy is performed. The evaluation
