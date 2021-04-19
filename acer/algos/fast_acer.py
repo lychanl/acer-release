@@ -44,7 +44,7 @@ class FastACER(BaseACERAgent):
                 self._actor_beta_penalty, self._actions_bound, self._std, self._tf_time_step
             )
 
-    def _init_replay_buffer(self, memory_size: int):
+    def _init_replay_buffer(self, memory_size: int, policy_spec: BufferFieldSpec = None):
         if type(self._actions_space) == gym.spaces.Discrete:
             actions_shape = (1, )
         else:
@@ -55,6 +55,7 @@ class FastACER(BaseACERAgent):
             action_spec=BufferFieldSpec(shape=actions_shape, dtype=self._actor.action_dtype_np),
             obs_spec=BufferFieldSpec(shape=self._observations_space.shape, dtype=self._observations_space.dtype),
             max_size=memory_size,
+            policy_spec=policy_spec,
             num_buffers=self._num_parallel_envs
         )
 
@@ -91,6 +92,29 @@ class FastACER(BaseACERAgent):
         obs_next = self._process_observations(obs_next)
         rewards = self._process_rewards(rewards)
 
+        policies, _ = self._actor.prob(obs, actions)
+        mask = tf.sequence_mask(lengths, maxlen=self._n, dtype=tf.float32)
+
+        td = self._calculate_td(obs, obs_next, rewards, lengths, dones, mask)
+        truncated_density = self._calculate_truncated_density(policies, old_policies, mask)
+
+        d = tf.stop_gradient(td * truncated_density)
+
+        self._actor_backward_pass(first_obs, first_actions, d)
+        self._critic_backward_pass(first_obs, d)
+
+    @tf.function
+    def _calculate_truncated_density(self, policies, old_policies, mask):
+        policies_masked = policies * mask + (1 - mask) * tf.ones_like(policies)
+        old_policies_masked = old_policies * mask + (1 - mask) * tf.ones_like(old_policies)
+
+        policies_ratio = policies_masked / old_policies_masked
+        policies_ratio_prod = tf.reduce_prod(policies_ratio, axis=-1, keepdims=True)
+
+        return tf.tanh(policies_ratio_prod / self._b) * self._b
+
+    @tf.function
+    def _calculate_td(self, obs, obs_next, rewards, lengths, dones, mask):
         dones_mask = 1 - tf.cast(
             (tf.expand_dims(tf.range(1, self._n + 1), 0) == tf.expand_dims(lengths, 1)) & tf.expand_dims(dones, 1),
             tf.float32
@@ -100,17 +124,6 @@ class FastACER(BaseACERAgent):
         values_first = values[:,:-1]
         values_next = values[:,1:] * dones_mask
 
-        policies, _ = self._actor.prob(obs, actions)
-        mask = tf.sequence_mask(lengths, maxlen=self._n, dtype=tf.float32)
-
-        policies_masked = policies * mask + (1 - mask) * tf.ones_like(policies)
-        old_policies_masked = old_policies * mask + (1 - mask) * tf.ones_like(old_policies)
-
-        policies_ratio = policies_masked / old_policies_masked
-        policies_ratio_prod = tf.reduce_prod(policies_ratio, axis=-1, keepdims=True)
-
-        truncated_density = tf.tanh(policies_ratio_prod / self._b) * self._b
-
         gamma_coeffs_masked = tf.expand_dims(tf.pow(self._gamma, tf.range(1., self._n + 1)), axis=0) * mask
 
         td_parts = rewards + self._gamma * values_next - values_first
@@ -118,20 +131,9 @@ class FastACER(BaseACERAgent):
 
         values_next_discounted = tf.expand_dims(tf.pow(self._gamma, tf.cast(lengths, tf.float32)), 1) * values_next
 
-        td = (-values_first + td_rewards + values_next_discounted)
-        d = tf.stop_gradient(td * truncated_density)
+        return (-values_first + td_rewards + values_next_discounted)
 
-        self._backward_pass(first_obs, first_actions, d)
-
-    def _backward_pass(self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor):
-        """Performs backward pass in BaseActor's and Critic's networks
-
-        Args:
-            observations: batch [batch_size, observations_dim] of observations vectors
-            actions: batch [batch_size, actions_dim] of actions vectors
-            d: batch [batch_size, observations_dim] of gradient update coefficient
-                (summation terms in the Equations (8) and (9) from the paper (1))
-        """
+    def _actor_backward_pass(self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor):
         with tf.GradientTape() as tape:
             loss = self._actor.loss(observations, actions, d)
         grads = tape.gradient(loss, self._actor.trainable_variables)
@@ -141,6 +143,7 @@ class FastACER(BaseACERAgent):
 
         self._actor_optimizer.apply_gradients(gradients)
 
+    def _critic_backward_pass(self, observations: tf.Tensor, d: tf.Tensor):
         with tf.GradientTape() as tape:
             loss = self._critic.loss(observations, d)
         grads = tape.gradient(loss, self._critic.trainable_variables)

@@ -428,7 +428,7 @@ class ACERAC(BaseACERAgent):
         
         self.logged_graph = False
 
-    def _init_replay_buffer(self, memory_size: int):
+    def _init_replay_buffer(self, memory_size: int, policy_spec: BufferFieldSpec = None):
         if type(self._actions_space) == gym.spaces.Discrete:
             actions_shape = (1,)
         else:
@@ -437,6 +437,7 @@ class ACERAC(BaseACERAgent):
         self._memory = MultiReplayBuffer(
             action_spec=BufferFieldSpec(shape=actions_shape, dtype=self._actor.action_dtype_np),
             obs_spec=BufferFieldSpec(shape=self._observations_space.shape, dtype=self._observations_space.dtype),
+            policy_spec=policy_spec,
             max_size=memory_size,
             num_buffers=self._num_parallel_envs,
             buffer_class=PrevReplayBuffer(self._actor.required_prev_samples)

@@ -38,23 +38,30 @@ class BaseActor(ABC, tf.keras.Model):
         """
         super().__init__(*args, **kwargs)
 
-        self._hidden_layers = []
-
         if type(actions_space) == gym.spaces.discrete.Discrete:
             actions_dim = actions_space.n
         else:
             actions_dim = actions_space.shape[0]
 
-        if len(observations_space.shape) > 1:
-            self._hidden_layers.extend(build_cnn_network())
-        
-        self._hidden_layers.extend(build_mlp_network(layers_sizes=layers))
-
-        self._hidden_layers.append(tf.keras.layers.Dense(actions_dim, kernel_initializer=utils.normc_initializer()))
+        self._hidden_layers = self._build_layers(observations_space, layers, actions_dim)
 
         self.actions_dim = actions_dim
         self.beta_penalty = beta_penalty
         self._tf_time_step = tf_time_step
+
+    def _build_layers(
+        self, observations_space: gym.Space, layers: Optional[Tuple[int]], actions_dim: int
+    ) -> List[tf.keras.Model]:
+        hidden_layers = []
+
+        if len(observations_space.shape) > 1:
+            hidden_layers.extend(build_cnn_network())
+        
+        hidden_layers.extend(build_mlp_network(layers_sizes=layers))
+
+        hidden_layers.append(tf.keras.layers.Dense(actions_dim, kernel_initializer=utils.normc_initializer()))        
+
+        return hidden_layers
 
     def _forward(self, observations: np.array) -> tf.Tensor:
         x = self._hidden_layers[0](observations)
@@ -311,6 +318,9 @@ class GaussianActor(BaseActor):
             scale_diag=tf.exp(self.log_std)
         )
 
+        return self._loss(mean, dist, actions, d)
+
+    def _loss(self, mean: tf.Tensor, dist: tf.Tensor, actions: np.array, d: np.array) -> tf.Tensor:
         action_log_probs = tf.expand_dims(dist.log_prob(actions), axis=1)
 
         bounds_penalty = tf.reduce_sum(
@@ -327,32 +337,34 @@ class GaussianActor(BaseActor):
         total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, d) + bounds_penalty)
 
         with tf.name_scope('actor'):
-            for i in range(self.actions_dim):
-                tf.summary.scalar(f'std_{i}', tf.exp(self.log_std[i]), step=self._tf_time_step)
             tf.summary.scalar('batch_loss', total_loss, step=self._tf_time_step)
             tf.summary.scalar('batch_bounds_penalty_mean', tf.reduce_mean(bounds_penalty), step=self._tf_time_step)
             tf.summary.scalar('batch_entropy_mean', tf.reduce_mean(entropy), step=self._tf_time_step)
 
         return total_loss
 
-    def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+    def _dist(self, observations: tf.Tensor) -> tf.Tensor:
         mean = self._forward(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
             scale_diag=tf.exp(self.log_std)
         )
+        return dist
 
+    def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+        dist = self._dist(observations)
+        return self._prob(dist, actions)
+
+    def _prob(self, dist: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         return dist.prob(actions), dist.log_prob(actions)
 
     @tf.function
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
-        mean = self._forward(observations)
-
-        dist = tfp.distributions.MultivariateNormalDiag(
-            loc=mean,
-            scale_diag=tf.exp(self.log_std)
-        )
-
+        dist = self._dist(observations)
+        return self._act(dist)
+    
+    @tf.function
+    def _act(self, dist: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         actions = dist.sample(dtype=self.dtype)
         actions_probs = dist.prob(actions)
 
@@ -378,7 +390,8 @@ class BaseACERAgent(ABC):
                  critic_lr: float = 0.001, critic_adam_beta1: float = 0.9, critic_adam_beta2: float = 0.999,
                  critic_adam_epsilon: float = 1e-7, standardize_obs: bool = False, rescale_rewards: int = -1,
                  limit_reward_tanh: float = None, time_step: int = 1, gradient_norm: float = None,
-                 gradient_norm_median_threshold: float = 4, learning_starts: int = 1000, **kwargs):
+                 gradient_norm_median_threshold: float = 4, learning_starts: int = 1000, 
+                 additional_buffer_types: List = (), policy_spec: BufferFieldSpec = None, **kwargs):
 
         self._tf_time_step = tf.Variable(
             initial_value=time_step, name='tf_time_step', dtype=tf.dtypes.int64, trainable=False
@@ -400,6 +413,7 @@ class BaseACERAgent(ABC):
         self._gradient_norm = gradient_norm
         self._gradient_norm_median_threshold = gradient_norm_median_threshold
         self._batch_size = self._num_parallel_envs * self._batches_per_env
+        self._memory_size = memory_size
 
         self._actor_gradient_norm_median = tf.Variable(initial_value=1.0, trainable=False)
         self._critic_gradient_norm_median = tf.Variable(initial_value=1.0, trainable=False)
@@ -414,11 +428,11 @@ class BaseACERAgent(ABC):
         self._actor = self._init_actor()
         self._critic = self._init_critic()
 
-        self._init_replay_buffer(memory_size)
+        self._init_replay_buffer(memory_size, policy_spec)
         self._data_loader = tf.data.Dataset.from_generator(
             self._experience_replay_generator,
             (tf.dtypes.float32, tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.float32, tf.dtypes.float32,
-             tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.bool, tf.dtypes.int32)
+             tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.bool, tf.dtypes.int32, *additional_buffer_types)
         ).prefetch(1)
 
         self._actor_optimizer = tf.keras.optimizers.Adam(
@@ -446,7 +460,7 @@ class BaseACERAgent(ABC):
         else:
             self._running_mean_rewards = None
 
-    def _init_replay_buffer(self, memory_size: int):
+    def _init_replay_buffer(self, memory_size: int, policy_spec: BufferFieldSpec = None):
         if type(self._actions_space) == gym.spaces.Discrete:
             actions_shape = (1, )
         else:
@@ -456,6 +470,7 @@ class BaseACERAgent(ABC):
             buffer_class=ReplayBuffer,
             action_spec=BufferFieldSpec(shape=actions_shape, dtype=self._actor.action_dtype_np),
             obs_spec=BufferFieldSpec(shape=self._observations_space.shape, dtype=self._observations_space.dtype),
+            policy_spec=policy_spec,
             max_size=memory_size,
             num_buffers=self._num_parallel_envs
         )

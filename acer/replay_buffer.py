@@ -15,7 +15,9 @@ class BufferFieldSpec:
 
 
 class ReplayBuffer:
-    def __init__(self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
+    def __init__(
+            self, max_size: int, action_spec: BufferFieldSpec,
+            obs_spec: BufferFieldSpec, policies_spec: BufferFieldSpec = None):
         """Stores trajectories.
 
         Each of the samples stored in the buffer has the same probability of being drawn.
@@ -33,7 +35,7 @@ class ReplayBuffer:
         self._obs = self._init_field(obs_spec)
         self._obs_next = self._init_field(obs_spec)
         self._rewards = self._init_field(BufferFieldSpec((), np.float32))
-        self._policies = self._init_field(BufferFieldSpec((), np.float32))
+        self._policies = self._init_field(policies_spec or BufferFieldSpec((), np.float32))
         self._dones = self._init_field(BufferFieldSpec((), bool))
         self._ends = self._init_field(BufferFieldSpec((), bool))
 
@@ -185,8 +187,7 @@ class WindowReplayBuffer(ReplayBuffer):
             action_spec: BufferFieldSpec with actions space specification
             obs_spec: BufferFieldSpec with observations space specification
         """
-        super().__init__(max_size, action_spec, obs_spec)
-        self._policies = self._init_field(action_spec)
+        super().__init__(max_size, action_spec, obs_spec, self._init_field(action_spec))
 
     def _get_indices(self, sample_index: int, trajectory_len: int) -> Tuple[int, int]:
         current_length = 0
@@ -232,85 +233,86 @@ def PrevReplayBuffer(n: int = 1):
     return functools.partial(VecReplayBuffer, n=n)
 
 
-class _PrevReplayBuffer(ReplayBuffer):
+# class _PrevReplayBuffer(ReplayBuffer):
 
-    def __init__(self, n: int, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
-        """Extends ReplayBuffer to fetch a number of experience tuples before selected index.
-        If selected index indicates first time step in a episode, no additional tuples are attached.
+#     def __init__(self, n: int, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec):
+#         """Extends ReplayBuffer to fetch a number of experience tuples before selected index.
+#         If selected index indicates first time step in a episode, no additional tuples are attached.
 
-        Also policies buffer is replaced to store data in same specification as actions
-        (used in algorithms with autocorrelated actions).
+#         Also policies buffer is replaced to store data in same specification as actions
+#         (used in algorithms with autocorrelated actions).
 
-        Args:
-            n: Number of previous experience tuples to be fetched
-            max_size: maximum number of entries to be stored in the buffer - only newest entries are stored.
-            action_spec: BufferFieldSpec with actions space specification
-            obs_spec: BufferFieldSpec with observations space specification
-        """
-        super().__init__(max_size, action_spec, obs_spec)
-        self._policies = self._init_field(action_spec)
-        self._n = n
+#         Args:
+#             n: Number of previous experience tuples to be fetched
+#             max_size: maximum number of entries to be stored in the buffer - only newest entries are stored.
+#             action_spec: BufferFieldSpec with actions space specification
+#             obs_spec: BufferFieldSpec with observations space specification
+#         """
+#         super().__init__(max_size, action_spec, obs_spec)
+#         self._policies = self._init_field(action_spec)
+#         self._n = n
 
-    def get(self, trajectory_len: Optional[int] = None) -> Tuple[Dict[str, np.array], int]:
-        if self._current_size == 0:
-            # empty buffer
-            return ({
-                "actions": np.array([]),
-                "observations": np.array([]),
-                "rewards": np.array([]),
-                "next_observations": np.array([]),
-                "policies": np.array([]),
-                "dones": np.array([]),
-                "ends": np.array([])
-            }, -1)
+#     def get(self, trajectory_len: Optional[int] = None) -> Tuple[Dict[str, np.array], int]:
+#         if self._current_size == 0:
+#             # empty buffer
+#             return ({
+#                 "actions": np.array([]),
+#                 "observations": np.array([]),
+#                 "rewards": np.array([]),
+#                 "next_observations": np.array([]),
+#                 "policies": np.array([]),
+#                 "dones": np.array([]),
+#                 "ends": np.array([])
+#             }, -1)
 
-        sample_index = self._sample_random_index()
+#         sample_index = self._sample_random_index()
         
-        n = 0
-        """
-        for _n in range(1, self._n + 1):
-            index = sample_index - _n
-            if index < 0:
-                if self._current_size < self._max_size:
-                    break
-                index = self._max_size + index
-            if self._ends[index] or self._pointer == index:
-                break
+#         n = 0
+#         """
+#         for _n in range(1, self._n + 1):
+#             index = sample_index - _n
+#             if index < 0:
+#                 if self._current_size < self._max_size:
+#                     break
+#                 index = self._max_size + index
+#             if self._ends[index] or self._pointer == index:
+#                 break
 
-            n = _n
-        """
+#             n = _n
+#         """
 
-        n = self._n
+#         n = self._n
 
-        if sample_index - n < self._pointer <= sample_index:
-            n = sample_index - self._pointer
+#         if sample_index - n < self._pointer <= sample_index:
+#             n = sample_index - self._pointer
 
-        if sample_index - n < 0:
-            if self._current_size < self._max_size:
-                n = sample_index
-            elif self._pointer > sample_index - n + self._max_size:
-                n = self._max_size + sample_index - self._pointer
+#         if sample_index - n < 0:
+#             if self._current_size < self._max_size:
+#                 n = sample_index
+#             elif self._pointer > sample_index - n + self._max_size:
+#                 n = self._max_size + sample_index - self._pointer
         
-        if sample_index - n >= 0:
-            r = np.r_[sample_index - n]
-        else:
-            r = np.r_[sample_index:self._max_size, 0:self._max_size]
-        ends = self._ends[r]
-        if ends.any():
-            n = n - np.nonzero(ends)[-1][0] - 1
+#         if sample_index - n >= 0:
+#             r = np.r_[sample_index - n]
+#         else:
+#             r = np.r_[sample_index:self._max_size, 0:self._max_size]
+#         ends = self._ends[r]
+#         if ends.any():
+#             n = n - np.nonzero(ends)[-1][0] - 1
 
-        start_index, end_index = self._get_indices(sample_index, trajectory_len)
+#         start_index, end_index = self._get_indices(sample_index, trajectory_len)
         
-        start_index = (start_index - n) % self._max_size
+#         start_index = (start_index - n) % self._max_size
 
-        batch = self._fetch_batch(end_index, sample_index, start_index)
-        return batch
+#         batch = self._fetch_batch(end_index, sample_index, start_index)
+#         return batch
 
 
 class MultiReplayBuffer:
 
     def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec,
-                buffer_class: Callable[[int, BufferFieldSpec, BufferFieldSpec], ReplayBuffer] = ReplayBuffer):
+                buffer_class: Callable[[int, BufferFieldSpec, BufferFieldSpec], ReplayBuffer] = ReplayBuffer,
+                policy_spec: BufferFieldSpec = None):
         """Encapsulates ReplayBuffers from multiple environments.
 
         Args:
@@ -324,7 +326,7 @@ class MultiReplayBuffer:
 
         # assert issubclass(buffer_class, ReplayBuffer), "Buffer class should derive from ReplayBuffer"
 
-        self._buffers = [buffer_class(int(max_size / num_buffers), action_spec, obs_spec) for _ in range(num_buffers)]
+        self._buffers = [buffer_class(int(max_size / num_buffers), action_spec, obs_spec, policy_spec) for _ in range(num_buffers)]
 
     def put(self, steps: List[Tuple[Union[int, float, list], np.array, float, np.array, bool, bool]]):
         """Stores experience in the buffers. Accepts list of steps.
@@ -362,12 +364,13 @@ class MultiReplayBuffer:
     
     def get_vec(self, length_per_buffer: int, trajectory_len: int) -> Tuple[Dict[str, np.array], np.array]:
         vecs = [buffer.get_vec(length_per_buffer, trajectory_len) for buffer in self._buffers]
-        
+
         batch = {
             key: np.concatenate([vec[0][key] for vec in vecs])
             for key in vecs[0][0].keys()
         }
 
+        batch["time"] *= self._n_buffers
         lens = np.concatenate([vec[1] for vec in vecs])
 
         if len(vecs[0]) == 2:
@@ -418,7 +421,9 @@ class MultiReplayBuffer:
 
 class VecReplayBuffer(ReplayBuffer):
 
-    def __init__(self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, n: int = None):
+    def __init__(
+        self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec,
+        policy_spec: BufferFieldSpec = None, n: int = None):
         """Extends ReplayBuffer to fetch a number of experience tuples before selected index.
         If selected index indicates first time step in a episode, no additional tuples are attached.
 
@@ -431,8 +436,7 @@ class VecReplayBuffer(ReplayBuffer):
             action_spec: BufferFieldSpec with actions space specification
             obs_spec: BufferFieldSpec with observations space specification
         """
-        super().__init__(max_size, action_spec, obs_spec)
-        self._policies = self._init_field(action_spec)
+        super().__init__(max_size, action_spec, obs_spec, policy_spec or action_spec)
         self._n = n
 
     def get(self, trajectory_len: Optional[int] = None) -> Tuple[Dict[str, np.array], int]:
@@ -445,7 +449,8 @@ class VecReplayBuffer(ReplayBuffer):
                 "next_observations": np.array([]),
                 "policies": np.array([]),
                 "dones": np.array([]),
-                "ends": np.array([])
+                "ends": np.array([]),
+                "time": np.array([]),
             }, -1)
 
         sample_index = self._sample_random_index()
@@ -485,7 +490,8 @@ class VecReplayBuffer(ReplayBuffer):
                 "next_observations": np.zeros((length, 0)),
                 "policies": np.zeros((length, 0)),
                 "dones": np.zeros((length, 0)),
-                "ends": np.zeros((length, 0))
+                "ends": np.zeros((length, 0)),
+                "time": np.zeros(length)
             }, np.repeat(-1, length))
 
         sample_indices = self._sample_random_index(length)
@@ -538,5 +544,8 @@ class VecReplayBuffer(ReplayBuffer):
             while len(m.shape) < len(v.shape):
                 m = np.expand_dims(m, -1)
             batch[k] = v * m
+
+        time = ((self._pointer - 1) - sample_indices) % self._max_size
+        batch['time'] = np.asarray(time).astype(np.int32)
 
         return (batch, lens, prev_lens) if self._n is not None else (batch, lens)

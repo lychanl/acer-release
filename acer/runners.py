@@ -18,6 +18,7 @@ from algos.acerac import ACERAC
 from algos.base import BaseACERAgent
 from algos.quantile_acer import QACER
 from algos.qacerac import QACERAC
+from algos.exploracer import ExplorACER
 from logger import CSVLogger
 from utils import is_atari, getPossiblyDTChangedEnvBuilder
 
@@ -33,6 +34,7 @@ ALGOS = {
     'acerac': ACERAC,
     'qacer': QACER,
     'qacerac': QACERAC,
+    'exploracer': ExplorACER
 }
 
 

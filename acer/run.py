@@ -10,6 +10,7 @@ from runners import Runner, ALGOS
 from utils import calculate_gamma, getDTChangedEnvName
 
 from algos.acerac import AUTOCORRELATED_ACTORS
+from algos.exploracer import DIFF_FUNCTIONS
 
 parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
 parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer", choices=ALGOS)
@@ -40,6 +41,11 @@ parser.add_argument('--c0', type=float, help='experience replay warm start coeff
 parser.add_argument('--kappa', type=float, help='kappa parameter for qacer', default=0.)
 parser.add_argument('--atoms', type=int, help='number of atoms for qacer', default=50)
 parser.add_argument('--alpha', type=float, help='Alpha parameter for acerac.', default=0.5)
+parser.add_argument('--std_loss_mult', type=float, help='std loss to actor loss ration', default=0.1)
+parser.add_argument('--std_diff_fun', type=str, help='Distribution difference function.',
+                    default='KL', choices=list(DIFF_FUNCTIONS))
+parser.add_argument('--std_loss_delay', type=float, help='Delay of std optimization.', default=0.)
+parser.add_argument('--entropy_coeff', type=float, help='Entropy coefficient for ExplorACER', default=1)
 parser.add_argument('--tau', type=int, help='Tau parameter for acerac', default=2)
 parser.add_argument('--n', type=int, help='N parameter for fast acerac', default=2)
 parser.add_argument('--noise_type', type=str, help='Type of noise for ACERAC',
