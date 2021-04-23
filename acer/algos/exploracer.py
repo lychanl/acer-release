@@ -28,6 +28,44 @@ DIFF_FUNCTIONS = {
 class VarSigmaGaussianActor(GaussianActor):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
+                 beta_penalty: float, actions_bound: float, *args, **kwargs):
+        """BaseActor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
+
+        TODO: introduce [a, b] intervals as allowed actions bounds
+
+        Args:
+            observations_dim: dimension of observations space
+            layers: list of hidden layer sizes
+            beta_penalty: penalty for too confident actions coefficient
+            actions_bound: upper (lower == '-actions_bound') bound for allowed actions,
+             required in case of continuous actions
+        """
+        super().__init__(
+            observations_space, actions_space, layers, beta_penalty, actions_bound,
+            *args, **kwargs)
+
+        self._std_layers = self._build_layers(observations_space, layers, self.actions_dim)
+
+    @tf.function
+    def _std_forward(self, observations: np.array) -> tf.Tensor:
+        x = self._std_layers[0](observations)
+        for layer in self._std_layers[1:]:
+            x = layer(x)
+        return x
+
+    def _dist(self, observations: np.array) -> tf.Tensor:
+        mean = self._forward(observations)
+        log_std = self._std_forward(observations)
+        dist = tfp.distributions.MultivariateNormalDiag(
+            loc=mean,
+            scale_diag=tf.exp(log_std)
+        )
+
+        return dist
+
+
+class DistVarSigmaGaussianActor(VarSigmaGaussianActor):
+    def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  beta_penalty: float, actions_bound: float, std_loss_mult: float = 0.1, std_loss_delay: float = 0.,
                  std_diff_fun='KL', *args, **kwargs):
         """BaseActor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
@@ -49,58 +87,12 @@ class VarSigmaGaussianActor(GaussianActor):
         self._std_loss_mult = std_loss_mult
         self._std_loss_delay = std_loss_delay
 
-        self._actions_bound = actions_bound
-
-        self._std_layers = self._build_layers(observations_space, layers, self.actions_dim)
-
-    @tf.function
-    def _std_forward(self, observations: np.array) -> tf.Tensor:
-        x = self._std_layers[0](observations)
-        for layer in self._std_layers[1:]:
-            x = layer(x)
-        return x
-
-    def _dist(self, observations: np.array) -> tf.Tensor:
-        mean = self._forward(observations)
-        log_std = self._std_forward(observations)
-        dist = tfp.distributions.MultivariateNormalDiag(
-            loc=mean,
-            scale_diag=tf.exp(log_std)
-        )
-
-        return dist
-
-    @tf.function
-    def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
-        mean = self._forward(observations)
-        log_std = self._std_forward(observations)
-        dist = tfp.distributions.MultivariateNormalDiag(
-            loc=mean,
-            scale_diag=tf.exp(log_std)
-        )
-
-        actions = dist.sample(dtype=self.dtype)
-        actions_probs = dist.prob(actions)
-
-        with tf.name_scope('actor'):
-            tf.summary.scalar(f'batch_action_mean', tf.reduce_mean(actions), step=self._tf_time_step)
-
-        actions_probs = tf.repeat(tf.expand_dims(actions_probs, 1), actions.shape[-1], axis=-1)
-
-        return actions, tf.stack((actions_probs, mean), axis=1)
-
     @tf.function
     def _std_loss(
         self, old_mean: tf.Tensor, mean: tf.Tensor, std: tf.Tensor, expected_entropy: tf.Tensor
     ) -> tf.Tensor:
         std_diff = self._diff(old_mean, mean, std)
-        # if not np.isfinite(std_diff.numpy()).all():
-        #     print('NAN')
         return tf.reduce_mean(tf.square(expected_entropy - std_diff))
-
-    @tf.function
-    def _std_loss2(self, log_std: tf.Tensor, expected_entropy: tf.Tensor) -> tf.Tensor:
-        return tf.reduce_mean(-log_std * tf.stop_gradient(expected_entropy))
 
     @tf.function
     def loss(
@@ -117,7 +109,6 @@ class VarSigmaGaussianActor(GaussianActor):
         )
 
         std_loss = self._std_loss(old_mean, tf.stop_gradient(mean), std, expected_entropy)
-        # std_loss = self._std_loss2(log_std, expected_entropy)
         loss = self._loss(mean, dist, actions, d)
 
         std_loss = tf.where(tf.cast(self._tf_time_step, tf.float32) < self._std_loss_delay, 0., std_loss)
@@ -141,8 +132,47 @@ class VarSigmaGaussianActor(GaussianActor):
         return loss + self._std_loss_mult * std_loss
 
 
+class StdVarSigmaGaussianActor(VarSigmaGaussianActor):
+    def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
+                 beta_penalty: float, actions_bound: float, entropy_coeff: float = 0.0, *args, **kwargs):
+        """BaseActor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
 
-class ExplorACER(FastACER):
+        TODO: introduce [a, b] intervals as allowed actions bounds
+
+        Args:
+            observations_dim: dimension of observations space
+            layers: list of hidden layer sizes
+            beta_penalty: penalty for too confident actions coefficient
+            actions_bound: upper (lower == '-actions_bound') bound for allowed actions,
+             required in case of continuous actions
+        """
+        super().__init__(
+            observations_space, actions_space, layers, beta_penalty, actions_bound, None,
+            *args, **kwargs)
+
+        self._entropy_coeff = entropy_coeff
+
+    @tf.function
+    def loss(
+        self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor) -> tf.Tensor:
+        mean = self._forward(observations)
+        log_std = self._std_forward(observations)
+        std = tf.exp(log_std)
+
+        dist = tfp.distributions.MultivariateNormalDiag(
+            loc=mean,
+            scale_diag=std
+        )
+
+        loss = self._loss(mean, dist, actions, d)
+
+        with tf.name_scope('actor'):
+            tf.summary.scalar('std', tf.reduce_mean(std), self._tf_time_step)
+
+        return loss + -self._entropy_coeff * log_std
+
+
+class DistExplorACER(FastACER):
     def __init__(
             self, observations_space: gym.Space, actions_space: gym.Space, *args,
             entropy_coeff: float = 1, std_loss_mult: float = 0.1, std_loss_delay: float = 0,
@@ -161,7 +191,7 @@ class ExplorACER(FastACER):
         if self._is_discrete:
             raise NotImplementedError
         else:
-            return VarSigmaGaussianActor(
+            return DistVarSigmaGaussianActor(
                 self._observations_space, self._actions_space, self._actor_layers,
                 self._actor_beta_penalty, self._actions_bound,
                 self._std_loss_mult, self._std_loss_delay, self._std_diff_fun,
@@ -247,4 +277,23 @@ class ExplorACER(FastACER):
                 dones,
                 lengths,
                 time
+            )
+
+
+class StdExplorACER(FastACER):
+    def __init__(
+            self, observations_space: gym.Space, actions_space: gym.Space, *args,
+            entropy_coeff: float = 0, **kwargs):
+        self._entropy_coeff = entropy_coeff
+        super().__init__(observations_space, actions_space, *args, **kwargs)
+
+
+    def _init_actor(self) -> BaseActor:
+        if self._is_discrete:
+            raise NotImplementedError
+        else:
+            return StdVarSigmaGaussianActor(
+                self._observations_space, self._actions_space, self._actor_layers,
+                self._actor_beta_penalty, self._actions_bound,
+                self._entropy_coeff, self._tf_time_step
             )
