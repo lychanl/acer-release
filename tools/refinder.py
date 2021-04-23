@@ -170,7 +170,7 @@ if __name__ == "__main__":
     diffs = make_diffs(runs_params) if args.diff else [{}] * len(results)
     res_props = all_res_props if args.results else [{}] * len(results)
 
-    for res, r, d in zip(results, res_props, diffs):
+    for res, r, d in sorted(zip(results, res_props, diffs)):
         print(
             res,
             *[f'{k}={v}' for k, v in r.items()],
