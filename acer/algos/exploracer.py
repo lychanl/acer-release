@@ -15,13 +15,13 @@ def _kl_diff(old_mean: tf.Tensor, mean: tf.Tensor, std: tf.Tensor) -> tf.Tensor:
 
 
 @tf.function
-def _new_diff(old_mean: tf.Tensor, mean: tf.Tensor, std: tf.Tensor) -> tf.Tensor:
+def _is_diff(old_mean: tf.Tensor, mean: tf.Tensor, std: tf.Tensor) -> tf.Tensor:
     return tf.exp(tf.reduce_sum(tf.square(old_mean - mean) / tf.square(std), axis=-1)) - 1
 
 
 DIFF_FUNCTIONS = {
     'KL': _kl_diff,
-    'NEW': _new_diff
+    'IS': _is_diff
 }
 
 
