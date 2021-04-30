@@ -82,6 +82,8 @@ parser.add_argument('--gradient_norm_median_threshold', help='Number of medians 
                     type=float, default=4)
 parser.add_argument('--use_v', action='store_true',
                     help='If true then value instead of noise-value will be used (ACERAC only)')
+parser.add_argument('--reverse', action='store_true',
+                    help='Reverse param for exploracer')
 parser.add_argument('--evaluate_time_steps_interval', type=int, help='Number of time steps between evaluations. '
                                                                      '-1 to turn evaluation off',
                     default=10000)
