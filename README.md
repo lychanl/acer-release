@@ -22,12 +22,16 @@ or full path should be passed):
 ```shell script
 source {name}/bin/activate 
 ```
-3. While in the repository's root directory, install the requirements:
+3. While in the repository's root directory, update pip version:
+```shell script
+python -m pip install --upgrade pip
+``` 
+4. Install the requirements:
 ```shell script
 pip install -r requirements.txt
 ``` 
 
-4. Run the agent:
+5. Run the agent:
 ```shell script
 python run.py {args...}
 ``` 

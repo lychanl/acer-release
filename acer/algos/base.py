@@ -63,6 +63,7 @@ class BaseActor(ABC, tf.keras.Model):
 
         return hidden_layers
 
+    @tf.function(experimental_relax_shapes=True)
     def _forward(self, observations: np.array) -> tf.Tensor:
         x = self._hidden_layers[0](observations)
         for layer in self._hidden_layers[1:]:
@@ -246,7 +247,7 @@ class CategoricalActor(BaseActor):
         action_log_probs = tf.gather_nd(log_probs, actions, batch_dims=1)
         return action_probs, action_log_probs
 
-    @tf.function
+    @tf.function(experimental_relax_shapes=True)
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
 
         # TODO: remove hardcoded '10' and '20'
@@ -262,7 +263,7 @@ class CategoricalActor(BaseActor):
             tf.summary.histogram('action', actions, step=self._tf_time_step)
         return tf.squeeze(actions, axis=[1]), actions_probs
 
-    @tf.function
+    @tf.function(experimental_relax_shapes=True)
     def act_deterministic(self, observations: tf.Tensor, **kwargs) -> tf.Tensor:
         """Performs most probable action"""
         logits = tf.divide(self._forward(observations), 10)

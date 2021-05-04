@@ -46,13 +46,13 @@ class FastACER(BaseACERAgent):
 
     def _init_replay_buffer(self, memory_size: int, policy_spec: BufferFieldSpec = None):
         if type(self._actions_space) == gym.spaces.Discrete:
-            actions_shape = (1, )
+            self._actions_shape = (1, )
         else:
-            actions_shape = self._actions_space.shape
+            self._actions_shape = self._actions_space.shape
 
         self._memory = MultiReplayBuffer(
             buffer_class=VecReplayBuffer,
-            action_spec=BufferFieldSpec(shape=actions_shape, dtype=self._actor.action_dtype_np),
+            action_spec=BufferFieldSpec(shape=self._actions_shape, dtype=self._actor.action_dtype_np),
             obs_spec=BufferFieldSpec(shape=self._observations_space.shape, dtype=self._observations_space.dtype),
             max_size=memory_size,
             policy_spec=policy_spec,
@@ -92,7 +92,13 @@ class FastACER(BaseACERAgent):
         obs_next = self._process_observations(obs_next)
         rewards = self._process_rewards(rewards)
 
-        policies, _ = self._actor.prob(obs, actions)
+        flat_obs = tf.reshape(obs, (-1, *self._observations_space.shape))
+
+        policies, _ = self._actor.prob(
+            flat_obs,
+            tf.reshape(actions, (-1, *self._actions_shape)),
+        )
+        policies = tf.reshape(policies, (self._batch_size, self._n))
         mask = tf.sequence_mask(lengths, maxlen=self._n, dtype=tf.float32)
 
         td = self._calculate_td(obs, obs_next, rewards, lengths, dones, mask)
@@ -103,7 +109,7 @@ class FastACER(BaseACERAgent):
         self._actor_backward_pass(first_obs, first_actions, d)
         self._critic_backward_pass(first_obs, d)
 
-    @tf.function
+    @tf.function(experimental_relax_shapes=True)
     def _calculate_truncated_density(self, policies, old_policies, mask):
         policies_masked = policies * mask + (1 - mask) * tf.ones_like(policies)
         old_policies_masked = old_policies * mask + (1 - mask) * tf.ones_like(old_policies)
@@ -113,14 +119,18 @@ class FastACER(BaseACERAgent):
 
         return tf.tanh(policies_ratio_prod / self._b) * self._b
 
-    @tf.function
+    @tf.function(experimental_relax_shapes=True)
     def _calculate_td(self, obs, obs_next, rewards, lengths, dones, mask):
         dones_mask = 1 - tf.cast(
             (tf.expand_dims(tf.range(1, self._n + 1), 0) == tf.expand_dims(lengths, 1)) & tf.expand_dims(dones, 1),
             tf.float32
         )
 
-        values = tf.squeeze(self._critic.value(tf.concat([obs, tf.expand_dims(obs_next, 1)], axis=1)), axis=2)
+        all_obs = tf.concat([obs, tf.expand_dims(obs_next, 1)], axis=1)
+        values = tf.reshape(
+            self._critic.value(tf.reshape(all_obs, (-1, *self._observations_space.shape))),
+            (self._batch_size, self._n + 1)
+        )
         values_first = values[:,:-1]
         values_next = values[:,1:] * dones_mask
 
