@@ -10,13 +10,13 @@ from replay_buffer import BufferFieldSpec, VecReplayBuffer, MultiReplayBuffer
 
 
 @tf.function
-def _kl_diff(old_mean: tf.Tensor, mean: tf.Tensor, std: tf.Tensor) -> tf.Tensor:
-    return tf.reduce_sum(0.5 * tf.square(old_mean - mean) / tf.square(std), axis=-1)
+def _kl_diff(ratio: tf.Tensor) -> tf.Tensor:
+    return tf.reduce_sum(0.5 * ratio, axis=-1)
 
 
 @tf.function
-def _is_diff(old_mean: tf.Tensor, mean: tf.Tensor, std: tf.Tensor) -> tf.Tensor:
-    return tf.exp(tf.reduce_sum(tf.square(old_mean - mean) / tf.square(std), axis=-1)) - 1
+def _is_diff(ratio: tf.Tensor) -> tf.Tensor:
+    return tf.exp(ratio) - 1
 
 
 DIFF_FUNCTIONS = {
@@ -67,7 +67,7 @@ class VarSigmaGaussianActor(GaussianActor):
 class DistVarSigmaGaussianActor(VarSigmaGaussianActor):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  beta_penalty: float, actions_bound: float, std_loss_mult: float = 0.1, std_loss_delay: float = 0.,
-                 std_diff_fun='KL', reverse=False, *args, **kwargs):
+                 std_diff_fun='KL', reverse=False, b=None, *args, **kwargs):
         """BaseActor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
 
         TODO: introduce [a, b] intervals as allowed actions bounds
@@ -87,12 +87,16 @@ class DistVarSigmaGaussianActor(VarSigmaGaussianActor):
         self._diff = DIFF_FUNCTIONS[std_diff_fun]
         self._std_loss_mult = std_loss_mult
         self._std_loss_delay = std_loss_delay
+        self._b = b
 
     @tf.function
     def _std_loss(
         self, old_mean: tf.Tensor, mean: tf.Tensor, std: tf.Tensor, expected_entropy: tf.Tensor
     ) -> tf.Tensor:
-        std_diff = self._diff(old_mean, mean, std)
+        ratio = tf.reduce_sum(tf.square(old_mean - mean) / tf.square(std), axis=-1)
+        if self._b:
+            ratio = tf.tanh(ratio / self._b) * self._b
+        std_diff = self._diff(ratio)
         if self._reverse:
             std_diff = 1 / (1 + std_diff)
         return tf.reduce_mean(tf.square(expected_entropy - std_diff))
@@ -179,12 +183,13 @@ class DistExplorACER(FastACER):
     def __init__(
             self, observations_space: gym.Space, actions_space: gym.Space, *args,
             entropy_coeff: float = 1, std_loss_mult: float = 0.1, std_loss_delay: float = 0,
-            std_diff_fun: str = 'KL', reverse=False, **kwargs):
+            std_diff_fun: str = 'KL', diff_b=None, reverse=False, **kwargs):
         self._entropy_coeff = entropy_coeff
         self._std_loss_mult = std_loss_mult
         self._std_diff_fun = std_diff_fun
         self._std_loss_delay = std_loss_delay
         self._reverse = reverse
+        self._diff_b = diff_b
         super().__init__(
             observations_space, actions_space,
             *args, **kwargs, additional_buffer_types=(tf.dtypes.int32,),
@@ -198,7 +203,8 @@ class DistExplorACER(FastACER):
             return DistVarSigmaGaussianActor(
                 self._observations_space, self._actions_space, self._actor_layers,
                 self._actor_beta_penalty, self._actions_bound,
-                self._std_loss_mult, self._std_loss_delay, self._std_diff_fun, self._reverse,
+                self._std_loss_mult, self._std_loss_delay,
+                self._std_diff_fun, self._reverse, self._diff_b,
                 self._tf_time_step
             )
 
