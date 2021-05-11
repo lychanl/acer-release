@@ -11,7 +11,7 @@ from replay_buffer import BufferFieldSpec, VecReplayBuffer, MultiReplayBuffer
 
 @tf.function
 def _kl_diff(ratio: tf.Tensor) -> tf.Tensor:
-    return tf.reduce_sum(0.5 * ratio, axis=-1)
+    return 0.5 * ratio
 
 
 @tf.function
@@ -66,8 +66,8 @@ class VarSigmaGaussianActor(GaussianActor):
 
 class DistVarSigmaGaussianActor(VarSigmaGaussianActor):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 beta_penalty: float, actions_bound: float, std_loss_mult: float = 0.1, std_loss_delay: float = 0.,
-                 std_diff_fun='KL', reverse=False, b=None, *args, **kwargs):
+                 beta_penalty: float, actions_bound: float, std_loss_mult: float = 0.1,
+                 std_diff_fun='KL', b=None, *args, **kwargs):
         """BaseActor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
 
         TODO: introduce [a, b] intervals as allowed actions bounds
@@ -83,10 +83,8 @@ class DistVarSigmaGaussianActor(VarSigmaGaussianActor):
             observations_space, actions_space, layers, beta_penalty, actions_bound, None,
             *args, **kwargs)
 
-        self._reverse = reverse
         self._diff = DIFF_FUNCTIONS[std_diff_fun]
         self._std_loss_mult = std_loss_mult
-        self._std_loss_delay = std_loss_delay
         self._b = b
 
     @tf.function
@@ -97,8 +95,6 @@ class DistVarSigmaGaussianActor(VarSigmaGaussianActor):
         if self._b:
             ratio = tf.tanh(ratio / self._b) * self._b
         std_diff = self._diff(ratio)
-        if self._reverse:
-            std_diff = 1 / (1 + std_diff)
         return tf.reduce_mean(tf.square(expected_entropy - std_diff))
 
     @tf.function
@@ -117,8 +113,6 @@ class DistVarSigmaGaussianActor(VarSigmaGaussianActor):
 
         std_loss = self._std_loss(old_mean, tf.stop_gradient(mean), std, expected_entropy)
         loss = self._loss(mean, dist, actions, d)
-
-        std_loss = tf.where(tf.cast(self._tf_time_step, tf.float32) < self._std_loss_delay, 0., std_loss)
 
         with tf.name_scope('actor'):
             tf.summary.scalar('std', tf.reduce_mean(std), self._tf_time_step)
@@ -182,13 +176,11 @@ class StdVarSigmaGaussianActor(VarSigmaGaussianActor):
 class DistExplorACER(FastACER):
     def __init__(
             self, observations_space: gym.Space, actions_space: gym.Space, *args,
-            entropy_coeff: float = 1, std_loss_mult: float = 0.1, std_loss_delay: float = 0,
-            std_diff_fun: str = 'KL', diff_b=None, reverse=False, **kwargs):
+            entropy_coeff: float = 1, std_loss_mult: float = 0.1,
+            std_diff_fun: str = 'KL', diff_b=None, **kwargs):
         self._entropy_coeff = entropy_coeff
         self._std_loss_mult = std_loss_mult
         self._std_diff_fun = std_diff_fun
-        self._std_loss_delay = std_loss_delay
-        self._reverse = reverse
         self._diff_b = diff_b
         super().__init__(
             observations_space, actions_space,
@@ -203,8 +195,7 @@ class DistExplorACER(FastACER):
             return DistVarSigmaGaussianActor(
                 self._observations_space, self._actions_space, self._actor_layers,
                 self._actor_beta_penalty, self._actions_bound,
-                self._std_loss_mult, self._std_loss_delay,
-                self._std_diff_fun, self._reverse, self._diff_b,
+                self._std_loss_mult, self._std_diff_fun, self._diff_b,
                 self._tf_time_step
             )
 
@@ -237,8 +228,6 @@ class DistExplorACER(FastACER):
         window_size = tf.minimum(tf.cast(self._tf_time_step, tf.float32), tf.constant(self._memory_size, tf.float32))
         expected_entropy = self._entropy_coeff * tf.cast(time, tf.float32) / tf.cast(window_size, tf.float32)
         # expected_entropy = 1 - tf.cast(time, tf.float32) / tf.cast(window_size, tf.float32)
-        if self._reverse:
-            expected_entropy = 1 / (1 + expected_entropy)
 
         # expected_entropy = tf.where(td >= 0, 0.8 * tf.ones_like(td), -0.2 * tf.ones_like(td)) * truncated_density
         # expected_entropy = tf.reduce_sum(expected_entropy, axis=1, keepdims=True)
