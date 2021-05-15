@@ -237,7 +237,7 @@ class DistExplorACER(FastACER):
         self._actor_backward_pass(old_first_means, first_obs, first_actions, d, expected_entropy)
         self._critic_backward_pass(first_obs, d)
 
-    @tf.function
+    # @tf.function
     def _actor_backward_pass(
         self, old_mean: tf.Tensor, observations: tf.Tensor, 
         actions: tf.Tensor, d: tf.Tensor, expected_std_diff: tf.Tensor

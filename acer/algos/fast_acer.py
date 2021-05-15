@@ -91,7 +91,8 @@ class FastACER(BaseACERAgent):
         obs = self._process_observations(obs)
         obs_next = self._process_observations(obs_next)
         rewards = self._process_rewards(rewards)
-
+        
+        """
         flat_obs = tf.reshape(obs, (-1, *self._observations_space.shape))
 
         policies, _ = self._actor.prob(
@@ -99,6 +100,9 @@ class FastACER(BaseACERAgent):
             tf.reshape(actions, (-1, *self._actions_shape)),
         )
         policies = tf.reshape(policies, (self._batch_size, self._n))
+        """
+        policies, _ = self._actor.prob(obs, actions)
+
         mask = tf.sequence_mask(lengths, maxlen=self._n, dtype=tf.float32)
 
         td = self._calculate_td(obs, obs_next, rewards, lengths, dones, mask)
@@ -126,11 +130,16 @@ class FastACER(BaseACERAgent):
             tf.float32
         )
 
+        """
         all_obs = tf.concat([obs, tf.expand_dims(obs_next, 1)], axis=1)
-        values = tf.reshape(
+        values_o = tf.reshape(
             self._critic.value(tf.reshape(all_obs, (-1, *self._observations_space.shape))),
             (self._batch_size, self._n + 1)
         )
+        """
+
+        values = tf.squeeze(self._critic.value(tf.concat([obs, tf.expand_dims(obs_next, 1)], axis=1)), axis=2)
+        
         values_first = values[:,:-1]
         values_next = values[:,1:] * dones_mask
 
