@@ -47,6 +47,8 @@ parser.add_argument('--std_diff_fun', type=str, help='Distribution difference fu
 parser.add_argument('--std_loss_delay', type=float, help='Delay of std optimization.', default=0.)
 parser.add_argument('--diff_b', type=float, help='diff ratio truncation coefficient',
                     required=False, default=None)
+parser.add_argument('--diff_h', type=float, help='H scale for log std loss',
+                    required=False, default=None)
 parser.add_argument('--entropy_coeff', type=float, help='Entropy coefficient for ExplorACER', default=1)
 parser.add_argument('--tau', type=int, help='Tau parameter for acerac', default=2)
 parser.add_argument('--n', type=int, help='N parameter for fast acerac', default=2)

@@ -67,7 +67,7 @@ class VarSigmaGaussianActor(GaussianActor):
 class DistVarSigmaGaussianActor(VarSigmaGaussianActor):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  beta_penalty: float, actions_bound: float, std_loss_mult: float = 0.1,
-                 std_diff_fun='KL', b=None, *args, **kwargs):
+                 std_diff_fun='KL', b=None, h=None, *args, **kwargs):
         """BaseActor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
 
         TODO: introduce [a, b] intervals as allowed actions bounds
@@ -86,18 +86,29 @@ class DistVarSigmaGaussianActor(VarSigmaGaussianActor):
         self._diff = DIFF_FUNCTIONS[std_diff_fun]
         self._std_loss_mult = std_loss_mult
         self._b = b
+        self._h = h
+        self._std0 = 1
 
-    @tf.function
+    # @tf.function
     def _std_loss(
         self, old_mean: tf.Tensor, mean: tf.Tensor, std: tf.Tensor, expected_entropy: tf.Tensor
     ) -> tf.Tensor:
         ratio = tf.reduce_sum(tf.square(old_mean - mean) / tf.square(std), axis=-1)
-        if self._b:
-            ratio = tf.tanh(ratio / self._b) * self._b
         std_diff = self._diff(ratio)
-        return tf.reduce_mean(tf.square(expected_entropy - std_diff))
 
-    @tf.function
+        if self._b:
+            psi_std_diff = tf.tanh(std_diff / self._b) * self._b
+            std_loss = tf.reduce_mean(tf.square(expected_entropy - psi_std_diff))
+        else:
+            std_loss = tf.reduce_mean(tf.square(expected_entropy - std_diff))
+
+        if self._h:
+            std_loss = std_loss + tf.reduce_sum((std_diff - psi_std_diff) / (std_diff + 1e-6)\
+                * tf.reduce_sum(tf.square(tf.math.log(std / self._std0) / (tf.ones_like(std) * self._h)), axis=-1))
+
+        return std_loss
+
+    # @tf.function
     def loss(
         self, old_mean: tf.Tensor, observations: tf.Tensor, actions: tf.Tensor,
         d: tf.Tensor, expected_entropy: tf.Tensor
@@ -177,11 +188,12 @@ class DistExplorACER(FastACER):
     def __init__(
             self, observations_space: gym.Space, actions_space: gym.Space, *args,
             entropy_coeff: float = 1, std_loss_mult: float = 0.1,
-            std_diff_fun: str = 'KL', diff_b=None, **kwargs):
+            std_diff_fun: str = 'KL', diff_b=None, diff_h=None,  **kwargs):
         self._entropy_coeff = entropy_coeff
         self._std_loss_mult = std_loss_mult
         self._std_diff_fun = std_diff_fun
         self._diff_b = diff_b
+        self._diff_h = diff_h
         super().__init__(
             observations_space, actions_space,
             *args, **kwargs, additional_buffer_types=(tf.dtypes.int32,),
@@ -195,7 +207,8 @@ class DistExplorACER(FastACER):
             return DistVarSigmaGaussianActor(
                 self._observations_space, self._actions_space, self._actor_layers,
                 self._actor_beta_penalty, self._actions_bound,
-                self._std_loss_mult, self._std_diff_fun, self._diff_b,
+                self._std_loss_mult, self._std_diff_fun,
+                self._diff_b, self._diff_h,
                 self._tf_time_step
             )
 
