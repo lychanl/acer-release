@@ -16,7 +16,7 @@ def _kl_diff(ratio: tf.Tensor) -> tf.Tensor:
 
 @tf.function
 def _is_diff(ratio: tf.Tensor) -> tf.Tensor:
-    return tf.exp(ratio) - 1
+    return tf.exp(tf.minimum(ratio, 10)) - 1
 
 
 DIFF_FUNCTIONS = {
@@ -96,6 +96,18 @@ class DistVarSigmaGaussianActor(VarSigmaGaussianActor):
         ratio = tf.reduce_sum(tf.square(old_mean - mean) / tf.square(std), axis=-1)
         std_diff = self._diff(ratio)
 
+        """
+        with tf.name_scope('actor_loss'):
+            tf.summary.scalar('mean ratio', tf.reduce_mean(ratio), self._tf_time_step)
+            tf.summary.scalar('max ratio', tf.reduce_max(ratio), self._tf_time_step)
+            tf.summary.scalar('min ratio', tf.reduce_min(ratio), self._tf_time_step)
+            tf.summary.scalar('ratio fin', tf.reduce_all(tf.math.is_finite(ratio)), self._tf_time_step)
+            tf.summary.scalar('mean diff', tf.reduce_mean(std_diff), self._tf_time_step)
+            tf.summary.scalar('max diff', tf.reduce_max(std_diff), self._tf_time_step)
+            tf.summary.scalar('min diff', tf.reduce_min(std_diff), self._tf_time_step)
+            tf.summary.scalar('diff fin', tf.reduce_all(tf.math.is_finite(std_diff)), self._tf_time_step)
+        """
+
         if self._b:
             psi_std_diff = tf.tanh(std_diff / self._b) * self._b
             std_loss = tf.reduce_mean(tf.square(expected_entropy - psi_std_diff))
@@ -103,8 +115,18 @@ class DistVarSigmaGaussianActor(VarSigmaGaussianActor):
             std_loss = tf.reduce_mean(tf.square(expected_entropy - std_diff))
 
         if self._h:
-            std_loss = std_loss + tf.reduce_sum((std_diff - psi_std_diff) / (std_diff + 1e-6)\
-                * tf.reduce_sum(tf.square(tf.math.log(std / self._std0) / (tf.ones_like(std) * self._h)), axis=-1))
+            h_part = (1 - psi_std_diff / (std_diff + 1e-6))\
+                * tf.reduce_sum(tf.square(tf.math.log(std / self._std0) / (tf.ones_like(std) * self._h)), axis=-1)
+
+            """
+            with tf.name_scope('actor_loss'):
+                tf.summary.scalar('mean h_part', tf.reduce_mean(h_part), self._tf_time_step)
+                tf.summary.scalar('max h_part', tf.reduce_max(h_part), self._tf_time_step)
+                tf.summary.scalar('min h_part', tf.reduce_min(h_part), self._tf_time_step)
+                tf.summary.scalar('h_part fin', tf.reduce_all(tf.math.is_finite(h_part)), self._tf_time_step)
+            """
+
+            std_loss = std_loss + tf.reduce_sum(h_part)
 
         return std_loss
 
@@ -127,8 +149,8 @@ class DistVarSigmaGaussianActor(VarSigmaGaussianActor):
 
         with tf.name_scope('actor'):
             tf.summary.scalar('std', tf.reduce_mean(std), self._tf_time_step)
-            tf.summary.scalar('std_loss', tf.reduce_mean(std_loss), self._tf_time_step)
-            tf.summary.scalar('expected_loss', tf.reduce_mean(expected_entropy), self._tf_time_step)
+            tf.summary.scalar('min_std', tf.reduce_min(std), self._tf_time_step)
+            tf.summary.scalar('max_std', tf.reduce_max(std), self._tf_time_step)
             tf.summary.scalar('success_ratio', tf.reduce_mean(tf.cast(d > 0, tf.float32)), self._tf_time_step)
             tf.summary.scalar(
                 'mean_square_means_diff',
@@ -263,6 +285,7 @@ class DistExplorACER(FastACER):
         gradients = zip(grads, self._actor.trainable_variables)
 
         self._actor_optimizer.apply_gradients(gradients)
+
 
     def _experience_replay_generator(self):
         """Generates trajectories batches. All tensors are padded with zeros to match self._n number of

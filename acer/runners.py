@@ -139,24 +139,24 @@ class Runner:
         if experiment_name:
             exp_name = "{experiment_name}_{num_try}" if num_try > 0 else experiment_name
             
-            log_dir = Path(
+            run_log_dir = Path(
                 f"{log_dir}/{environment_name}_{algorithm}_{exp_name}"
                 f"_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
             )
         elif num_try == 0:
-            log_dir = Path(
+            run_log_dir = Path(
                 f"{log_dir}/{environment_name}_{algorithm}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
             )
         else:
-            log_dir = Path(
+            run_log_dir = Path(
                 f"{log_dir}/{environment_name}_{algorithm}_{num_try}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
             )
         
-        if log_dir.exists():
+        if run_log_dir.exists():
             self._prepare_log_dir(experiment_name, log_dir, environment_name, algorithm, num_try + 1)
         else:
-            log_dir.mkdir(parents=True, exist_ok=True)
-            self._log_dir = log_dir
+            run_log_dir.mkdir(parents=True, exist_ok=True)
+            self._log_dir = run_log_dir
 
     def run(self):
         """Performs training. If 'evaluate' is True, evaluation of the policy is performed. The evaluation
