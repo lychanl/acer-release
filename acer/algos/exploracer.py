@@ -48,10 +48,13 @@ class VarSigmaGaussianActor(GaussianActor):
 
     @tf.function
     def _std_forward(self, observations: np.array) -> tf.Tensor:
-        x = self._std_layers[0](observations)
-        for layer in self._std_layers[1:]:
+        batch_dims = observations.shape[:-len(self.obs_shape)]
+        
+        x = tf.reshape(observations, (-1,) + self.obs_shape)
+        for layer in self._std_layers:
             x = layer(x)
-        return x
+        
+        return tf.reshape(x, batch_dims + (self.actions_dim,))
 
     def _dist(self, observations: np.array) -> tf.Tensor:
         mean = self._forward(observations)

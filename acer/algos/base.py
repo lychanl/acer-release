@@ -45,6 +45,7 @@ class BaseActor(ABC, tf.keras.Model):
 
         self._hidden_layers = self._build_layers(observations_space, layers, actions_dim)
 
+        self.obs_shape = observations_space.shape
         self.actions_dim = actions_dim
         self.beta_penalty = beta_penalty
         self._tf_time_step = tf_time_step
@@ -63,12 +64,15 @@ class BaseActor(ABC, tf.keras.Model):
 
         return hidden_layers
 
-    @tf.function(experimental_relax_shapes=True)
+    @tf.function
     def _forward(self, observations: np.array) -> tf.Tensor:
-        x = self._hidden_layers[0](observations)
-        for layer in self._hidden_layers[1:]:
+        batch_dims = observations.shape[:-len(self.obs_shape)]
+        
+        x = tf.reshape(observations, (-1,) + self.obs_shape)
+        for layer in self._hidden_layers:
             x = layer(x)
-        return x
+        
+        return tf.reshape(x, batch_dims + (self.actions_dim,))
 
     @property
     @abstractmethod
@@ -137,6 +141,7 @@ class BaseCritic(ABC, tf.keras.Model):
 
         self._hidden_layers.extend(build_mlp_network(layers_sizes=layers))
 
+        self.obs_shape = observations_space.shape
         self._v = tf.keras.layers.Dense(1, kernel_initializer=utils.normc_initializer())
         self._tf_time_step = tf_time_step
         self._use_additional_input = use_additional_input
@@ -157,12 +162,18 @@ class BaseCritic(ABC, tf.keras.Model):
         """
         x = tf.concat([observations, additional_input], axis=-1) if self._use_additional_input else observations
 
+        batch_dims = observations.shape[:-len(self.obs_shape)]
+        
+        obs_shape = self.obs_shape[:-1] + (self.obs_shape[-1] + additional_input.shape[-1],)\
+            if self._use_additional_input else self.obs_shape
+
+        x = tf.reshape(x, (-1,) + obs_shape)
         for layer in self._hidden_layers:
             x = layer(x)
-
+        
         value = self._v(x)
 
-        return value
+        return tf.reshape(value, batch_dims + (1,))
 
 
 class Critic(BaseCritic):
@@ -363,7 +374,7 @@ class GaussianActor(BaseActor):
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
         dist = self._dist(observations)
         return self._act(dist)
-    
+
     @tf.function
     def _act(self, dist: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         actions = dist.sample(dtype=self.dtype)
@@ -371,6 +382,7 @@ class GaussianActor(BaseActor):
 
         with tf.name_scope('actor'):
             tf.summary.scalar(f'batch_action_mean', tf.reduce_mean(actions), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_std_mean', tf.reduce_mean(dist.scale.H.diag), step=self._tf_time_step)
 
         return actions, actions_probs
 
