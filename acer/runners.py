@@ -131,7 +131,7 @@ class Runner:
         )
 
         self._save_parameters(algorithm_parameters)
-        self._agent = _get_agent(algorithm, algorithm_parameters, dummy_env.observation_space, dummy_env.action_space)
+        self._agent = _get_agent(algorithm, algorithm_parameters, self._env.single_observation_space, self._env.single_action_space)
         self._current_obs = self._env.reset()
         self._dump = dump
 
