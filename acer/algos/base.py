@@ -446,7 +446,7 @@ class BaseACERAgent(ABC):
             self._experience_replay_generator,
             (tf.dtypes.float32, tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.float32, tf.dtypes.float32,
              tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.bool, tf.dtypes.int32, *additional_buffer_types)
-        ).prefetch(1)
+        )  # .prefetch(1)
 
         self._actor_optimizer = tf.keras.optimizers.Adam(
             lr=actor_lr,

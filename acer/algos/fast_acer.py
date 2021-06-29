@@ -22,7 +22,7 @@ from replay_buffer import BufferFieldSpec, VecReplayBuffer, MultiReplayBuffer
 
 class FastACER(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
-                 critic_layers: Optional[Tuple[int]], n: int = 2, b: float = 3, *args, **kwargs):
+                 critic_layers: Optional[Tuple[int]], n: int = 2, b: float = 3, no_truncate: bool = True, *args, **kwargs):
         """BaseActor-Critic with Experience Replay
 
         TODO: finish docstrings
@@ -31,6 +31,7 @@ class FastACER(BaseACERAgent):
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
         self._n = n
         self._b = b
+        self._truncate = not no_truncate
 
     def _init_actor(self) -> BaseActor:
         if self._is_discrete:
@@ -108,6 +109,10 @@ class FastACER(BaseACERAgent):
         td = self._calculate_td(obs, obs_next, rewards, lengths, dones, mask)
         truncated_density = self._calculate_truncated_density(policies, old_policies, mask)
 
+        with tf.name_scope('density'):
+            tf.summary.scalar('density_mean', tf.reduce_mean(truncated_density), step=self._tf_time_step)
+            tf.summary.scalar('density_std', tf.math.reduce_std(truncated_density), step=self._tf_time_step)
+
         d = tf.stop_gradient(td * truncated_density)
 
         self._actor_backward_pass(first_obs, first_actions, d)
@@ -121,7 +126,10 @@ class FastACER(BaseACERAgent):
         policies_ratio = policies_masked / old_policies_masked
         policies_ratio_prod = tf.reduce_prod(policies_ratio, axis=-1, keepdims=True)
 
-        return tf.tanh(policies_ratio_prod / self._b) * self._b
+        if self._truncate:
+            return tf.tanh(policies_ratio_prod / self._b) * self._b
+        else:
+            return policies_ratio_prod
 
     @tf.function(experimental_relax_shapes=True)
     def _calculate_td(self, obs, obs_next, rewards, lengths, dones, mask):
