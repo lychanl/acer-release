@@ -338,3 +338,230 @@ class StdExplorACER(FastACER):
                 self._actor_beta_penalty, self._actions_bound,
                 self._entropy_coeff, self._tf_time_step
             )
+
+
+class  SingleSigmaActor(GaussianActor):
+    def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
+                 beta_penalty: float, actions_bound: float, *args, **kwargs):
+        super().__init__(
+            observations_space, actions_space, layers, beta_penalty, actions_bound,
+            *args, **kwargs)
+        self._log_std = tf.Variable(self.log_std - 1)
+
+
+    def _dist(self, observations: np.array) -> tf.Tensor:
+        mean = self._forward(observations)
+        dist = tfp.distributions.MultivariateNormalDiag(
+            loc=mean,
+            scale_diag=tf.exp(self._log_std)
+        )
+
+        return dist
+        
+    @tf.function
+    def loss(
+        self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor, target_std: tf.Tensor) -> tf.Tensor:
+        mean = self._forward(observations)
+        std = tf.exp(self._log_std)
+
+        dist = tfp.distributions.MultivariateNormalDiag(
+            loc=mean,
+            scale_diag=tf.stop_gradient(std) * tf.ones_like(mean)
+        )
+
+        std_loss = tf.reduce_sum(tf.square(std - tf.stop_gradient(target_std)))
+
+        loss = self._loss(mean, dist, actions, d) + std_loss
+
+        with tf.name_scope('actor'):
+            tf.summary.scalar('std', tf.reduce_mean(std), self._tf_time_step)
+            tf.summary.scalar('target_std', tf.reduce_mean(target_std), self._tf_time_step)
+
+        return loss
+
+
+class SingleSigmaExplorACER(FastACER):
+    def _init_actor(self) -> BaseActor:
+        if self._is_discrete:
+            raise NotImplementedError
+        else:
+            return SingleSigmaActor(
+                self._observations_space, self._actions_space, self._actor_layers,
+                self._actor_beta_penalty, self._actions_bound, self._std,
+                self._tf_time_step,
+            )
+ 
+    @tf.function(experimental_relax_shapes=True)
+    def _learn_from_experience_batch(
+        self, obs, obs_next, actions, old_policies, rewards,
+        first_obs, first_actions, dones, lengths):
+        """Backward pass with single batch of experience.
+
+        Every experience replay requires sequence of experiences with random length, thus we have to use
+        ragged tensors here.
+
+        See Equation (8) and Equation (9) in the paper (1).
+        """
+
+        obs = self._process_observations(obs)
+        obs_next = self._process_observations(obs_next)
+        rewards = self._process_rewards(rewards)
+        policies, _ = self._actor.prob(obs, actions)
+
+        mask = tf.sequence_mask(lengths, maxlen=self._n, dtype=tf.float32)
+
+        td = self._calculate_td(obs, obs_next, rewards, lengths, dones, mask)
+        truncated_density = self._calculate_truncated_density(policies, old_policies, mask)
+
+        expected_std = tf.reduce_mean(tf.abs(self._actor._forward(obs) - actions), axis=(0, 1))  * tf.sqrt(2 / np.pi)
+
+        d = tf.stop_gradient(td * truncated_density)
+
+        self._actor_backward_pass(first_obs, first_actions, d, expected_std)
+        self._critic_backward_pass(first_obs, d)
+
+    # @tf.function
+    def _actor_backward_pass(
+        self, observations: tf.Tensor, 
+        actions: tf.Tensor, d: tf.Tensor, expected_std: tf.Tensor
+    ):
+        with tf.GradientTape() as tape:
+            loss = self._actor.loss(observations, actions, d, expected_std)
+        grads = tape.gradient(loss, self._actor.trainable_variables)
+        if self._gradient_norm is not None:
+            grads = self._clip_gradient(grads, self._actor_gradient_norm_median, 'actor')
+        gradients = zip(grads, self._actor.trainable_variables)
+
+        self._actor_optimizer.apply_gradients(gradients)
+
+
+class MultiSigmaActor(VarSigmaGaussianActor):
+    def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
+                 beta_penalty: float, actions_bound: float, *args, **kwargs):
+        super().__init__(
+            observations_space, actions_space, layers, beta_penalty, actions_bound,
+            *args, **kwargs)
+
+    @tf.function
+    def loss(
+        self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor, target_std: tf.Tensor, std_weights: tf.Tensor) -> tf.Tensor:
+        mean = self._forward(observations)
+        std = tf.exp(self._std_forward(observations))
+
+        dist = tfp.distributions.MultivariateNormalDiag(
+            loc=mean,
+            scale_diag=tf.stop_gradient(std) * tf.ones_like(mean)
+        )
+
+        std_loss = tf.reduce_mean(tf.reduce_sum(tf.square(std - tf.stop_gradient(target_std)), axis=-1) * std_weights)
+
+        loss = self._loss(mean, dist, actions, d) + std_loss
+
+        with tf.name_scope('actor'):
+            tf.summary.scalar('std', tf.reduce_mean(std), self._tf_time_step)
+            tf.summary.scalar('target_std', tf.reduce_mean(target_std), self._tf_time_step)
+            tf.summary.scalar(
+                'weighted_target_std',
+                tf.reduce_sum(tf.reduce_mean(target_std, axis=-1) * std_weights) / tf.reduce_sum(std_weights),
+                self._tf_time_step
+            )
+
+        return loss
+
+
+class MultiSigmaExplorACER(FastACER):
+    def __init__(self, *args, time_coeff='linear', alpha=1,  **kwargs):
+        super().__init__(*args, **kwargs, additional_buffer_types=(tf.dtypes.int32,))
+
+        self._time_coeff = time_coeff
+        self._alpha = alpha
+
+    def _init_actor(self) -> BaseActor:
+        if self._is_discrete:
+            raise NotImplementedError
+        else:
+            return MultiSigmaActor(
+                self._observations_space, self._actions_space, self._actor_layers,
+                self._actor_beta_penalty, self._actions_bound, self._std,
+                self._tf_time_step,
+            )
+ 
+    @tf.function(experimental_relax_shapes=True)
+    def _learn_from_experience_batch(
+        self, obs, obs_next, actions, old_policies, rewards,
+        first_obs, first_actions, dones, lengths, time):
+        """Backward pass with single batch of experience.
+
+        Every experience replay requires sequence of experiences with random length, thus we have to use
+        ragged tensors here.
+
+        See Equation (8) and Equation (9) in the paper (1).
+        """
+
+        obs = self._process_observations(obs)
+        obs_next = self._process_observations(obs_next)
+        rewards = self._process_rewards(rewards)
+        policies, _ = self._actor.prob(obs, actions)
+
+        mask = tf.sequence_mask(lengths, maxlen=self._n, dtype=tf.float32)
+
+        td = self._calculate_td(obs, obs_next, rewards, lengths, dones, mask)
+        truncated_density = self._calculate_truncated_density(policies, old_policies, mask)
+
+        window_size = tf.minimum(tf.cast(self._tf_time_step, tf.float32), tf.constant(self._memory_size, tf.float32))
+        time_coeff = (
+            2 * (1 - tf.cast(time, tf.float32) / window_size )
+        ) if self._time_coeff == 'linear' else (
+            tf.exp(-tf.cast(time, tf.float32) / window_size * 2) * window_size * (1 - tf.exp(-2 / window_size))
+        )
+
+        expected_std = tf.abs(self._actor._forward(obs) - actions)[:,0]  * self._alpha * tf.sqrt(np.pi / 2)
+
+        d = tf.stop_gradient(td * truncated_density)
+
+        self._actor_backward_pass(first_obs, first_actions, d, expected_std, time_coeff)
+        self._critic_backward_pass(first_obs, d)
+
+    # @tf.function
+    def _actor_backward_pass(
+        self, observations: tf.Tensor, 
+        actions: tf.Tensor, d: tf.Tensor, expected_std: tf.Tensor, std_weights: tf.Tensor
+    ):
+        with tf.GradientTape() as tape:
+            loss = self._actor.loss(observations, actions, d, expected_std, std_weights)
+        grads = tape.gradient(loss, self._actor.trainable_variables)
+        if self._gradient_norm is not None:
+            grads = self._clip_gradient(grads, self._actor_gradient_norm_median, 'actor')
+        gradients = zip(grads, self._actor.trainable_variables)
+
+        self._actor_optimizer.apply_gradients(gradients)
+
+    def _experience_replay_generator(self):
+        """Generates trajectories batches. All tensors are padded with zeros to match self._n number of
+        experience tuples in a single trajectory.
+        Trajectories are returned in shape [batch, self._n, <obs/actions/etc shape>]
+        """
+        while True:
+            offline_batches, lens = self._fetch_offline_batch()
+            
+            lengths = lens
+            obs = offline_batches['observations']
+            obs_next = offline_batches['next_observations'][np.arange(self._batch_size),lens - 1]
+            actions = offline_batches['actions']
+            rewards = offline_batches['rewards']
+            policies = offline_batches['policies']
+            dones = offline_batches['dones'][np.arange(self._batch_size),lens - 1]
+            time = offline_batches['time']
+
+            yield (
+                obs,
+                obs_next,
+                actions,
+                policies[:,:,0],
+                rewards,
+                obs[:,0],
+                actions[:,0],
+                dones,
+                lengths,
+                time
+            )

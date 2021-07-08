@@ -91,6 +91,7 @@ parser.add_argument('--levels', type=int, help='Buffer tree levels (prioritized 
 parser.add_argument('--block', type=int, help='Block size (prioritized replay)')
 parser.add_argument('--reverse', action='store_true',
                     help='Reverse param for exploracer')
+parser.add_argument('--time_coeff', type=str, help='type of time-based coefficient for sigma learning', default="linear", choices=("linear", "exp"))
 parser.add_argument('--evaluate_time_steps_interval', type=int, help='Number of time steps between evaluations. '
                                                                      '-1 to turn evaluation off',
                     default=10000)

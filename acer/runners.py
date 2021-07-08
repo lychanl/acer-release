@@ -18,7 +18,7 @@ from algos.acerac import ACERAC
 from algos.base import BaseACERAgent
 from algos.quantile_acer import QACER
 from algos.qacerac import QACERAC
-from algos.exploracer import DistExplorACER, StdExplorACER
+from algos.exploracer import DistExplorACER, StdExplorACER, SingleSigmaExplorACER, MultiSigmaExplorACER
 from algos.prioritized_acer import PrioritizedACER
 from logger import CSVLogger
 from utils import is_atari, getPossiblyDTChangedEnvBuilder
@@ -38,6 +38,8 @@ ALGOS = {
     'exploracer': DistExplorACER,
     'stdexploracer': StdExplorACER,
     'acper': PrioritizedACER,
+    'singlesigma': SingleSigmaExplorACER,
+    'multisigma': MultiSigmaExplorACER
 }
 
 
