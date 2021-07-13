@@ -131,7 +131,7 @@ class FastACER(BaseACERAgent):
         else:
             return policies_ratio_prod
 
-    @tf.function(experimental_relax_shapes=True)
+    # @tf.function(experimental_relax_shapes=True)
     def _calculate_td(self, obs, obs_next, rewards, lengths, dones, mask):
         dones_mask = 1 - tf.cast(
             (tf.expand_dims(tf.range(1, self._n + 1), 0) == tf.expand_dims(lengths, 1)) & tf.expand_dims(dones, 1),

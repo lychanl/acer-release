@@ -64,7 +64,7 @@ class BaseActor(ABC, tf.keras.Model):
 
         return hidden_layers
 
-    @tf.function
+    # @tf.function
     def _forward(self, observations: np.array) -> tf.Tensor:
         batch_dims = observations.shape[:-len(self.obs_shape)]
         
@@ -258,7 +258,6 @@ class CategoricalActor(BaseActor):
         action_log_probs = tf.gather_nd(log_probs, actions, batch_dims=1)
         return action_probs, action_log_probs
 
-    @tf.function(experimental_relax_shapes=True)
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
 
         # TODO: remove hardcoded '10' and '20'

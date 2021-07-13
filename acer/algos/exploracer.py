@@ -46,7 +46,7 @@ class VarSigmaGaussianActor(GaussianActor):
 
         self._std_layers = self._build_layers(observations_space, layers, self.actions_dim)
 
-    @tf.function
+    # @tf.function
     def _std_forward(self, observations: np.array) -> tf.Tensor:
         batch_dims = observations.shape[:-len(self.obs_shape)]
         
@@ -467,6 +467,10 @@ class MultiSigmaActor(VarSigmaGaussianActor):
             )
 
         return loss
+ 
+    # @tf.function
+    def _std_forward(self, observations: np.array) -> tf.Tensor:
+        return super(MultiSigmaActor, self)._std_forward(observations) + tf.expand_dims(self.log_std, 0)
 
 
 class MultiSigmaExplorACER(FastACER):
@@ -485,7 +489,7 @@ class MultiSigmaExplorACER(FastACER):
                 self._actor_beta_penalty, self._actions_bound, self._std,
                 self._tf_time_step,
             )
- 
+
     @tf.function(experimental_relax_shapes=True)
     def _learn_from_experience_batch(
         self, obs, obs_next, actions, old_policies, rewards,
