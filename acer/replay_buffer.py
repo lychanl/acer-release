@@ -639,7 +639,7 @@ class PrioritizedReplayBuffer(VecReplayBuffer):
 
     def _fetch_slice(self, buffer_slice) -> Dict[str, np.array]:
         batch = super()._fetch_slice(buffer_slice)
-        batch["priors"] = self._priorities[0][buffer_slice]
+        batch["priors"] = self._priorities[0][buffer_slice] * self._current_size / self._total_priorities
 
         return batch
 
@@ -658,7 +658,7 @@ class PrioritizedReplayBuffer(VecReplayBuffer):
 
     def _zero_vec(self, length):
         return ({
-            "priors": np.ones((length, 0)),
+            "priors": np.zeros((length, 0)),
             "actions": np.zeros((length, 0)),
             "observations": np.zeros((length, 0)),
             "rewards": np.zeros((length, 0)),
