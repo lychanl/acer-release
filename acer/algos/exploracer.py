@@ -437,23 +437,25 @@ class SingleSigmaExplorACER(FastACER):
 
 class MultiSigmaActor(VarSigmaGaussianActor):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 beta_penalty: float, actions_bound: float, *args, **kwargs):
+                 beta_penalty: float, actions_bound: float, alpha, *args, **kwargs):
+        self._alpha = alpha
         super().__init__(
             observations_space, actions_space, layers, beta_penalty, actions_bound,
             *args, **kwargs)
 
     @tf.function
     def loss(
-        self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor, target_std: tf.Tensor, std_weights: tf.Tensor) -> tf.Tensor:
+        self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor, target_std: tf.Tensor, target_std2, std_weights: tf.Tensor) -> tf.Tensor:
         mean = self._forward(observations)
-        std = tf.exp(self._std_forward(observations))
+        eta = self._std_forward(observations)
+        std = tf.exp(eta)
 
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
             scale_diag=tf.stop_gradient(std) * tf.ones_like(mean)
         )
 
-        std_loss = tf.reduce_mean(tf.reduce_sum(tf.square(std - tf.stop_gradient(target_std)), axis=-1) * std_weights)
+        std_loss = tf.reduce_sum(tf.square(target_std / std), -1) + self._alpha * tf.reduce_sum(tf.square(target_std2 / std), -1) + (1 + self._alpha) * tf.reduce_sum(eta, -1)
 
         loss = self._loss(mean, dist, actions, d) + std_loss
 
@@ -473,12 +475,24 @@ class MultiSigmaActor(VarSigmaGaussianActor):
         return super(MultiSigmaActor, self)._std_forward(observations) + tf.expand_dims(self.log_std, 0)
 
 
-class MultiSigmaExplorACER(FastACER):
-    def __init__(self, *args, time_coeff='linear', alpha=1,  **kwargs):
-        super().__init__(*args, **kwargs, additional_buffer_types=(tf.dtypes.int32,))
+    @tf.function
+    def _act(self, dist: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+        actions = dist.sample(dtype=self.dtype)
+        actions_probs = dist.prob(actions)
 
+        with tf.name_scope('actor'):
+            tf.summary.scalar(f'batch_action_mean', tf.reduce_mean(actions), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_std_mean', tf.reduce_mean(dist.scale.H.diag), step=self._tf_time_step)
+
+        return actions, tf.concat([actions_probs, dist.mode()[0]], axis=0)
+
+
+class MultiSigmaExplorACER(FastACER):
+    def __init__(self, actions_space, *args, time_coeff='linear', alpha=1, **kwargs):
         self._time_coeff = time_coeff
         self._alpha = alpha
+
+        super().__init__(*args, actions_space=actions_space, **kwargs, additional_buffer_types=(tf.dtypes.int32,), policy_spec=BufferFieldSpec((1 + actions_space.shape[0],)))
 
     def _init_actor(self) -> BaseActor:
         if self._is_discrete:
@@ -486,7 +500,7 @@ class MultiSigmaExplorACER(FastACER):
         else:
             return MultiSigmaActor(
                 self._observations_space, self._actions_space, self._actor_layers,
-                self._actor_beta_penalty, self._actions_bound, self._std,
+                self._actor_beta_penalty, self._actions_bound, self._alpha, self._std,
                 self._tf_time_step,
             )
 
@@ -502,6 +516,9 @@ class MultiSigmaExplorACER(FastACER):
         See Equation (8) and Equation (9) in the paper (1).
         """
 
+        old_expected_actions = old_policies[:,:,1:]
+        old_policies = old_policies[:,:,0]
+
         obs = self._process_observations(obs)
         obs_next = self._process_observations(obs_next)
         rewards = self._process_rewards(rewards)
@@ -513,26 +530,28 @@ class MultiSigmaExplorACER(FastACER):
         truncated_density = self._calculate_truncated_density(policies, old_policies, mask)
 
         window_size = tf.minimum(tf.cast(self._tf_time_step, tf.float32), tf.constant(self._memory_size, tf.float32))
-        time_coeff = (
+        time_coeff = tf.ones_like(time, tf.float32) if self._time_coeff == 'none' else (
             2 * (1 - tf.cast(time, tf.float32) / window_size )
         ) if self._time_coeff == 'linear' else (
             tf.exp(-tf.cast(time, tf.float32) / window_size * 2) * window_size * (1 - tf.exp(-2 / window_size))
-        )
+        ) 
 
-        expected_std = tf.abs(self._actor._forward(obs) - actions)[:,0]  * self._alpha * tf.sqrt(np.pi / 2)
+        modes = self._actor._dist(obs).mode()
+        expected_std = 0.5 * (old_expected_actions[:,0,:] - modes[:,0,:])
+        expected_std2 = 0.5 * (actions[:,0,:] - modes[:,0,:])
 
         d = tf.stop_gradient(td * truncated_density)
 
-        self._actor_backward_pass(first_obs, first_actions, d, expected_std, time_coeff)
+        self._actor_backward_pass(first_obs, first_actions, d, expected_std, expected_std2, time_coeff)
         self._critic_backward_pass(first_obs, d)
 
     # @tf.function
     def _actor_backward_pass(
         self, observations: tf.Tensor, 
-        actions: tf.Tensor, d: tf.Tensor, expected_std: tf.Tensor, std_weights: tf.Tensor
+        actions: tf.Tensor, d: tf.Tensor, expected_std: tf.Tensor, expected_std2, std_weights: tf.Tensor
     ):
         with tf.GradientTape() as tape:
-            loss = self._actor.loss(observations, actions, d, expected_std, std_weights)
+            loss = self._actor.loss(observations, actions, d, expected_std, expected_std2, std_weights)
         grads = tape.gradient(loss, self._actor.trainable_variables)
         if self._gradient_norm is not None:
             grads = self._clip_gradient(grads, self._actor_gradient_norm_median, 'actor')
@@ -561,7 +580,7 @@ class MultiSigmaExplorACER(FastACER):
                 obs,
                 obs_next,
                 actions,
-                policies[:,:,0],
+                policies,
                 rewards,
                 obs[:,0],
                 actions[:,0],
