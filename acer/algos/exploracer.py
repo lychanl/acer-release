@@ -437,8 +437,9 @@ class SingleSigmaExplorACER(FastACER):
 
 class MultiSigmaActor(VarSigmaGaussianActor):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 beta_penalty: float, actions_bound: float, alpha, *args, **kwargs):
+                 beta_penalty: float, actions_bound: float, alpha, std_loss_mult, *args, **kwargs):
         self._alpha = alpha
+        self._std_loss_mult = std_loss_mult
         super().__init__(
             observations_space, actions_space, layers, beta_penalty, actions_bound,
             *args, **kwargs)
@@ -457,11 +458,12 @@ class MultiSigmaActor(VarSigmaGaussianActor):
 
         std_loss = tf.reduce_sum(tf.square(target_std / std), -1) + self._alpha * tf.reduce_sum(tf.square(target_std2 / std), -1) + (1 + self._alpha) * tf.reduce_sum(eta, -1)
 
-        loss = self._loss(mean, dist, actions, d) + std_loss
+        loss = self._loss(mean, dist, actions, d) + std_loss * self._std_loss_mult
 
         with tf.name_scope('actor'):
             tf.summary.scalar('std', tf.reduce_mean(std), self._tf_time_step)
             tf.summary.scalar('target_std', tf.reduce_mean(target_std), self._tf_time_step)
+            tf.summary.scalar('target_std', tf.reduce_mean(target_std2), self._tf_time_step)
             tf.summary.scalar(
                 'weighted_target_std',
                 tf.reduce_sum(tf.reduce_mean(target_std, axis=-1) * std_weights) / tf.reduce_sum(std_weights),
@@ -488,9 +490,10 @@ class MultiSigmaActor(VarSigmaGaussianActor):
 
 
 class MultiSigmaExplorACER(FastACER):
-    def __init__(self, actions_space, *args, time_coeff='linear', alpha=1, **kwargs):
+    def __init__(self, actions_space, *args, time_coeff='linear', alpha=1, std_loss_mult=1, **kwargs):
         self._time_coeff = time_coeff
         self._alpha = alpha
+        self._std_loss_mult = std_loss_mult
 
         super().__init__(*args, actions_space=actions_space, **kwargs, additional_buffer_types=(tf.dtypes.int32,), policy_spec=BufferFieldSpec((1 + actions_space.shape[0],)))
 
@@ -500,8 +503,8 @@ class MultiSigmaExplorACER(FastACER):
         else:
             return MultiSigmaActor(
                 self._observations_space, self._actions_space, self._actor_layers,
-                self._actor_beta_penalty, self._actions_bound, self._alpha, self._std,
-                self._tf_time_step,
+                self._actor_beta_penalty, self._actions_bound, self._alpha, self._std_loss_mult,
+                self._std, self._tf_time_step,
             )
 
     @tf.function(experimental_relax_shapes=True)
