@@ -40,7 +40,8 @@ parser.add_argument('--c', type=int, help='experience replay intensity', require
 parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=1)
 parser.add_argument('--kappa', type=float, help='kappa parameter for qacer', default=0.)
 parser.add_argument('--atoms', type=int, help='number of atoms for qacer', default=50)
-parser.add_argument('--alpha', type=float, help='Alpha parameter for acerac.', default=0.5)
+parser.add_argument('--alpha', type=float, help='Alpha parameter.', default=0.5)
+parser.add_argument('--rho', type=float, help='Rho parameter.', default=1)
 parser.add_argument('--std_loss_mult', type=float, help='std loss to actor loss ration', default=0.1)
 parser.add_argument('--std_diff_fun', type=str, help='Distribution difference function.',
                     default='KL', choices=list(DIFF_FUNCTIONS))

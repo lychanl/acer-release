@@ -437,8 +437,9 @@ class SingleSigmaExplorACER(FastACER):
 
 class MultiSigmaActor(VarSigmaGaussianActor):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 beta_penalty: float, actions_bound: float, alpha, std_loss_mult, *args, **kwargs):
+                 beta_penalty: float, actions_bound: float, alpha, rho, std_loss_mult, *args, **kwargs):
         self._alpha = alpha
+        self._rho = rho
         self._std_loss_mult = std_loss_mult
         super().__init__(
             observations_space, actions_space, layers, beta_penalty, actions_bound,
@@ -456,12 +457,14 @@ class MultiSigmaActor(VarSigmaGaussianActor):
             scale_diag=tf.stop_gradient(std) * tf.ones_like(mean)
         )
 
+        rho_std = self._rho * std
+
         if self._alpha >= 0:
-            std_loss = tf.reduce_sum(tf.square(target_std / std), -1)\
-                + self._alpha * tf.reduce_sum(tf.square(target_std2 / std), -1)\
+            std_loss = tf.reduce_sum(tf.square(target_std / rho_std), -1)\
+                + self._alpha * tf.reduce_sum(tf.square(target_std2 / rho_std), -1)\
                 + (1 + self._alpha) * tf.reduce_sum(eta, -1)
         else:
-            std_loss = tf.reduce_sum(tf.square(target_std2 / std), -1) + tf.reduce_sum(eta, -1)
+            std_loss = tf.reduce_sum(tf.square(target_std2 / rho_std), -1) + tf.reduce_sum(eta, -1)
 
         loss = self._loss(mean, dist, actions, d) + std_loss * self._std_loss_mult
 
@@ -495,9 +498,10 @@ class MultiSigmaActor(VarSigmaGaussianActor):
 
 
 class MultiSigmaExplorACER(FastACER):
-    def __init__(self, actions_space, *args, time_coeff='linear', alpha=1, std_loss_mult=1, **kwargs):
+    def __init__(self, actions_space, *args, time_coeff='linear', alpha=1, rho=1, std_loss_mult=1, **kwargs):
         self._time_coeff = time_coeff
         self._alpha = alpha
+        self._rho = rho
         self._std_loss_mult = std_loss_mult
 
         super().__init__(*args, actions_space=actions_space, **kwargs, additional_buffer_types=(tf.dtypes.int32,), policy_spec=BufferFieldSpec((1 + actions_space.shape[0],)))
@@ -508,7 +512,7 @@ class MultiSigmaExplorACER(FastACER):
         else:
             return MultiSigmaActor(
                 self._observations_space, self._actions_space, self._actor_layers,
-                self._actor_beta_penalty, self._actions_bound, self._alpha, self._std_loss_mult,
+                self._actor_beta_penalty, self._actions_bound, self._alpha, self._rho, self._std_loss_mult,
                 self._std, self._tf_time_step,
             )
 
