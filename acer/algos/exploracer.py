@@ -457,14 +457,14 @@ class MultiSigmaActor(VarSigmaGaussianActor):
             scale_diag=tf.stop_gradient(std) * tf.ones_like(mean)
         )
 
-        rho_std = self._rho * std
+        rho_std = tf.square(self._rho * std)
 
         if self._alpha >= 0:
-            std_loss = tf.reduce_sum(tf.square(target_std / rho_std), -1)\
-                + self._alpha * tf.reduce_sum(tf.square(target_std2 / rho_std), -1)\
+            std_loss = tf.reduce_sum(0.5 * target_std / rho_std, -1)\
+                + self._alpha * tf.reduce_sum(0.5 * target_std2 / rho_std, -1)\
                 + (1 + self._alpha) * tf.reduce_sum(eta, -1)
         else:
-            std_loss = tf.reduce_sum(tf.square(target_std2 / rho_std), -1) + tf.reduce_sum(eta, -1)
+            std_loss = tf.reduce_sum(0.5 * target_std2 / rho_std, -1) + tf.reduce_sum(eta, -1)
 
         loss = self._loss(mean, dist, actions, d) + std_loss * self._std_loss_mult
 
@@ -494,7 +494,7 @@ class MultiSigmaActor(VarSigmaGaussianActor):
             tf.summary.scalar(f'batch_action_mean', tf.reduce_mean(actions), step=self._tf_time_step)
             tf.summary.scalar(f'batch_std_mean', tf.reduce_mean(dist.scale.H.diag), step=self._tf_time_step)
 
-        return actions, tf.concat([actions_probs, dist.mode()[0]], axis=0)
+        return actions, tf.concat([[actions_probs], dist.mode()], axis=1)
 
 
 class MultiSigmaExplorACER(FastACER):
@@ -549,15 +549,15 @@ class MultiSigmaExplorACER(FastACER):
         ) 
 
         modes = self._actor._dist(obs).mode()
-        expected_std = 0.5 * (old_expected_actions[:,0,:] - modes[:,0,:])
-        expected_std2 = 0.5 * (actions[:,0,:] - modes[:,0,:])
+        expected_std = tf.stop_gradient(tf.square(old_expected_actions[:,0,:] - modes[:,0,:]))
+        expected_std2 = tf.stop_gradient(tf.square(actions[:,0,:] - modes[:,0,:]))
 
         d = tf.stop_gradient(td * truncated_density)
 
         self._actor_backward_pass(first_obs, first_actions, d, expected_std, expected_std2, time_coeff)
         self._critic_backward_pass(first_obs, d)
 
-    # @tf.function
+    @tf.function
     def _actor_backward_pass(
         self, observations: tf.Tensor, 
         actions: tf.Tensor, d: tf.Tensor, expected_std: tf.Tensor, expected_std2, std_weights: tf.Tensor
