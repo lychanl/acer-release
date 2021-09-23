@@ -25,9 +25,15 @@ class Run:
         self.last_eval_out_means = [None for _ in range(log_outs)]
         self.timesteps = 0
 
-    def start(self):
+    def start(self, verbose):
+        exe = sys.executable
+        run = os.path.join(os.path.dirname(__file__), 'run.py')
+
+        if verbose:
+            print(f'Run: python {exe} script {run} {" ".join(self.params)}')
+
         self.process = subprocess.Popen(
-            [sys.executable, os.path.join(os.path.dirname(__file__), 'run.py'), *self.params],
+            [exe, run, *self.params],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True, text=True
         )
         time.sleep(5)
