@@ -94,7 +94,7 @@ def run(base_params, splitted_sets, verbose):
     processes = [make_proc(base_params, set) for set in splitted_sets]
 
     for p in processes:
-        p.start()
+        p.start(verbose)
 
     start = datetime.datetime.now()
 
