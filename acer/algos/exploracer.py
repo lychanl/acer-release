@@ -340,7 +340,7 @@ class StdExplorACER(FastACER):
             )
 
 
-class  SingleSigmaActor(GaussianActor):
+class SingleSigmaActor(GaussianActor):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  beta_penalty: float, actions_bound: float, *args, **kwargs):
         super().__init__(
@@ -457,6 +457,14 @@ class MultiSigmaActor(VarSigmaGaussianActor):
             scale_diag=tf.stop_gradient(std) * tf.ones_like(mean)
         )
 
+        return self._loss(mean, dist, actions, d)
+
+    @tf.function
+    def std_loss(
+            self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor, target_std: tf.Tensor, target_std2, std_weights: tf.Tensor) -> tf.Tensor:
+        eta = self._std_forward(observations)
+        std = tf.exp(eta)
+
         rho_std = tf.square(self._rho * std)
 
         if self._alpha >= 0:
@@ -465,8 +473,6 @@ class MultiSigmaActor(VarSigmaGaussianActor):
                 + (1 + self._alpha) * tf.reduce_sum(eta, -1)
         else:
             std_loss = tf.reduce_sum(0.5 * target_std2 / rho_std, -1) + tf.reduce_sum(eta, -1)
-
-        loss = self._loss(mean, dist, actions, d) + std_loss * self._std_loss_mult
 
         with tf.name_scope('actor'):
             tf.summary.scalar('std', tf.reduce_mean(std), self._tf_time_step)
@@ -477,8 +483,14 @@ class MultiSigmaActor(VarSigmaGaussianActor):
                 tf.reduce_sum(tf.reduce_mean(target_std, axis=-1) * std_weights) / tf.reduce_sum(std_weights),
                 self._tf_time_step
             )
+            tf.summary.scalar(
+                'weighted_target_std2',
+                tf.reduce_sum(tf.reduce_mean(target_std2, axis=-1) * std_weights) / tf.reduce_sum(std_weights),
+                self._tf_time_step
+            )
 
-        return loss
+        return std_loss
+
  
     # @tf.function
     def _std_forward(self, observations: np.array) -> tf.Tensor:
@@ -498,13 +510,22 @@ class MultiSigmaActor(VarSigmaGaussianActor):
 
 
 class MultiSigmaExplorACER(FastACER):
-    def __init__(self, actions_space, *args, time_coeff='linear', alpha=1, rho=1, std_loss_mult=1, **kwargs):
+    def __init__(
+            self, actions_space, *args, time_coeff='linear', alpha=1, rho=1, std_loss_mult=1,
+            actor_lr=0, actor_adam_beta1=0, actor_adam_beta2=0, actor_adam_epsilon=0, **kwargs):
         self._time_coeff = time_coeff
         self._alpha = alpha
         self._rho = rho
         self._std_loss_mult = std_loss_mult
 
         super().__init__(*args, actions_space=actions_space, **kwargs, additional_buffer_types=(tf.dtypes.int32,), policy_spec=BufferFieldSpec((1 + actions_space.shape[0],)))
+
+        self._explor_optimizer = tf.keras.optimizers.Adam(
+            lr=actor_lr * std_loss_mult,
+            beta_1=actor_adam_beta1,
+            beta_2=actor_adam_beta2,
+            epsilon=actor_adam_epsilon
+        )
 
     def _init_actor(self) -> BaseActor:
         if self._is_discrete:
@@ -567,9 +588,16 @@ class MultiSigmaExplorACER(FastACER):
         grads = tape.gradient(loss, self._actor.trainable_variables)
         if self._gradient_norm is not None:
             grads = self._clip_gradient(grads, self._actor_gradient_norm_median, 'actor')
-        gradients = zip(grads, self._actor.trainable_variables)
 
+        with tf.GradientTape() as std_tape:
+            std_loss = self._actor.std_loss(observations, actions, d, expected_std, expected_std2, std_weights)
+        std_grads = std_tape.gradient(std_loss, self._actor.trainable_variables)
+
+        gradients = zip(grads, self._actor.trainable_variables)
         self._actor_optimizer.apply_gradients(gradients)
+
+        std_gradients = zip(std_grads, self._actor.trainable_variables)
+        self._actor_optimizer.apply_gradients(std_gradients)
 
     def _experience_replay_generator(self):
         """Generates trajectories batches. All tensors are padded with zeros to match self._n number of
