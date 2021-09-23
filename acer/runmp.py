@@ -28,16 +28,16 @@ class Run:
     def start(self):
         self.process = subprocess.Popen(
             [sys.executable, os.path.join(os.path.dirname(__file__), 'run.py'), *self.params],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True, text=True
         )
         time.sleep(5)
 
-    def refresh(self):
+    def refresh(self, verbose):
         if not self.alive():
             return
 
         out = self.process.stdout.readline()
-        self.process_output(out)
+        self.process_output(out, verbose)
 
         self.return_code = self.process.poll()
         if self.return_code is not None:
@@ -45,10 +45,13 @@ class Run:
                 self.process_output(out)
             self.open = False
 
-    def process_output(self, out):
-        out = out.decode('utf8').strip()
+    def process_output(self, out, verbose):
+        out = out.strip()
         if not out:
             return
+
+        if verbose:
+            print(out)
 
         if 'evaluation run, return' in out:
             self.last_eval_outs.append(float(out.split()[-1]))
@@ -81,7 +84,7 @@ def name(params):
     return ' '.join([p[2:] if p.startswith('--') else p for p in params])
 
 
-def run(base_params, splitted_sets):
+def run(base_params, splitted_sets, verbose):
     processes = [make_proc(base_params, set) for set in splitted_sets]
 
     for p in processes:
@@ -95,11 +98,12 @@ def run(base_params, splitted_sets):
         while num_alive:
             num_alive = 0
             for p in processes:
-                p.refresh()
+                p.refresh(verbose)
                 if p.alive():
                     num_alive += 1
 
-            cls()
+            if not verbose:
+                cls()
             print(f"START: {start} ACTUALIZATION: {datetime.datetime.now()}")
             for p in processes:
                 p.show()
@@ -132,12 +136,13 @@ def split_run_params(optimized_params):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--optim', action='append', nargs='+', type=str)
+    parser.add_argument('--verbose', action='store_true', default=False)
 
     args, params = parser.parse_known_args()
 
     splitted_params = split_run_params(args.optim)
 
-    run(params, splitted_params)
+    run(params, splitted_params, args.verbose)
 
 
 if __name__ == "__main__":
