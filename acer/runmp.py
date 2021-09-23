@@ -34,7 +34,7 @@ class Run:
 
         self.process = subprocess.Popen(
             [exe, run, *self.params],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True, text=True
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
         )
         time.sleep(5)
 
