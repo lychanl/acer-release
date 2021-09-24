@@ -48,7 +48,7 @@ class Run:
         self.return_code = self.process.poll()
         if self.return_code is not None:
             for out in self.process.stdout.readlines():
-                self.process_output(out)
+                self.process_output(out, verbose)
             self.open = False
 
     def process_output(self, out, verbose):
@@ -111,6 +111,8 @@ def run(base_params, splitted_sets, verbose):
             if not verbose:
                 cls()
             print(f"START: {start} ACTUALIZATION: {datetime.datetime.now()}")
+            print("Base params: " + " ".join(map(str, base_params)))
+            print()
             for p in processes:
                 p.show()
             print()
