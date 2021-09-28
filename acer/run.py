@@ -38,7 +38,7 @@ parser.add_argument('--actor_beta_penalty', type=float, help='BaseActor penalty 
 parser.add_argument('--n_step', type=int, help='experience replay frequency', required=False, default=1)
 parser.add_argument('--c', type=int, help='experience replay intensity', required=False, default=1)
 parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=1)
-parser.add_argument('--kappa', type=float, help='kappa parameter for qacer', default=0.)
+parser.add_argument('--kappa', type=float, help='kappa parameter for qacer and time scaling', default=1.)
 parser.add_argument('--atoms', type=int, help='number of atoms for qacer', default=50)
 parser.add_argument('--alpha', type=float, help='Alpha parameter.', default=0.5)
 parser.add_argument('--rho', type=float, help='Rho parameter.', default=1)
@@ -92,7 +92,7 @@ parser.add_argument('--levels', type=int, help='Buffer tree levels (prioritized 
 parser.add_argument('--block', type=int, help='Block size (prioritized replay)')
 parser.add_argument('--reverse', action='store_true',
                     help='Reverse param for exploracer')
-parser.add_argument('--time_coeff', type=str, help='type of time-based coefficient for sigma learning', default="linear", choices=("none", "linear", "exp"))
+parser.add_argument('--time_coeff', type=str, help='type of time-based coefficient for sigma learning', default="linear", choices=("none", "linear", "exp", "power"))
 parser.add_argument('--evaluate_time_steps_interval', type=int, help='Number of time steps between evaluations. '
                                                                      '-1 to turn evaluation off',
                     default=10000)

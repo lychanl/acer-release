@@ -125,7 +125,8 @@ def run(base_params, splitted_sets, gpus, verbose):
 
             if not verbose:
                 cls()
-            print(f"START: {start} ACTUALIZATION: {datetime.datetime.now()}")
+            now = datetime.datetime.now()
+            print(f"START: {start} ACTUALIZATION: {now} DURATION: {now - start}")
             print("Base params: " + " ".join(map(str, base_params)))
             print()
             for p in processes:
