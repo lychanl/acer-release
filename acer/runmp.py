@@ -106,6 +106,9 @@ def run(base_params, splitted_sets, gpus, verbose):
             gpu = gpus[i % len(gpus)]
         else:
             gpu = None
+
+        print(f"Starting process {i+1} of {len(processes)} (gpu spec: {gpu})...")
+
         p.start(gpu, verbose)
 
     start = datetime.datetime.now()
@@ -157,7 +160,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--optim', action='append', nargs='+', type=str)
     parser.add_argument('--verbose', action='store_true', default=False)
-    parser.add_argument('--gpus', nargs='*', default=None, type=str)
+    parser.add_argument('--gpus', nargs='+', default=None, type=str)
 
     args, params = parser.parse_known_args()
 
