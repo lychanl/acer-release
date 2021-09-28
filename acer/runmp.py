@@ -10,6 +10,9 @@ def cls():
     os.system('cls' if os.name=='nt' else 'clear')
 
 
+GPUS_ENV = 'CUDA_VISIBLE_DEVICES'
+
+
 class Run:
     def __init__(self, name, params, log_outs=3) -> None:
         self.name = name
@@ -25,16 +28,21 @@ class Run:
         self.last_eval_out_means = [None for _ in range(log_outs)]
         self.timesteps = 0
 
-    def start(self, verbose):
+    def start(self, gpu, verbose):
         exe = sys.executable
         run = os.path.join(os.path.dirname(__file__), 'run.py')
 
         if verbose:
             print(f'Run: python {exe} script {run} {" ".join(self.params)}')
 
+        if gpu is None:
+            env = None
+        else:
+            env = {GPUS_ENV: gpu}
+
         self.process = subprocess.Popen(
             [exe, run, *self.params],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env
         )
         time.sleep(5)
 
@@ -90,11 +98,15 @@ def name(params):
     return ' '.join([p[2:] if p.startswith('--') else p for p in params])
 
 
-def run(base_params, splitted_sets, verbose):
+def run(base_params, splitted_sets, gpus, verbose):
     processes = [make_proc(base_params, set) for set in splitted_sets]
 
-    for p in processes:
-        p.start(verbose)
+    for i, p in enumerate(processes):
+        if gpus:
+            gpu = gpus[i % len(gpus)]
+        else:
+            gpu = None
+        p.start(gpu, verbose)
 
     start = datetime.datetime.now()
 
@@ -145,12 +157,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--optim', action='append', nargs='+', type=str)
     parser.add_argument('--verbose', action='store_true', default=False)
+    parser.add_argument('--gpus', nargs='*', default=None, type=str)
 
     args, params = parser.parse_known_args()
 
     splitted_params = split_run_params(args.optim)
 
-    run(params, splitted_params, args.verbose)
+    run(params, splitted_params, args.gpus, args.verbose)
 
 
 if __name__ == "__main__":
