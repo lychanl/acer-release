@@ -489,7 +489,7 @@ class MultiSigmaActor(VarSigmaGaussianActor):
                 self._tf_time_step
             )
 
-        return std_loss
+        return tf.reduce_mean(std_loss * std_weights)
 
  
     # @tf.function
