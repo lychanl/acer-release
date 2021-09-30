@@ -46,7 +46,7 @@ class VarSigmaGaussianActor(GaussianActor):
 
         self._std_layers = self._build_layers(observations_space, layers, self.actions_dim)
 
-    # @tf.function
+    @tf.function
     def _std_forward(self, observations: np.array) -> tf.Tensor:
         batch_dims = observations.shape[:-len(self.obs_shape)]
         
@@ -420,7 +420,7 @@ class SingleSigmaExplorACER(FastACER):
         self._actor_backward_pass(first_obs, first_actions, d, expected_std)
         self._critic_backward_pass(first_obs, d)
 
-    # @tf.function
+    @tf.function
     def _actor_backward_pass(
         self, observations: tf.Tensor, 
         actions: tf.Tensor, d: tf.Tensor, expected_std: tf.Tensor
@@ -492,7 +492,7 @@ class MultiSigmaActor(VarSigmaGaussianActor):
         return tf.reduce_mean(std_loss * std_weights)
 
  
-    # @tf.function
+    @tf.function
     def _std_forward(self, observations: np.array) -> tf.Tensor:
         return super(MultiSigmaActor, self)._std_forward(observations) + tf.expand_dims(self.log_std, 0)
 
@@ -505,6 +505,8 @@ class MultiSigmaActor(VarSigmaGaussianActor):
         with tf.name_scope('actor'):
             tf.summary.scalar(f'batch_action_mean', tf.reduce_mean(actions), step=self._tf_time_step)
             tf.summary.scalar(f'batch_std_mean', tf.reduce_mean(dist.scale.H.diag), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_std_min', tf.reduce_min(dist.scale.H.diag), step=self._tf_time_step)
+            tf.summary.scalar(f'batch_std_max', tf.reduce_max(dist.scale.H.diag), step=self._tf_time_step)
 
         return actions, tf.concat([[actions_probs], dist.mode()], axis=1)
 
@@ -579,6 +581,10 @@ class MultiSigmaExplorACER(FastACER):
 
         d = tf.stop_gradient(td * truncated_density)
 
+        with tf.name_scope('density'):
+            tf.summary.scalar('density_mean', tf.reduce_mean(truncated_density), step=self._tf_time_step)
+            tf.summary.scalar('density_std', tf.math.reduce_std(truncated_density), step=self._tf_time_step)
+
         self._actor_backward_pass(first_obs, first_actions, d, expected_std, expected_std2, time_coeff)
         self._critic_backward_pass(first_obs, d)
 
@@ -601,7 +607,7 @@ class MultiSigmaExplorACER(FastACER):
         self._actor_optimizer.apply_gradients(gradients)
 
         std_gradients = zip(std_grads, self._actor.trainable_variables)
-        self._actor_optimizer.apply_gradients(std_gradients)
+        self._explor_optimizer.apply_gradients(std_gradients)
 
     def _experience_replay_generator(self):
         """Generates trajectories batches. All tensors are padded with zeros to match self._n number of
