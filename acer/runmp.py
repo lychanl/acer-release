@@ -126,8 +126,9 @@ def poll(processes, verbose):
         alive = [p.process.stdout for p in processes if p.alive()]
         to_refresh, _, _ = select.select(alive, [], [])
 
-        for p in to_refresh:
-            p.refresh()
+        for p in alive:
+            if p.process.stdout in to_refresh:
+                p.refresh()
 
         return len([p for p in alive if p.alive()])
 
