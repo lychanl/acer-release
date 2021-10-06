@@ -33,6 +33,7 @@ class Run:
         self.log_outs = log_outs
 
         self.last_output = None
+        self.last_err = None
 
         self.last_eval_outs = []
         self.last_eval_out_means = [None for _ in range(log_outs)]
@@ -88,14 +89,16 @@ class Run:
             self.timesteps = int(out.split()[-1])
 
         self.last_output = out
+        if 'ERROR' in out.upper() or 'EXCEPTION' in out.upper():
+            self.last_err = out
 
     def show(self, show_name=True):
         status = "RUNNING" if self.return_code is None else "EXITED: " + str(self.return_code)
 
-        error = f" ({self.last_output})" if self.return_code else ""
+        error = f" ({self.last_err or self.last_output})" if self.return_code else ""
 
         descr = f'Timesteps: {self.timesteps} Last results: {" ".join(map(str, self.last_eval_out_means))}'
-        name = "{self.name}:" if show_name else " " * (show_name + 1)
+        name = f"{self.name}:" if show_name else " " * (len(self.name) + 1)
         print(f"{name}\t{descr}\t{status}{error}")
 
     def alive(self):
@@ -128,9 +131,10 @@ def poll(processes, verbose):
 
         for p in processes:
             if p.process.stdout in to_refresh:
-                p.refresh()
+                p.refresh(verbose)
 
-        return len([p for p in alive if p.alive()])
+        return len([p for p in processes if p.alive()])
+
 
 def run(base_params, splitted_sets, repeats, gpus, verbose):
     processes_groups = [make_procs(base_params, set, repeats) for set in splitted_sets]
