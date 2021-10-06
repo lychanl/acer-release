@@ -4,6 +4,7 @@ import os
 import sys
 import datetime
 import time
+import select
 
 
 def cls():
@@ -11,6 +12,15 @@ def cls():
 
 
 GPUS_ENV = 'CUDA_VISIBLE_DEVICES'
+
+
+class RunGroup:
+    def __init__(self, name, params, log_outs=3, repeats=1) -> None:
+        self.processes = [Run(name, params, log_outs) for _ in range(repeats)]
+
+    def show(self):
+        for i, p in enumerate(self.processes):
+            p.show(show_name=(i == 0))
 
 
 class Run:
@@ -51,6 +61,7 @@ class Run:
             return
 
         out = self.process.stdout.readline()
+        self.process.stdout.isatty
         self.process_output(out, verbose)
 
         self.return_code = self.process.poll()
@@ -78,10 +89,14 @@ class Run:
 
         self.last_output = out
 
-    def show(self):
+    def show(self, show_name=True):
         status = "RUNNING" if self.return_code is None else "EXITED: " + str(self.return_code)
+
+        error = f" ({self.last_output})" if self.return_code else ""
+
         descr = f'Timesteps: {self.timesteps} Last results: {" ".join(map(str, self.last_eval_out_means))}'
-        print(f"{self.name}:\t{descr}\t{status}")
+        name = "{self.name}:" if show_name else " " * (show_name + 1)
+        print(f"{name}\t{descr}\t{status}{error}")
 
     def alive(self):
         return self.process and self.open
@@ -90,16 +105,35 @@ class Run:
         self.process.terminate()
 
 
-def make_proc(base_params, params):
-    return Run(name(params), base_params + params)
+def make_procs(base_params, params, repeats):
+    return RunGroup(name(params), base_params + params, repeats=repeats)
 
 
 def name(params):
     return ' '.join([p[2:] if p.startswith('--') else p for p in params])
 
 
-def run(base_params, splitted_sets, gpus, verbose):
-    processes = [make_proc(base_params, set) for set in splitted_sets]
+def poll(processes, verbose):
+    if os.name == 'nt':
+        num_alive = 0
+        for p in processes:
+            p.refresh(verbose)
+            if p.alive():
+                num_alive += 1
+
+        return num_alive
+    else:
+        alive = [p.process.stdout for p in processes if p.alive()]
+        to_refresh, _, _ = select.select(alive, [], [])
+
+        for p in to_refresh:
+            p.refresh()
+
+        return len([p for p in alive if p.alive()])
+
+def run(base_params, splitted_sets, repeats, gpus, verbose):
+    processes_groups = [make_procs(base_params, set, repeats) for set in splitted_sets]
+    processes = [p for g in processes_groups for p in g.processes]
 
     for i, p in enumerate(processes):
         if gpus:
@@ -117,11 +151,7 @@ def run(base_params, splitted_sets, gpus, verbose):
         num_alive = len(processes)
 
         while num_alive:
-            num_alive = 0
-            for p in processes:
-                p.refresh(verbose)
-                if p.alive():
-                    num_alive += 1
+            num_alive = poll(processes, verbose)
 
             if not verbose:
                 cls()
@@ -129,8 +159,8 @@ def run(base_params, splitted_sets, gpus, verbose):
             print(f"START: {start} ACTUALIZATION: {now} DURATION: {now - start}")
             print("Base params: " + " ".join(map(str, base_params)))
             print()
-            for p in processes:
-                p.show()
+            for g in processes_groups:
+                g.show()
             print()
     except KeyboardInterrupt:
         for p in processes:
@@ -162,12 +192,13 @@ def main():
     parser.add_argument('--optim', action='append', nargs='+', type=str)
     parser.add_argument('--verbose', action='store_true', default=False)
     parser.add_argument('--gpus', nargs='+', default=None, type=str)
+    parser.add_argument('--repeats', default=1, type=int)
 
     args, params = parser.parse_known_args()
 
     splitted_params = split_run_params(args.optim)
 
-    run(params, splitted_params, args.gpus, args.verbose)
+    run(params, splitted_params, args.repeats, args.gpus, args.verbose)
 
 
 if __name__ == "__main__":
