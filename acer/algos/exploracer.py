@@ -514,12 +514,14 @@ class MultiSigmaActor(VarSigmaGaussianActor):
 class MultiSigmaExplorACER(FastACER):
     def __init__(
             self, actions_space, *args, time_coeff='linear', alpha=1, rho=1, std_loss_mult=1, kappa=1,
-            actor_lr=0.001, actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999, actor_adam_epsilon: float = 1e-7, **kwargs):
+            actor_lr=0.001, actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999, actor_adam_epsilon: float = 1e-7,
+            no_window_adapt=False, **kwargs):
         self._time_coeff = time_coeff
         self._alpha = alpha
         self._rho = rho
         self._std_loss_mult = std_loss_mult
         self._kappa = kappa
+        self._no_window_adapt = no_window_adapt
 
         super().__init__(
             *args, actions_space=actions_space, **kwargs,
@@ -571,7 +573,10 @@ class MultiSigmaExplorACER(FastACER):
         td = self._calculate_td(obs, obs_next, rewards, lengths, dones, mask)
         truncated_density = self._calculate_truncated_density(policies, old_policies, mask)
 
-        window_size = tf.minimum(tf.cast(self._tf_time_step, tf.float32), tf.constant(self._memory_size, tf.float32))
+        if self._no_window_adapt:
+            window_size = self._memory_size
+        else:
+            window_size = tf.minimum(tf.cast(self._tf_time_step, tf.float32), tf.constant(self._memory_size, tf.float32))
         stime = tf.cast(time, tf.float32) / window_size
         time_coeff = tf.ones_like(time, tf.float32) if self._time_coeff == 'none' else (
             1 - stime
