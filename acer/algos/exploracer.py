@@ -515,13 +515,14 @@ class MultiSigmaExplorACER(FastACER):
     def __init__(
             self, actions_space, *args, time_coeff='linear', alpha=1, rho=1, std_loss_mult=1, kappa=1,
             actor_lr=0.001, actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999, actor_adam_epsilon: float = 1e-7,
-            no_window_adapt=False, **kwargs):
+            no_window_adapt=False, above_expected=False, **kwargs):
         self._time_coeff = time_coeff
         self._alpha = alpha
         self._rho = rho
         self._std_loss_mult = std_loss_mult
         self._kappa = kappa
         self._no_window_adapt = no_window_adapt
+        self._above_expected = above_expected
 
         super().__init__(
             *args, actions_space=actions_space, **kwargs,
@@ -586,6 +587,11 @@ class MultiSigmaExplorACER(FastACER):
             (1 - stime) ** self._kappa
         )
 
+        weights = time_coeff
+
+        if self._above_expected:
+            weights = weights * tf.stop_gradient(tf.sign(tf.squeeze(td, 1)) + 1) / 2
+
         modes = self._actor._dist(obs).mode()
         expected_std = tf.stop_gradient(tf.square(old_expected_actions[:,0,:] - modes[:,0,:]))
         expected_std2 = tf.stop_gradient(tf.square(actions[:,0,:] - modes[:,0,:]))
@@ -597,7 +603,7 @@ class MultiSigmaExplorACER(FastACER):
             tf.summary.scalar('density_std', tf.math.reduce_std(truncated_density), step=self._tf_time_step)
 
         # self._actor_backward_pass(first_obs, first_actions, d)
-        self._actor_backward_pass(first_obs, first_actions, d, expected_std, expected_std2, time_coeff)
+        self._actor_backward_pass(first_obs, first_actions, d, expected_std, expected_std2, weights)
         self._critic_backward_pass(first_obs, d)
 
     @tf.function

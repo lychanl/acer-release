@@ -94,6 +94,7 @@ parser.add_argument('--reverse', action='store_true',
                     help='Reverse param for exploracer')
 parser.add_argument('--time_coeff', type=str, help='type of time-based coefficient for sigma learning', default="linear", choices=("none", "linear", "exp", "power"))
 parser.add_argument('--no_window_adapt', help='don\'t adapt window size of time-based coefficient for sigma learning', default=None, action='store_true')
+parser.add_argument('--above_expected', help='adapt std to samples with positive adv only', default=None, action='store_true')
 parser.add_argument('--evaluate_time_steps_interval', type=int, help='Number of time steps between evaluations. '
                                                                      '-1 to turn evaluation off',
                     default=10000)

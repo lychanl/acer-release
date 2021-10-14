@@ -31,6 +31,8 @@ class Run:
         self.process = None
         self.return_code = None
         self.log_outs = log_outs
+        self.started = False
+        self.gpu = None
 
         self.last_output = None
         self.last_err = None
@@ -40,6 +42,8 @@ class Run:
         self.timesteps = 0
 
     def start(self, gpu, verbose):
+        self.gpu = gpu
+
         exe = sys.executable
         run = os.path.join(os.path.dirname(__file__), 'run.py')
 
@@ -55,6 +59,8 @@ class Run:
             [exe, run, *self.params],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env
         )
+        self.started = True
+
         time.sleep(5)
 
     def refresh(self, verbose):
@@ -93,7 +99,12 @@ class Run:
             self.last_err = out
 
     def show(self, show_name=True):
-        status = "RUNNING" if self.return_code is None else "EXITED: " + str(self.return_code)
+        if not self.started:
+            status = "AWAITING"
+        elif self.return_code is None:
+            status = "RUNNING"
+        else:
+            status = "EXITED: " + str(self.return_code)
 
         error = f" ({self.last_err or self.last_output})" if self.return_code else ""
 
@@ -117,14 +128,17 @@ def name(params):
 
 
 def poll(processes, verbose):
+    alive = []
+    finished = []
+
     if os.name == 'nt':
         num_alive = 0
         for p in processes:
             p.refresh(verbose)
             if p.alive():
-                num_alive += 1
-
-        return num_alive
+                alive.append(p)
+            else:
+                finished.append(p)
     else:
         alive = [p.process.stdout for p in processes if p.alive()]
         to_refresh, _, _ = select.select(alive, [], [])
@@ -132,31 +146,54 @@ def poll(processes, verbose):
         for p in processes:
             if p.process.stdout in to_refresh:
                 p.refresh(verbose)
+            if p.alive():
+                alive.append(p)
+            else:
+                finished.append(p)
+    
+    return alive, finished
 
-        return len([p for p in processes if p.alive()])
+
+def get_next_gpu(gpus, running):
+    if not gpus:
+        return None
+
+    counters = {g: 0 for g in gpus}
+
+    for p in running:
+        counters[p.gpu] += 1
+
+    return min(counters, key=counters.get)
 
 
-def run(base_params, splitted_sets, repeats, gpus, verbose):
+def run(base_params, splitted_sets, repeats, gpus, max_procs, verbose):
     processes_groups = [make_procs(base_params, set, repeats) for set in splitted_sets]
     processes = [p for g in processes_groups for p in g.processes]
 
+    running = []
+    awaitng = []
+    finished = []
+
     for i, p in enumerate(processes):
-        if gpus:
-            gpu = gpus[i % len(gpus)]
+        if len(running) < max_procs:
+            if gpus:
+                gpu = gpus[i % len(gpus)]
+            else:
+                gpu = None
+
+            print(f"Starting process {i+1} of {len(processes)} (gpu spec: {gpu})...")
+            p.start(gpu, verbose)
+            running.append(p)
         else:
-            gpu = None
-
-        print(f"Starting process {i+1} of {len(processes)} (gpu spec: {gpu})...")
-
-        p.start(gpu, verbose)
+            awaitng.append(p)
 
     start = datetime.datetime.now()
 
     try:
-        num_alive = len(processes)
+        while running:
+            running, new_finished = poll(running, verbose)
+            finished.extend(new_finished)
 
-        while num_alive:
-            num_alive = poll(processes, verbose)
 
             if not verbose:
                 cls()
@@ -167,6 +204,11 @@ def run(base_params, splitted_sets, repeats, gpus, verbose):
             for g in processes_groups:
                 g.show()
             print()
+            
+            while len(running) < max_procs and awaitng:
+                gpu = get_next_gpu(gpus, running)
+                print(f"Starting process (gpu spec: {gpu})...")
+                p.start(gpu, verbose)
     except KeyboardInterrupt:
         for p in processes:
             p.interrupt()
@@ -198,12 +240,13 @@ def main():
     parser.add_argument('--verbose', action='store_true', default=False)
     parser.add_argument('--gpus', nargs='+', default=None, type=str)
     parser.add_argument('--repeats', default=1, type=int)
+    parser.add_argument('--max_procs', default=1, type=int)
 
     args, params = parser.parse_known_args()
 
     splitted_params = split_run_params(args.optim)
 
-    run(params, splitted_params, args.repeats, args.gpus, args.verbose)
+    run(params, splitted_params, args.repeats, args.gpus, args.max_procs, args.verbose)
 
 
 if __name__ == "__main__":

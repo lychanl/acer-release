@@ -131,7 +131,7 @@ class FastACER(BaseACERAgent):
         else:
             return policies_ratio_prod
 
-    # @tf.function(experimental_relax_shapes=True)
+    @tf.function(experimental_relax_shapes=True)
     def _calculate_td(self, obs, obs_next, rewards, lengths, dones, mask):
         dones_mask = 1 - tf.cast(
             (tf.expand_dims(tf.range(1, self._n + 1), 0) == tf.expand_dims(lengths, 1)) & tf.expand_dims(dones, 1),
@@ -156,9 +156,11 @@ class FastACER(BaseACERAgent):
         td_parts = rewards + self._gamma * values_next - values_first
         td_rewards = tf.reduce_sum(td_parts * gamma_coeffs_masked, axis=1, keepdims=True)
 
-        values_next_discounted = tf.expand_dims(tf.pow(self._gamma, tf.cast(lengths, tf.float32)), 1) * values_next
+        return td_rewards
 
-        return (-values_first + td_rewards + values_next_discounted)
+        #  values_next_discounted = tf.expand_dims(tf.pow(self._gamma, tf.cast(lengths, tf.float32)), 1) * values_next
+
+        #  return (-values_first + td_rewards + values_next_discounted)
 
     def _actor_backward_pass(self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor):
         with tf.GradientTape() as tape:
