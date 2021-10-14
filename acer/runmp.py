@@ -208,7 +208,9 @@ def run(base_params, splitted_sets, repeats, gpus, max_procs, verbose):
             while len(running) < max_procs and awaitng:
                 gpu = get_next_gpu(gpus, running)
                 print(f"Starting process (gpu spec: {gpu})...")
+                p = awaitng.pop()
                 p.start(gpu, verbose)
+                running.append(p)
     except KeyboardInterrupt:
         for p in processes:
             p.interrupt()
