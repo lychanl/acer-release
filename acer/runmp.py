@@ -140,8 +140,8 @@ def poll(processes, verbose):
             else:
                 finished.append(p)
     else:
-        alive = [p.process.stdout for p in processes if p.alive()]
-        to_refresh, _, _ = select.select(alive, [], [])
+        possible = [p.process.stdout for p in processes if p.alive()]
+        to_refresh, _, _ = select.select(possible, [], [])
 
         for p in processes:
             if p.process.stdout in to_refresh:
