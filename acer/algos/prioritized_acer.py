@@ -7,10 +7,16 @@ from replay_buffer import BufferFieldSpec, MultiPrioritizedReplayBuffer
 
 
 class PrioritizedACER(FastACER):
-    def __init__(self, *args, levels=2, block_size=256, update_blocks=1, **kwargs) -> None:
+    def __init__(self, *args, levels=2, block_size=256, update_blocks=1, alpha=1, priority="IS", **kwargs) -> None:
         self._levels = levels
         self._block_size = block_size
         self._update_blocks = update_blocks
+        self._alpha = alpha
+        self._priority = {
+            "IS": self._calculate_IS_priorities,
+            "prob": self._calculate_prob_priorities,
+            "IS1": self._calculate_IS1_priorities
+        }[priority]
 
         super().__init__(*args, **kwargs, additional_buffer_types=(tf.dtypes.float32,))
         
@@ -33,7 +39,7 @@ class PrioritizedACER(FastACER):
         if self._time_step > self._learning_starts:
             if self._memory.should_update_block():
                 for block in self._priority_update_loader.take(self._update_blocks):
-                    priorities = self._calculate_priorities(*block)
+                    priorities = self._priority(*block)
                     self._memory.update_block(priorities.numpy())
                     
                     with tf.name_scope('priorities'):
@@ -74,13 +80,17 @@ class PrioritizedACER(FastACER):
         mask = tf.sequence_mask(lengths, maxlen=self._n, dtype=tf.float32)
 
         td = self._calculate_td(obs, obs_next, rewards, lengths, dones, mask)
-        truncated_density = self._calculate_density(policies, old_policies, mask) * tf.reshape(priorities, (-1, 1))
+        density = self._calculate_density(policies, old_policies, mask) / tf.reshape(priorities, (-1, 1))
+
+        if self._truncate:
+            density = tf.tanh(density / self._b) * self._b
 
         with tf.name_scope('density'):
-            tf.summary.scalar('density_mean', tf.reduce_mean(truncated_density), step=self._tf_time_step)
-            tf.summary.scalar('density_std', tf.math.reduce_std(truncated_density), step=self._tf_time_step)
+            tf.summary.scalar('priorities_batch_mean', tf.reduce_mean(priorities), step=self._tf_time_step)
+            tf.summary.scalar('density_mean', tf.reduce_mean(density), step=self._tf_time_step)
+            tf.summary.scalar('density_std', tf.math.reduce_std(density), step=self._tf_time_step)
 
-        d = tf.stop_gradient(td * truncated_density)
+        d = tf.stop_gradient(td * density)
 
         self._actor_backward_pass(first_obs, first_actions, d)
         self._critic_backward_pass(first_obs, d)
@@ -93,10 +103,7 @@ class PrioritizedACER(FastACER):
         policies_ratio = policies_masked / old_policies_masked
         policies_ratio_prod = tf.reduce_prod(policies_ratio, axis=-1, keepdims=True)
 
-        if self._truncate:
-            return tf.tanh(policies_ratio_prod / self._b) * self._b
-        else:
-            return policies_ratio_prod
+        return policies_ratio_prod
 
     def _experience_replay_generator(self):
         """Generates trajectories batches. All tensors are padded with zeros to match self._n number of
@@ -129,13 +136,48 @@ class PrioritizedACER(FastACER):
             )
 
     @tf.function(experimental_relax_shapes=True)
-    def _calculate_priorities(self, obs, actions, old_policies, lengths):
+    def _calculate_IS_priorities(self, obs, actions, old_policies, lengths):
         obs = self._process_observations(obs)
         policies, _ = self._actor.prob(obs, actions)
 
         mask = tf.sequence_mask(lengths, maxlen=self._n, dtype=tf.float32)
 
-        return tf.reshape(self._calculate_density(policies, old_policies, mask), (-1,))
+        priorities = tf.reshape(self._calculate_density(policies, old_policies, mask), (-1,))
+        
+        if self._alpha == -1:
+            return priorities
+        else:
+            return tf.clip_by_value(priorities, 1 / self._alpha, self._alpha)
+
+    @tf.function(experimental_relax_shapes=True)
+    def _calculate_prob_priorities(self, obs, actions, old_policies, lengths):
+        obs = self._process_observations(obs)
+        policies, _ = self._actor.prob(obs, actions)
+
+        mask = tf.sequence_mask(lengths, maxlen=self._n, dtype=tf.float32)
+
+        policies_masked = policies * mask + (1 - mask) * tf.ones_like(policies)
+    
+        priorities = tf.reshape(tf.reduce_prod(policies_masked, axis=1), (-1,))
+        
+        if self._alpha == -1:
+            return priorities
+        else:
+            return tf.clip_by_value(priorities, 1 / self._alpha, self._alpha)
+
+    @tf.function(experimental_relax_shapes=True)
+    def _calculate_IS1_priorities(self, obs, actions, old_policies, lengths):
+        obs = self._process_observations(obs)
+        policies, _ = self._actor.prob(obs, actions)
+
+        mask = tf.sequence_mask(lengths, maxlen=self._n, dtype=tf.float32)
+
+        priorities = tf.reshape(self._calculate_density(policies, old_policies, mask), (-1,))
+        
+        if self._alpha == -1:
+            return priorities
+        else:
+            return tf.clip_by_value(priorities, 1 / self._alpha, 1)
 
     def _priorities_update_generator(self):
         """Generates trajectories batches. All tensors are padded with zeros to match self._n number of
