@@ -21,7 +21,42 @@ config.gpu_options.allow_growth = True
 session = InteractiveSession(config=config)
 
 
-class BaseActor(ABC, tf.keras.Model):
+class BaseModel(ABC, tf.keras.Model):
+
+    def __init__(self, input_shape_len: int, layers: Optional[Tuple[int]], output_dim: int, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self._hidden_layers = self._build_layers(input_shape_len, layers, output_dim)
+        self._input_shape_len = input_shape_len
+        self._output_dim = output_dim
+
+    def _build_layers(
+        self, input_shape_len: int, layers: Optional[Tuple[int]], output_dim: int
+    ) -> List[tf.keras.Model]:
+        hidden_layers = []
+
+        if input_shape_len > 1:
+            hidden_layers.extend(build_cnn_network())
+        
+        hidden_layers.extend(build_mlp_network(layers_sizes=layers))
+
+        hidden_layers.append(tf.keras.layers.Dense(output_dim, kernel_initializer=utils.normc_initializer()))        
+
+        return hidden_layers
+
+    @tf.function(experimental_relax_shapes=True)
+    def _forward(self, input: np.array) -> tf.Tensor:
+        batch_dims = tf.convert_to_tensor(input.shape[1:-self._input_shape_len])
+        input_dims = tf.convert_to_tensor(input.shape[-self._input_shape_len:])
+        
+        x = tf.reshape(input, tf.concat([[-1,], input_dims], axis=0))
+        for layer in self._hidden_layers:
+            x = layer(x)
+        
+        return tf.reshape(x, tf.concat([[-1,], batch_dims, [self._output_dim,]], axis=0))
+
+
+class BaseActor(BaseModel):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  beta_penalty: float, tf_time_step: tf.Variable, *args, **kwargs):
@@ -36,43 +71,17 @@ class BaseActor(ABC, tf.keras.Model):
                 that are out of the allowed bounds
             tf_time_step: time step as TensorFlow variable, required for TensorBoard summaries
         """
-        super().__init__(*args, **kwargs)
-
         if type(actions_space) == gym.spaces.discrete.Discrete:
             actions_dim = actions_space.n
         else:
             actions_dim = actions_space.shape[0]
 
-        self._hidden_layers = self._build_layers(observations_space, layers, actions_dim)
+        super().__init__(len(observations_space.shape), layers, actions_dim, *args, **kwargs)
 
         self.obs_shape = observations_space.shape
         self.actions_dim = actions_dim
         self.beta_penalty = beta_penalty
         self._tf_time_step = tf_time_step
-
-    def _build_layers(
-        self, observations_space: gym.Space, layers: Optional[Tuple[int]], actions_dim: int
-    ) -> List[tf.keras.Model]:
-        hidden_layers = []
-
-        if len(observations_space.shape) > 1:
-            hidden_layers.extend(build_cnn_network())
-        
-        hidden_layers.extend(build_mlp_network(layers_sizes=layers))
-
-        hidden_layers.append(tf.keras.layers.Dense(actions_dim, kernel_initializer=utils.normc_initializer()))        
-
-        return hidden_layers
-
-    # @tf.function
-    def _forward(self, observations: np.array) -> tf.Tensor:
-        batch_dims = observations.shape[:-len(self.obs_shape)]
-        
-        x = tf.reshape(observations, (-1,) + self.obs_shape)
-        for layer in self._hidden_layers:
-            x = layer(x)
-        
-        return tf.reshape(x, batch_dims + (self.actions_dim,))
 
     @property
     @abstractmethod
@@ -121,7 +130,8 @@ class BaseActor(ABC, tf.keras.Model):
         """
 
 
-class BaseCritic(ABC, tf.keras.Model):
+class BaseCritic(BaseModel):
+
     def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]],
                  tf_time_step: tf.Variable, use_additional_input: bool = False, *args, **kwargs):
         """Value function approximation as MLP network neural network.
@@ -133,16 +143,12 @@ class BaseCritic(ABC, tf.keras.Model):
             tf_time_step: time step as TensorFlow variable, required for TensorBoard summaries
             additional_input_shape: shape of additional input variables
         """
-        super().__init__(*args, **kwargs)
-        self._hidden_layers = []
         if len(observations_space.shape) > 1:
             assert not use_additional_input
-            self._hidden_layers.extend(build_cnn_network())
 
-        self._hidden_layers.extend(build_mlp_network(layers_sizes=layers))
+        super().__init__(len(observations_space.shape), layers, 1, *args, **kwargs)
 
         self.obs_shape = observations_space.shape
-        self._v = tf.keras.layers.Dense(1, kernel_initializer=utils.normc_initializer())
         self._tf_time_step = tf_time_step
         self._use_additional_input = use_additional_input
 
@@ -161,19 +167,7 @@ class BaseCritic(ABC, tf.keras.Model):
 
         """
         x = tf.concat([observations, additional_input], axis=-1) if self._use_additional_input else observations
-
-        batch_dims = observations.shape[:-len(self.obs_shape)]
-        
-        obs_shape = self.obs_shape[:-1] + (self.obs_shape[-1] + additional_input.shape[-1],)\
-            if self._use_additional_input else self.obs_shape
-
-        x = tf.reshape(x, (-1,) + obs_shape)
-        for layer in self._hidden_layers:
-            x = layer(x)
-        
-        value = self._v(x)
-
-        return tf.reshape(value, batch_dims + (1,))
+        return self._forward(x)
 
 
 class Critic(BaseCritic):
