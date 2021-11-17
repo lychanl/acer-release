@@ -11,6 +11,7 @@ from utils import calculate_gamma, getDTChangedEnvName
 
 from algos.acerac import AUTOCORRELATED_ACTORS
 from algos.exploracer import DIFF_FUNCTIONS
+from algos.fast_acer import BUFFERS
 
 parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
 parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer", choices=ALGOS)
@@ -89,8 +90,12 @@ parser.add_argument('--gradient_norm_median_threshold', help='Number of medians 
 parser.add_argument('--use_v', action='store_true',
                     help='If true then value instead of noise-value will be used (ACERAC only)')
 parser.add_argument('--no_truncate', action='store_true', help='Experimental (FastACER only)')
-parser.add_argument('--levels', type=int, help='Buffer tree levels (prioritized replay)')
-parser.add_argument('--block', type=int, help='Block size (prioritized replay)')
+parser.add_argument('--buffer_type', type=str, choices=BUFFERS.keys(), default='simple')
+parser.add_argument('--buffer.levels', type=int, help='Buffer tree levels (prioritized replay)', default=2)
+parser.add_argument('--buffer.block', type=int, help='Block size (prioritized replay)', default=256)
+parser.add_argument('--buffer.clip', type=float, help='Buffer priority clipping param', default=-1)
+parser.add_argument('--buffer.priority', type=str, help='Buffer priority', default="IS")
+parser.add_argument('--buffer.n', type=int, help='N parameter for fast acerac', default=2)
 parser.add_argument('--reverse', action='store_true',
                     help='Reverse param for exploracer')
 parser.add_argument('--time_coeff', type=str, help='type of time-based coefficient for sigma learning', default="linear", choices=("none", "linear", "exp", "power"))

@@ -18,7 +18,7 @@ class BufferFieldSpec:
 class ReplayBuffer:
     def __init__(
             self, max_size: int, action_spec: BufferFieldSpec,
-            obs_spec: BufferFieldSpec, policies_spec: BufferFieldSpec = None):
+            obs_spec: BufferFieldSpec, policies_spec: BufferFieldSpec = None, *args, **kwargs):
         """Stores trajectories.
 
         Each of the samples stored in the buffer has the same probability of being drawn.
@@ -129,6 +129,7 @@ class ReplayBuffer:
         end = self._ends[buffer_slice]
 
         return {
+            "priors": np.ones(actions.shape[:2]),
             "actions": actions,
             "observations": observations,
             "rewards": rewards,
@@ -231,7 +232,7 @@ class WindowReplayBuffer(ReplayBuffer):
 
 
 def PrevReplayBuffer(n: int = 1):
-    return functools.partial(VecReplayBuffer, n=n)
+    return functools.partial(VecReplayBuffer, prev_n=n)
 
 
 # class _PrevReplayBuffer(ReplayBuffer):
@@ -313,7 +314,7 @@ class MultiReplayBuffer:
 
     def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec,
                 buffer_class: Callable[[int, BufferFieldSpec, BufferFieldSpec], ReplayBuffer] = ReplayBuffer,
-                policy_spec: BufferFieldSpec = None, *args, **kwargs):
+                policy_spec: BufferFieldSpec = None, priority_fields: Tuple[str] = None, n: int = None, *args, **kwargs):
         """Encapsulates ReplayBuffers from multiple environments.
 
         Args:
@@ -324,6 +325,8 @@ class MultiReplayBuffer:
         """
         self._n_buffers = num_buffers
         self._max_size = max_size
+        self.priority_fields = priority_fields
+        self.n = n
 
         # assert issubclass(buffer_class, ReplayBuffer), "Buffer class should derive from ReplayBuffer"
 
@@ -410,6 +413,9 @@ class MultiReplayBuffer:
         with open(path, 'wb') as f:
             pickle.dump(self, f)
 
+    def should_update_block(self):
+        return False
+
     @staticmethod
     def load(path: str) -> MultiReplayBuffer:
         """Loads the buffer from the disk
@@ -426,7 +432,7 @@ class VecReplayBuffer(ReplayBuffer):
 
     def __init__(
         self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec,
-        policy_spec: BufferFieldSpec = None, n: int = None):
+        policy_spec: BufferFieldSpec = None, prev_n: int = None, *args, **kwargs):
         """Extends ReplayBuffer to fetch a number of experience tuples before selected index.
         If selected index indicates first time step in a episode, no additional tuples are attached.
 
@@ -440,10 +446,11 @@ class VecReplayBuffer(ReplayBuffer):
             obs_spec: BufferFieldSpec with observations space specification
         """
         super().__init__(max_size, action_spec, obs_spec, policy_spec or action_spec)
-        self._n = n
+        self._prev_n = prev_n
 
     def _zero(self):
         return ({
+            "priors": np.zeros([]),
             "actions": np.array([]),
             "observations": np.array([]),
             "rewards": np.array([]),
@@ -460,34 +467,35 @@ class VecReplayBuffer(ReplayBuffer):
             return self._zero()
 
         sample_index = self._sample_random_index()
-        n = self._n
+        prev_n = self._prev_n
 
-        if sample_index - n < self._pointer <= sample_index:
-            n = sample_index - self._pointer
+        if sample_index - prev_n < self._pointer <= sample_index:
+            prev_n = sample_index - self._pointer
 
-        if sample_index - n < 0:
+        if sample_index - prev_n < 0:
             if self._current_size < self._max_size:
-                n = sample_index
-            elif self._pointer > sample_index - n + self._max_size:
-                n = self._max_size + sample_index - self._pointer
+                prev_n = sample_index
+            elif self._pointer > sample_index - prev_n + self._max_size:
+                prev_n = self._max_size + sample_index - self._pointer
         
-        if sample_index - n >= 0:
-            r = np.r_[sample_index - n:sample_index]
+        if sample_index - prev_n >= 0:
+            r = np.r_[sample_index - prev_n:sample_index]
         else:
             r = np.r_[sample_index:self._max_size, 0:self._max_size]
         ends = self._ends[r]
         if ends.any():
-            n = n - np.nonzero(ends)[-1][0] - 1
+            prev_n = prev_n - np.nonzero(ends)[-1][0] - 1
 
         start_index, end_index = self._get_indices(sample_index, trajectory_len)
         
-        start_index = (start_index - n) % self._max_size
+        start_index = (start_index - prev_n) % self._max_size
 
         batch = self._fetch_batch(end_index, sample_index, start_index)
         return batch
 
     def _zero_vec(self, length):
         return ({
+            "priors": np.zeros((length, 0)),
             "actions": np.zeros((length, 0)),
             "observations": np.zeros((length, 0)),
             "rewards": np.zeros((length, 0)),
@@ -508,9 +516,9 @@ class VecReplayBuffer(ReplayBuffer):
         return self._get_sampled_vec(length, trajectory_len, sample_indices)
 
     def _get_sampled_vec(self, length, trajectory_len, sample_indices):
-        prev_lens = np.repeat(self._n, length)
+        prev_lens = np.repeat(self._prev_n, length)
 
-        if self._n is not None:
+        if self._prev_n is not None:
             prev_pointer_ind = np.logical_and(sample_indices - prev_lens < self._pointer, self._pointer <= sample_indices)
             prev_lens[prev_pointer_ind] = sample_indices[prev_pointer_ind] - self._pointer
 
@@ -534,17 +542,17 @@ class VecReplayBuffer(ReplayBuffer):
         pointer_ovf_ind = np.logical_and(sample_indices + lens > self._max_size, self._pointer < sample_indices + lens - self._max_size)
         lens[pointer_ovf_ind] = (self._pointer + self._max_size) - sample_indices[pointer_ovf_ind]
 
-        n = self._n or 0
-        selection = (np.repeat(np.expand_dims(sample_indices, 1), n + trajectory_len, axis=1) + np.arange(-n, trajectory_len))
+        prev_n = self._prev_n or 0
+        selection = (np.repeat(np.expand_dims(sample_indices, 1), prev_n + trajectory_len, axis=1) + np.arange(-prev_n, trajectory_len))
         selection = selection % self._max_size
 
         batch = self._fetch_slice(selection)
 
-        ends_mask = np.cumsum(batch['ends'][:,self._n:-1], axis=1) == 0
+        ends_mask = np.cumsum(batch['ends'][:,prev_n:-1], axis=1) == 0
         lens = np.minimum(lens, ends_mask.sum(axis=1) + 1)
 
-        if self._n is not None:
-            prev_ends_mask = np.flip(np.cumsum(np.flip(batch['ends'][:,:self._n], 1), axis=1), 1) == 0
+        if self._prev_n is not None:
+            prev_ends_mask = np.flip(np.cumsum(np.flip(batch['ends'][:,:self._prev_n], 1), axis=1), 1) == 0
             prev_lens = np.minimum(prev_lens, prev_ends_mask.sum(axis=1))
             mask = np.concatenate([prev_ends_mask, np.ones((length, 1)), ends_mask], axis=1)
         else:
@@ -560,151 +568,5 @@ class VecReplayBuffer(ReplayBuffer):
         time = ((self._pointer - 1) - sample_indices) % self._max_size
         batch['time'] = np.asarray(time).astype(np.int32)
 
-        return (batch, lens, prev_lens) if self._n is not None else (batch, lens)
+        return (batch, lens, prev_lens) if self._prev_n is not None else (batch, lens)
 
-
-class PrioritizedReplayBuffer(VecReplayBuffer):
-    def __init__(
-            self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec,
-            block: int, levels: int = 2):
-        super().__init__(max_size, action_spec, obs_spec, policy_spec=policy_spec, n=None)
-        self._udpate_pointer = 0
-
-        self._block = block
-        self._levels = levels
-
-        self._rands = None
-
-        self._priorities = []
-        self._priorities_cumsums = []
-        self._block_starts = []
-        self._block_ends = []
-        self._total_priorities = 0
-
-        self._level_block_size = int((max_size // block) ** (1 / levels))
-        if self._level_block_size ** levels * block < max_size:
-            self._level_block_size += 1
-        level_blocks = max_size
-        for level in range(levels + 1):
-
-            self._priorities.append(np.zeros(level_blocks, dtype=np.float32))
-            self._priorities_cumsums.append(np.zeros(level_blocks, dtype=np.float32))
-
-            prev_level_block = level_blocks
-            block_size = self._level_block_size if level > 0 else block
-            level_blocks = level_blocks // block_size + (level_blocks % block_size != 0)
-
-            self._block_starts.append(np.arange(level_blocks) * block_size)
-            self._block_ends.append(np.minimum((np.arange(level_blocks) + 1) * block_size, prev_level_block))
-
-    def put(self, action: Union[int, float, list], observation: np.array, next_observation: np.array, reward: float, policy: float, is_done: bool, end: bool):
-        self._priorities[0][self._pointer] = 1
-        self._update_block_priorities(self._pointer // self._block)
-        return super().put(action, observation, next_observation, reward, policy, is_done, end)
-
-    def _update_block_priorities(self, block):
-        for level in range(self._levels + 1):
-            block_start = self._block_starts[level][block]
-            block_end = self._block_ends[level][block]
-            
-            self._priorities_cumsums[level][block_start:block_end] = np.cumsum(self._priorities[level][block_start:block_end])
-            
-            if level < self._levels:
-                self._priorities[level + 1][block] = np.sum(self._priorities[level][block_start:block_end])
-            else:
-                self._total_priorities = self._priorities[-1].sum()
-
-            block = block // self._level_block_size
-
-    def _sample_random_index(self, size=None) -> int:
-
-        rands = np.random.random(size=size) * self._total_priorities
-        self._rands = rands
-        return self._sample_indices_from_rands(rands)
-
-    def _sample_indices_from_rands(self, rands):
-        ids = np.zeros_like(rands, dtype=int)
-
-        for i, r in enumerate(rands):
-            block = 0
-            for level in reversed(range(self._levels + 1)):
-                start = self._block_starts[level][block]
-                end = self._block_ends[level][block]
-                block = min(np.searchsorted(self._priorities_cumsums[level][start:end], r) + start, end - 1)
-                if block > start:
-                    r = r - self._priorities_cumsums[level][block - 1]
-            ids[i] = min(block, self._current_size - 1)
-
-        return ids
-
-    def _fetch_slice(self, buffer_slice) -> Dict[str, np.array]:
-        batch = super()._fetch_slice(buffer_slice)
-        batch["priors"] = self._priorities[0][buffer_slice] * self._current_size / self._total_priorities
-
-        return batch
-
-    def _zero(self):
-        return ({
-            "priors": np.array([]),
-            "actions": np.array([]),
-            "observations": np.array([]),
-            "rewards": np.array([]),
-            "next_observations": np.array([]),
-            "policies": np.array([]),
-            "dones": np.array([]),
-            "ends": np.array([]),
-            "time": np.array([]),
-        }, -1)
-
-    def _zero_vec(self, length):
-        return ({
-            "priors": np.zeros((length, 0)),
-            "actions": np.zeros((length, 0)),
-            "observations": np.zeros((length, 0)),
-            "rewards": np.zeros((length, 0)),
-            "next_observations": np.zeros((length, 0)),
-            "policies": np.zeros((length, 0)),
-            "dones": np.zeros((length, 0)),
-            "ends": np.zeros((length, 0)),
-            "time": np.zeros(length)
-        }, np.repeat(-1, length))
-
-    def should_update_block(self):
-        return self._current_size >= self._block
-
-    def get_next_block_to_update(self, trajectory_len):
-        return self._get_sampled_vec(
-            self._block, trajectory_len,
-            np.arange(self._block_starts[0][self._udpate_pointer], self._block_ends[0][self._udpate_pointer])
-        )
-
-    def update_block(self, priorities):
-        self._priorities[0][(self._udpate_pointer * self._block):((self._udpate_pointer + 1) * self._block)] = priorities
-        self._update_block_priorities(self._udpate_pointer)
-        self._udpate_pointer = (self._udpate_pointer + 1) % (self._current_size // self._block)
-
-
-class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
-    def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec, *args, **kwargs):
-        super().__init__(max_size, num_buffers, action_spec, obs_spec, buffer_class=PrioritizedReplayBuffer, policy_spec=policy_spec, *args, **kwargs)
-
-    def should_update_block(self):
-        return all(buf.should_update_block() for buf in self._buffers)
-
-    def get_next_block_to_update(self, trajectory_len):
-        ret = dict()
-        lens = []
-        for buf in self._buffers:
-            batch, ls = buf.get_next_block_to_update(trajectory_len)
-            lens.append(ls)
-            for k, v in batch.items():
-                ret[k] = ret.get(k, []) + [v]
-
-        for k, v in ret.items():
-            ret[k] = np.concatenate(ret[k])
-
-        return ret, np.concatenate(lens)
-
-    def update_block(self, priorities):
-        for p, buf in zip(priorities.reshape((self._n_buffers, -1)), self._buffers):
-            buf.update_block(p)

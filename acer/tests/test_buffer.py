@@ -1,6 +1,7 @@
 import unittest
 
-from acer.replay_buffer import PrevReplayBuffer, BufferFieldSpec, PrioritizedReplayBuffer
+from replay_buffer import PrevReplayBuffer, BufferFieldSpec
+from prioritized_buffer import PrioritizedReplayBuffer
 
 import numpy as np
 

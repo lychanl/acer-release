@@ -18,18 +18,33 @@ import numpy as np
 
 from algos.base import BaseACERAgent, BaseActor, CategoricalActor, GaussianActor, Critic
 from replay_buffer import BufferFieldSpec, VecReplayBuffer, MultiReplayBuffer
+from prioritized_buffer import MultiPrioritizedReplayBuffer
+
+
+BUFFERS = {
+    'simple': (MultiReplayBuffer, {'buffer_class': VecReplayBuffer}),
+    'prioritized': (MultiPrioritizedReplayBuffer, {})
+}
 
 
 class FastACER(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
-                 critic_layers: Optional[Tuple[int]], n: int = 2, b: float = 3, no_truncate: bool = True, *args, **kwargs):
+                 critic_layers: Optional[Tuple[int]], b: float = 3, no_truncate: bool = True,
+                 update_blocks=1, buffer_type='simple', *args, **kwargs):
         """BaseActor-Critic with Experience Replay
 
         TODO: finish docstrings
         """
 
+        self._buffer_args = {}
+        for key, value in kwargs.items():
+            if key.startswith('buffer.'):
+                self._buffer_args[key[len('buffer.'):]] = value
+
+        self._update_blocks = update_blocks
+        self._buffer_type=buffer_type
+
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
-        self._n = n
         self._b = b
         self._truncate = not no_truncate
 
@@ -45,20 +60,33 @@ class FastACER(BaseACERAgent):
                 self._actor_beta_penalty, self._actions_bound, self._std, self._tf_time_step
             )
 
+    def _init_data_loader(self, _) -> None:
+        gen, dtypes = self._get_experience_replay_generator()
+        self._data_loader = tf.data.Dataset.from_generator(gen, dtypes)
+
     def _init_replay_buffer(self, memory_size: int, policy_spec: BufferFieldSpec = None):
         if type(self._actions_space) == gym.spaces.Discrete:
             self._actions_shape = (1, )
         else:
             self._actions_shape = self._actions_space.shape
 
-        self._memory = MultiReplayBuffer(
-            buffer_class=VecReplayBuffer,
+        buffer_cls, buffer_base_args = BUFFERS[self._buffer_type]
+
+        self._memory = buffer_cls(
             action_spec=BufferFieldSpec(shape=self._actions_shape, dtype=self._actor.action_dtype_np),
             obs_spec=BufferFieldSpec(shape=self._observations_space.shape, dtype=self._observations_space.dtype),
             max_size=memory_size,
             policy_spec=policy_spec,
-            num_buffers=self._num_parallel_envs
+            num_buffers=self._num_parallel_envs,
+            **buffer_base_args,
+            **self._buffer_args
         )
+
+        gen_fields = self._memory.priority_fields
+        if gen_fields is not None:        
+            replay_gen, dtypes = self._get_experience_replay_generator(seq=True, fields=gen_fields)
+            self._buffer_update_loader = tf.data.Dataset.from_generator(
+                replay_gen, dtypes).prefetch(1)
 
     def _init_critic(self) -> Critic:
         return Critic(self._observations_space, self._critic_layers, self._tf_time_step)
@@ -79,8 +107,8 @@ class FastACER(BaseACERAgent):
                 self._learn_from_experience_batch(*batch)
 
     @tf.function(experimental_relax_shapes=True)
-    def _learn_from_experience_batch(self, obs, obs_next, actions, old_policies,
-                                     rewards, first_obs, first_actions, dones, lengths):
+    def _learn_from_experience_batch(self, lengths, obs, obs_next, actions, old_policies,
+                                     rewards, dones, priorities):
         """Backward pass with single batch of experience.
 
         Every experience replay requires sequence of experiences with random length, thus we have to use
@@ -92,28 +120,26 @@ class FastACER(BaseACERAgent):
         obs = self._process_observations(obs)
         obs_next = self._process_observations(obs_next)
         rewards = self._process_rewards(rewards)
-        
-        """
-        flat_obs = tf.reshape(obs, (-1, *self._observations_space.shape))
 
-        policies, _ = self._actor.prob(
-            flat_obs,
-            tf.reshape(actions, (-1, *self._actions_shape)),
-        )
-        policies = tf.reshape(policies, (self._batch_size, self._n))
-        """
+        first_obs = obs[:, 0]
+        first_actions = actions[:, 0]
+
         policies, _ = self._actor.prob(obs, actions)
 
-        mask = tf.sequence_mask(lengths, maxlen=self._n, dtype=tf.float32)
+        mask = tf.sequence_mask(lengths, maxlen=self._memory.n, dtype=tf.float32)
 
         td = self._calculate_td(obs, obs_next, rewards, lengths, dones, mask)
-        truncated_density = self._calculate_truncated_density(policies, old_policies, mask)
+        density = self._calculate_truncated_density(policies, old_policies, mask) / tf.reshape(priorities, (-1, 1))
+
+        if self._truncate:
+            density = tf.tanh(density / self._b) * self._b
 
         with tf.name_scope('density'):
-            tf.summary.scalar('density_mean', tf.reduce_mean(truncated_density), step=self._tf_time_step)
-            tf.summary.scalar('density_std', tf.math.reduce_std(truncated_density), step=self._tf_time_step)
+            tf.summary.scalar('priorities_batch_mean', tf.reduce_mean(priorities), step=self._tf_time_step)
+            tf.summary.scalar('density_mean', tf.reduce_mean(density), step=self._tf_time_step)
+            tf.summary.scalar('density_std', tf.math.reduce_std(density), step=self._tf_time_step)
 
-        d = tf.stop_gradient(td * truncated_density)
+        d = tf.stop_gradient(td * density)
 
         self._actor_backward_pass(first_obs, first_actions, d)
         self._critic_backward_pass(first_obs, d)
@@ -126,41 +152,26 @@ class FastACER(BaseACERAgent):
         policies_ratio = policies_masked / old_policies_masked
         policies_ratio_prod = tf.reduce_prod(policies_ratio, axis=-1, keepdims=True)
 
-        if self._truncate:
-            return tf.tanh(policies_ratio_prod / self._b) * self._b
-        else:
-            return policies_ratio_prod
+        return policies_ratio_prod
 
     @tf.function(experimental_relax_shapes=True)
     def _calculate_td(self, obs, obs_next, rewards, lengths, dones, mask):
         dones_mask = 1 - tf.cast(
-            (tf.expand_dims(tf.range(1, self._n + 1), 0) == tf.expand_dims(lengths, 1)) & tf.expand_dims(dones, 1),
+            (tf.expand_dims(tf.range(1, self._memory.n + 1), 0) == tf.expand_dims(lengths, 1)) & tf.expand_dims(dones, 1),
             tf.float32
         )
-
-        """
-        all_obs = tf.concat([obs, tf.expand_dims(obs_next, 1)], axis=1)
-        values_o = tf.reshape(
-            self._critic.value(tf.reshape(all_obs, (-1, *self._observations_space.shape))),
-            (self._batch_size, self._n + 1)
-        )
-        """
 
         values = tf.squeeze(self._critic.value(tf.concat([obs, tf.expand_dims(obs_next, 1)], axis=1)), axis=2)
         
         values_first = values[:,:-1]
         values_next = values[:,1:] * dones_mask
 
-        gamma_coeffs_masked = tf.expand_dims(tf.pow(self._gamma, tf.range(1., self._n + 1)), axis=0) * mask
+        gamma_coeffs_masked = tf.expand_dims(tf.pow(self._gamma, tf.range(1., self._memory.n + 1)), axis=0) * mask
 
         td_parts = rewards + self._gamma * values_next - values_first
         td_rewards = tf.reduce_sum(td_parts * gamma_coeffs_masked, axis=1, keepdims=True)
 
         return td_rewards
-
-        #  values_next_discounted = tf.expand_dims(tf.pow(self._gamma, tf.cast(lengths, tf.float32)), 1) * values_next
-
-        #  return (-values_first + td_rewards + values_next_discounted)
 
     def _actor_backward_pass(self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor):
         with tf.GradientTape() as tape:
@@ -183,32 +194,41 @@ class FastACER(BaseACERAgent):
         self._critic_optimizer.apply_gradients(gradients)
 
     def _fetch_offline_batch(self) -> List[Dict[str, Union[np.array, list]]]:
-        return self._memory.get_vec(self._batches_per_env, self._n)
+        return self._memory.get_vec(self._batches_per_env, self._memory.n)
 
-    def _experience_replay_generator(self):
-        """Generates trajectories batches. All tensors are padded with zeros to match self._n number of
-        experience tuples in a single trajectory.
-        Trajectories are returned in shape [batch, self._n, <obs/actions/etc shape>]
-        """
-        while True:
-            offline_batches, lens = self._fetch_offline_batch()
-            
-            lengths = lens
-            obs = offline_batches['observations']
-            obs_next = offline_batches['next_observations'][np.arange(self._batch_size),lens - 1]
-            actions = offline_batches['actions']
-            rewards = offline_batches['rewards']
-            policies = offline_batches['policies']
-            dones = offline_batches['dones'][np.arange(self._batch_size),lens - 1]
+    def _get_experience_replay_generator(
+            self, seq=False, fields=('obs', 'obs_next', 'actions', 'policies', 'rewards', 'dones', 'priorities')):
+        batch_size_ids = np.arange(self._batch_size)
+        specs = {
+            'obs': ('observations', lambda x, lens: x),
+            'obs_next': ('next_observations', lambda x, lens: x[batch_size_ids, lens - 1]),
+            'actions': ('actions', lambda x, lens: x),
+            'policies': ('policies', lambda x, lens: x[:, :, 0]),
+            'rewards': ('rewards', lambda x, lens: x),
+            'dones': ('dones', lambda x, lens: x[batch_size_ids, lens - 1]),
+            'priorities': ('priors', lambda x, lens: x[:, 0]),
+            'time': ('time', lambda x, lens: x),
+        }
 
-            yield (
-                obs,
-                obs_next,
-                actions,
-                policies[:,:,0],
-                rewards,
-                obs[:,0],
-                actions[:,0],
-                dones,
-                lengths
-            )
+        dtypes = {
+            'obs': tf.float32,
+            'obs_next': tf.float32,
+            'actions': self._actor.action_dtype,
+            'policies': tf.float32,
+            'rewards': tf.float32,
+            'dones': tf.bool,
+            'priorities': tf.float32,
+            'time': tf.int32,
+        }
+
+        field_specs = [specs[f] for f in fields]
+        field_dtypes = (tf.int32, ) + tuple(dtypes[f] for f in fields)
+
+        def experience_replay_generator():
+            while True:
+                batch, lens = self._memory.get_next_block_to_update() if seq else self._fetch_offline_batch()
+
+                data = (lens,) + tuple(preproc(batch[field], lens) for field, preproc in field_specs)
+                yield data
+
+        return experience_replay_generator, field_dtypes

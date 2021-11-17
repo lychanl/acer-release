@@ -441,11 +441,8 @@ class BaseACERAgent(ABC):
         self._critic = self._init_critic()
 
         self._init_replay_buffer(memory_size, policy_spec)
-        self._data_loader = tf.data.Dataset.from_generator(
-            self._experience_replay_generator,
-            (tf.dtypes.float32, tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.float32, tf.dtypes.float32,
-             tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.bool, tf.dtypes.int32, *additional_buffer_types)
-        )  # .prefetch(1)
+
+        self._init_data_loader(additional_buffer_types)
 
         self._actor_optimizer = tf.keras.optimizers.Adam(
             lr=actor_lr,
@@ -471,6 +468,13 @@ class BaseACERAgent(ABC):
             self._running_mean_rewards = tf_utils.RunningMeanVarianceTf(shape=(1, ))
         else:
             self._running_mean_rewards = None
+
+    def _init_data_loader(self, additional_buffer_types) -> None:
+        self._data_loader = tf.data.Dataset.from_generator(
+            self._experience_replay_generator,
+            (tf.dtypes.float32, tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.float32, tf.dtypes.float32,
+             tf.dtypes.float32, self._actor.action_dtype, tf.dtypes.bool, tf.dtypes.int32, *additional_buffer_types)
+        )
 
     def _init_replay_buffer(self, memory_size: int, policy_spec: BufferFieldSpec = None):
         if type(self._actions_space) == gym.spaces.Discrete:
