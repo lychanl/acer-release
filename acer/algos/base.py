@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from algos.automodel import AutoModel, AutoModelComponent
 from pathlib import Path
 from typing import Tuple, Union, List, Optional, Dict
 
@@ -21,7 +22,7 @@ config.gpu_options.allow_growth = True
 session = InteractiveSession(config=config)
 
 
-class BaseModel(ABC, tf.keras.Model):
+class BaseModel(AutoModelComponent, tf.keras.Model):
 
     def __init__(self, input_shape_len: int, layers: Optional[Tuple[int]], output_dim: int, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -29,6 +30,8 @@ class BaseModel(ABC, tf.keras.Model):
         self._hidden_layers = self._build_layers(input_shape_len, layers, output_dim)
         self._input_shape_len = input_shape_len
         self._output_dim = output_dim
+
+        self.optimizer = None
 
     def _build_layers(
         self, input_shape_len: int, layers: Optional[Tuple[int]], output_dim: int
@@ -55,11 +58,18 @@ class BaseModel(ABC, tf.keras.Model):
         
         return tf.reshape(x, tf.concat([[-1,], batch_dims, [self._output_dim,]], axis=0))
 
+    def optimize(self, **loss_kwargs):
+        with tf.GradientTape() as tape:
+            loss = self.loss(**loss_kwargs)
+        grads = tape.gradient(loss, self.trainable_variables)
+        gradients = zip(grads, self.trainable_variables)
+
+        self.optimizer.apply_gradients(gradients)
 
 class BaseActor(BaseModel):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 beta_penalty: float, tf_time_step: tf.Variable, *args, **kwargs):
+                 beta_penalty: float, tf_time_step: tf.Variable, *args, truncate: bool = True, b: float = 2, **kwargs):
         """Base abstract Actor class
 
         Args:
@@ -82,6 +92,35 @@ class BaseActor(BaseModel):
         self.actions_dim = actions_dim
         self.beta_penalty = beta_penalty
         self._tf_time_step = tf_time_step
+
+        self._truncate = truncate
+        self._b = b
+
+        self.register_method('policies', self.policy, {'observations': 'obs', 'actions': 'actions'})
+        self.register_method('actions', self.act_deterministic, {'observations': 'obs'})
+        self.register_method(
+            'density', self._calculate_density, {
+                'policies': 'actor.policies',
+                'old_policies': 'policies',
+                'mask': 'base.mask'
+            }
+        )
+        self.register_method(
+            'sample_weights', self._calculate_truncated_weights, {
+                'density': 'actor.density',
+                'priorities': 'priorities'
+            }
+        )
+
+        self.register_method('optimize', self.optimize, {
+            'observations': 'base.first_obs',
+            'actions': 'base.first_actions',
+            'd': 'base.weighted_td'
+        })
+        self.targets = ['optimize']
+
+    def policy(self, observations, actions):
+        return self.prob(observations, actions)[0]
 
     @property
     @abstractmethod
@@ -129,6 +168,23 @@ class BaseActor(BaseModel):
             Tensor of actions [batch_size, actions_dim]
         """
 
+    @tf.function(experimental_relax_shapes=True)
+    def _calculate_density(self, policies, old_policies, mask):
+        policies_masked = policies * mask + (1 - mask) * tf.ones_like(policies)
+        old_policies_masked = old_policies * mask + (1 - mask) * tf.ones_like(old_policies)
+
+        policies_ratio = policies_masked / old_policies_masked
+        policies_ratio_prod = tf.reduce_prod(policies_ratio, axis=-1, keepdims=True)
+
+        return policies_ratio_prod
+
+    def _calculate_truncated_weights(self, density, priorities):
+        weights = density / tf.reshape(priorities, (-1, 1))
+
+        if self._truncate:
+            weights = tf.tanh(weights / self._b) * self._b
+
+        return weights
 
 class BaseCritic(BaseModel):
 
@@ -151,6 +207,15 @@ class BaseCritic(BaseModel):
         self.obs_shape = observations_space.shape
         self._tf_time_step = tf_time_step
         self._use_additional_input = use_additional_input
+
+        self.register_method('value', self.value, {'observations': 'obs'})
+        self.register_method('value_next', self.value, {'observations': 'obs_next'})
+
+        self.register_method('optimize', self.optimize, {
+            'observations': 'base.first_obs',
+            'd': 'base.weighted_td'
+        })
+        self.targets = ['optimize']
 
     def call(self, inputs, training=None, mask=None, additional_input=None):
         return self.value(inputs, additional_input=additional_input)
@@ -386,7 +451,7 @@ class GaussianActor(BaseActor):
         return mean
 
 
-class BaseACERAgent(ABC):
+class BaseACERAgent(AutoModelComponent, AutoModel):
     """Base ACER abstract class"""
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Tuple[int], gamma: int = 0.99, actor_beta_penalty: float = 0.001,
@@ -398,6 +463,8 @@ class BaseACERAgent(ABC):
                  limit_reward_tanh: float = None, time_step: int = 1, gradient_norm: float = None,
                  gradient_norm_median_threshold: float = 4, learning_starts: int = 1000, 
                  additional_buffer_types: List = (), policy_spec: BufferFieldSpec = None, **kwargs):
+
+        super().__init__()
 
         self._tf_time_step = tf.Variable(
             initial_value=time_step, name='tf_time_step', dtype=tf.dtypes.int64, trainable=False
@@ -436,16 +503,21 @@ class BaseACERAgent(ABC):
 
         self._init_replay_buffer(memory_size, policy_spec)
 
+        self.register_method("first_obs", self._first_obs, {"obs": "obs"})
+        self.register_method("first_actions", self._first_actions, {"actions": "actions"})
+
+        self._init_automodel()
+
         self._init_data_loader(additional_buffer_types)
 
-        self._actor_optimizer = tf.keras.optimizers.Adam(
+        self._actor_optimizer = self._actor.optimizer = tf.keras.optimizers.Adam(
             lr=actor_lr,
             beta_1=actor_adam_beta1,
             beta_2=actor_adam_beta2,
             epsilon=actor_adam_epsilon
         )
 
-        self._critic_optimizer = tf.keras.optimizers.Adam(
+        self._critic_optimizer = self._critic.optimizer = tf.keras.optimizers.Adam(
             lr=critic_lr,
             beta_1=critic_adam_beta1,
             beta_2=critic_adam_beta2,
@@ -462,6 +534,15 @@ class BaseACERAgent(ABC):
             self._running_mean_rewards = tf_utils.RunningMeanVarianceTf(shape=(1, ))
         else:
             self._running_mean_rewards = None
+
+    def _first_obs(self, obs):
+        return obs[:, 0]
+
+    def _first_actions(self, actions):
+        return actions[:, 0]
+
+    def _init_automodel(self) -> None:
+        pass  # call for automodel-compatibile classes (FastACER and subseq.) before immediatly before initializing data loader
 
     def _init_data_loader(self, additional_buffer_types) -> None:
         self._data_loader = tf.data.Dataset.from_generator(
@@ -662,5 +743,3 @@ class BaseACERAgent(ABC):
             self._running_mean_rewards.save(rms_rewards_path)
 
         self._memory.save(buffer_path)
-
-
