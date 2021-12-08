@@ -5,6 +5,10 @@ import sys
 import datetime
 import time
 import select
+import json
+from tensorflow.python import client
+
+from tensorflow.python.ops.gen_array_ops import reshape
 
 
 def cls():
@@ -12,15 +16,24 @@ def cls():
 
 
 GPUS_ENV = 'CUDA_VISIBLE_DEVICES'
+DEFAULT_LOC = "~/acer_research/acer/run.py"
 
 
 class RunGroup:
-    def __init__(self, name, params, log_outs=3, repeats=1) -> None:
-        self.processes = [Run(name, params, log_outs) for _ in range(repeats)]
+    def __init__(self, RunClss, name, params, log_outs=3, repeats=1) -> None:
+        self.processes = [RunClss(name, params, log_outs) for _ in range(repeats)]
 
     def show(self):
         for i, p in enumerate(self.processes):
             p.show(show_name=(i == 0))
+
+
+class Remote:
+    def __init__(self, server, max_procs, python, loc) -> None:
+        self.server = server
+        self.max_procs = max_procs
+        self.python = python
+        self.loc = loc
 
 
 class Run:
@@ -32,7 +45,7 @@ class Run:
         self.return_code = None
         self.log_outs = log_outs
         self.started = False
-        self.gpu = None
+        self.resource = None
 
         self.last_output = None
         self.last_err = None
@@ -41,24 +54,14 @@ class Run:
         self.last_eval_out_means = [None for _ in range(log_outs)]
         self.timesteps = 0
 
-    def start(self, gpu, verbose):
-        self.gpu = gpu
+    def _start(self, verbose):
+        raise NotImplementedError
 
-        exe = sys.executable
-        run = os.path.join(os.path.dirname(__file__), 'run.py')
+    def start(self, resource, verbose):
+        self.resource = resource
 
-        if verbose:
-            print(f'Run: python {exe} script {run} {" ".join(self.params)}')
+        self._start(verbose)
 
-        if gpu is None:
-            env = None
-        else:
-            env = {GPUS_ENV: gpu}
-
-        self.process = subprocess.Popen(
-            [exe, run, *self.params],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env
-        )
         self.started = True
 
         time.sleep(5)
@@ -67,6 +70,9 @@ class Run:
         if not self.alive():
             return
 
+        self._refresh(verbose)
+
+    def _refresh(self, verbose):
         out = self.process.stdout.readline()
         self.process.stdout.isatty
         self.process_output(out, verbose)
@@ -119,8 +125,44 @@ class Run:
         self.process.terminate()
 
 
-def make_procs(base_params, params, repeats):
-    return RunGroup(name(params), base_params + params, repeats=repeats)
+class LocalRun(Run):
+
+    def _start(self, verbose):
+        exe = sys.executable
+        run = os.path.join(os.path.dirname(__file__), 'run.py')
+
+        if verbose:
+            print(f'Run: python {exe} script {run} {" ".join(self.params)}')
+
+        if self.resource is None:
+            env = None
+        else:
+            env = {GPUS_ENV: self.resource}
+
+        self.process = subprocess.Popen(
+            [exe, run, *self.params],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env
+        )
+
+
+class RemoteRun(Run):
+    def _start(self, verbose):
+        exe = sys.executable
+        run = os.path.join(os.path.dirname(__file__), 'runmp_remote.py')
+
+        cmd = f"{self.resource.python} {self.resource.loc} {' '.join(self.params)} 2> \&1"
+
+        if verbose:
+            print(f'Run: Call: {exe} {run} Remote command: {cmd}')
+
+        subprocess.Popen(
+            [exe, run, cmd],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        )
+
+
+def make_procs(base_params, params, repeats, remote):
+    return RunGroup(RemoteRun if remote else LocalRun, name(params), base_params + params, repeats=repeats)
 
 
 def name(params):
@@ -154,20 +196,22 @@ def poll(processes, verbose):
     return alive, finished
 
 
-def get_next_gpu(gpus, running):
-    if not gpus:
+def get_next_resource(resources, running):
+    if not resources:
         return None
 
-    counters = {g: 0 for g in gpus}
+    counters = {r: 0 for r in resources}
 
     for p in running:
-        counters[p.gpu] += 1
+        counters[p.resource] += 1
 
-    return min(counters, key=counters.get)
+    available = {r: limit - counters[r] for r, limit in resources.items() if counters[r] < limit}
+
+    return max(available, key=counters.get)
 
 
-def run(base_params, splitted_sets, repeats, gpus, max_procs, verbose):
-    processes_groups = [make_procs(base_params, set, repeats) for set in splitted_sets]
+def run(base_params, splitted_sets, repeats, resources, max_procs, remote, verbose):
+    processes_groups = [make_procs(base_params, set, repeats, remote) for set in splitted_sets]
     processes = [p for g in processes_groups for p in g.processes]
 
     running = []
@@ -176,13 +220,10 @@ def run(base_params, splitted_sets, repeats, gpus, max_procs, verbose):
 
     for i, p in enumerate(processes):
         if len(running) < max_procs:
-            if gpus:
-                gpu = gpus[i % len(gpus)]
-            else:
-                gpu = None
+            res = get_next_resource(resources, processes)
 
-            print(f"Starting process {i+1} of {len(processes)} (gpu spec: {gpu})...")
-            p.start(gpu, verbose)
+            print(f"Starting process {i+1} of {len(processes)} (resource: {str(res)})...")
+            p.start(res, verbose)
             running.append(p)
         else:
             awaitng.append(p)
@@ -193,7 +234,6 @@ def run(base_params, splitted_sets, repeats, gpus, max_procs, verbose):
         while running:
             running, new_finished = poll(running, verbose)
             finished.extend(new_finished)
-
 
             if not verbose:
                 cls()
@@ -206,10 +246,10 @@ def run(base_params, splitted_sets, repeats, gpus, max_procs, verbose):
             print()
             
             while len(running) < max_procs and awaitng:
-                gpu = get_next_gpu(gpus, running)
-                print(f"Starting process (gpu spec: {gpu})...")
+                res = get_next_resource(resources, running)
+                print(f"Starting process (resource spec: {res})...")
                 p = awaitng.pop()
-                p.start(gpu, verbose)
+                p.start(res, verbose)
                 running.append(p)
     except KeyboardInterrupt:
         for p in processes:
@@ -236,6 +276,18 @@ def split_run_params(optimized_params):
     return runs
 
 
+def load_remotes(remote):
+    with open(remote) as remote_list:
+        raw = json.load(remote_list)
+
+    return [Remote(
+        spec['server'],
+        spec['max_procs'],
+        spec.get('python', 'python'),
+        spec.get('loc', DEFAULT_LOC)
+    ) for spec in raw]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--optim', action='append', nargs='+', type=str)
@@ -243,12 +295,23 @@ def main():
     parser.add_argument('--gpus', nargs='+', default=None, type=str)
     parser.add_argument('--repeats', default=1, type=int)
     parser.add_argument('--max_procs', default=1, type=int)
+    parser.add_argument('--remote', type=str)
 
     args, params = parser.parse_known_args()
 
     splitted_params = split_run_params(args.optim)
 
-    run(params, splitted_params, args.repeats, args.gpus, args.max_procs, args.verbose)
+    if args.remote:
+        resources = load_remotes(args.remote)
+    elif args.gpus:
+        resources = {
+            gpu: args.max_procs // len(args.gpus) for gpu in args.gpus
+        }
+    else:
+        resources = {None: args.max_procs}
+    max_procs = sum(resources.values())
+
+    run(params, splitted_params, args.repeats, resources, max_procs, args.remote is not None, args.verbose)
 
 
 if __name__ == "__main__":

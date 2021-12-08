@@ -156,7 +156,12 @@ class FastACER(BaseACERAgent):
         values = values[:,:,0]
         values_next = values_next
 
-        values_next = tf.concat([values[:,1:], values_next], axis=1) * dones_mask
+        # concat works despite possibly different trajectory lengths because of memory_buffer implementation
+        # TODO make it independant from memory_buffer implementation
+        values_with_next = tf.concat([values[:,1:], values_next], axis=1)
+
+        next_mask = tf.cast(tf.expand_dims(tf.range(1, self._memory.n + 1), 0) == tf.expand_dims(lengths, 1), tf.float32)
+        values_next = ((1 - next_mask) * values_with_next + next_mask * values_next) * dones_mask
 
         gamma_coeffs_masked = tf.expand_dims(tf.pow(self._gamma, tf.range(1., self._memory.n + 1)), axis=0) * mask
 
