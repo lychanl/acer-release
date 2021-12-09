@@ -29,11 +29,13 @@ class RunGroup:
 
 
 class Remote:
-    def __init__(self, server, max_procs, python, loc) -> None:
+    def __init__(self, server, username, key, max_procs, python, loc) -> None:
         self.server = server
         self.max_procs = max_procs
         self.python = python
         self.loc = loc
+        self.username = username
+        self.key = key
 
 
 class Run:
@@ -122,7 +124,8 @@ class Run:
         return self.process and self.open
 
     def interrupt(self):
-        self.process.terminate()
+        if self.process:
+            self.process.terminate()
 
 
 class LocalRun(Run):
@@ -140,7 +143,7 @@ class LocalRun(Run):
             env = {GPUS_ENV: self.resource}
 
         self.process = subprocess.Popen(
-            [exe, run, *self.params],
+            [exe, "-u", run, *self.params],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env
         )
 
@@ -150,15 +153,18 @@ class RemoteRun(Run):
         exe = sys.executable
         run = os.path.join(os.path.dirname(__file__), 'runmp_remote.py')
 
-        cmd = f"{self.resource.python} {self.resource.loc} {' '.join(self.params)} 2> \&1"
+        cmd = f"{self.resource.python} {self.resource.loc} {' '.join(self.params)} 2>&1"
 
         if verbose:
-            print(f'Run: Call: {exe} {run} Remote command: {cmd}')
+            print(f'Run: Call: {exe} {run} on {self.resource.server} Remote command: {cmd}')
 
-        subprocess.Popen(
-            [exe, run, cmd],
+        self.process = subprocess.Popen(
+            [exe, "-u", run, self.resource.server, self.resource.username, self.resource.key, cmd],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
         )
+
+        if verbose:
+            print('Started')
 
 
 def make_procs(base_params, params, repeats, remote):
@@ -192,7 +198,7 @@ def poll(processes, verbose):
                 alive.append(p)
             else:
                 finished.append(p)
-    
+
     return alive, finished
 
 
@@ -220,7 +226,7 @@ def run(base_params, splitted_sets, repeats, resources, max_procs, remote, verbo
 
     for i, p in enumerate(processes):
         if len(running) < max_procs:
-            res = get_next_resource(resources, processes)
+            res = get_next_resource(resources, running)
 
             print(f"Starting process {i+1} of {len(processes)} (resource: {str(res)})...")
             p.start(res, verbose)
@@ -280,12 +286,14 @@ def load_remotes(remote):
     with open(remote) as remote_list:
         raw = json.load(remote_list)
 
-    return [Remote(
+    return {r: r.max_procs for r in [Remote(
         spec['server'],
+        spec['username'],
+        spec['key'],
         spec['max_procs'],
         spec.get('python', 'python'),
         spec.get('loc', DEFAULT_LOC)
-    ) for spec in raw]
+    ) for spec in raw]}
 
 
 def main():
