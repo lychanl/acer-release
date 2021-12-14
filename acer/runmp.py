@@ -313,7 +313,7 @@ def main():
 
     args, params = parser.parse_known_args()
 
-    splitted_params = split_run_params(args.optim, args.optim_flags)
+    splitted_params = split_run_params(args.optim, args.optim_flag)
 
     if args.remote:
         resources = load_remotes(args.remote)
