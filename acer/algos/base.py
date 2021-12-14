@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from algos.automodel import AutoModel, AutoModelComponent
+from algos.common.automodel import AutoModel, AutoModelComponent
 from pathlib import Path
 from typing import Tuple, Union, List, Optional, Dict
 
@@ -49,8 +49,9 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
 
     @tf.function(experimental_relax_shapes=True)
     def _forward(self, input: np.array) -> tf.Tensor:
-        batch_dims = tf.convert_to_tensor(input.shape[1:-self._input_shape_len])
-        input_dims = tf.convert_to_tensor(input.shape[-self._input_shape_len:])
+        shape = tf.shape(input)
+        batch_dims = shape[1:-self._input_shape_len]
+        input_dims = shape[-self._input_shape_len:]
         
         x = tf.reshape(input, tf.concat([[-1,], input_dims], axis=0))
         for layer in self._hidden_layers:

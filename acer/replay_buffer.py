@@ -1,4 +1,5 @@
 from __future__ import annotations
+from algos.common.parameters import Parameters, get_adapts_from_kwargs
 import pickle
 from dataclasses import dataclass
 import functools
@@ -314,7 +315,7 @@ class MultiReplayBuffer:
 
     def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec,
                 buffer_class: Callable[[int, BufferFieldSpec, BufferFieldSpec], ReplayBuffer] = ReplayBuffer,
-                policy_spec: BufferFieldSpec = None, priority_fields: Tuple[str] = None, n: int = None, *args, **kwargs):
+                policy_spec: BufferFieldSpec = None, priority_spec: Tuple = None, n: int = None, *args, **kwargs):
         """Encapsulates ReplayBuffers from multiple environments.
 
         Args:
@@ -325,14 +326,18 @@ class MultiReplayBuffer:
         """
         self._n_buffers = num_buffers
         self._max_size = max_size
-        self.priority_fields = priority_fields
-        self.n = n
+        self.priority = priority_spec
+        self.parameters = Parameters("memory_params", n=n, **get_adapts_from_kwargs(kwargs, ['n']))
 
         # assert issubclass(buffer_class, ReplayBuffer), "Buffer class should derive from ReplayBuffer"
 
         self._buffers = [
             buffer_class(int(max_size / num_buffers), action_spec, obs_spec, policy_spec, *args, **kwargs) for _ in range(num_buffers)
         ]
+
+    @property
+    def n(self):
+        return self.parameters['n']
 
     def put(self, steps: List[Tuple[Union[int, float, list], np.array, float, np.array, bool, bool]]):
         """Stores experience in the buffers. Accepts list of steps.

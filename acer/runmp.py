@@ -262,24 +262,29 @@ def run(base_params, splitted_sets, repeats, resources, max_procs, remote, verbo
             p.interrupt()
 
 
-def split_run_params(optimized_params):
-    if not optimized_params:
+def split_run_params(optimized_params, optimized_flags):
+    if not optimized_params and not optimized_flags:
         return [[]]
 
     runs = []
-    param = optimized_params[0]
+    if optimized_params:
+        param = optimized_params[0]
 
-    name = "--" + param[0]
-    values = param[1:]
+        name = "--" + param[0]
+        values = param[1:]
 
-    for value in values:
-        param_sets = split_run_params(optimized_params[1:])
-        for s in param_sets:
-            s.append(name)
-            s.append(value)
-        runs.extend(param_sets)
+        for value in values:
+            param_sets = split_run_params(optimized_params[1:], optimized_flags)
+            for s in param_sets:
+                s.append(name)
+                s.append(value)
+            runs.extend(param_sets)
 
-    return runs
+        return runs
+    else:
+        param_sets = split_run_params([], optimized_flags[1:])
+        flag = '--' + optimized_flags[0]
+        [[flag] + params for params in param_sets] + param_sets
 
 
 def load_remotes(remote):
@@ -299,6 +304,7 @@ def load_remotes(remote):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--optim', action='append', nargs='+', type=str)
+    parser.add_argument('--optim_flag', action='append', type=str)
     parser.add_argument('--verbose', action='store_true', default=False)
     parser.add_argument('--gpus', nargs='+', default=None, type=str)
     parser.add_argument('--repeats', default=1, type=int)

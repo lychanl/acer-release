@@ -5,7 +5,6 @@ import tensorflow as tf
 from typing import Union, Dict
 
 
-
 class PrioritizedReplayBuffer(VecReplayBuffer):
     def __init__(
             self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec,
@@ -131,20 +130,26 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
     def __init__(
             self, max_size: int, num_buffers: int,
             action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec,
-            clip: float, priority: str, *args, **kwargs):
+            clip: float, priority: str, alpha: float, *args, **kwargs):
         self._clip = clip
-        self.priority = {
-            "IS": self._calculate_IS_priorities,
-            "prob": self._calculate_prob_priorities,
-            "IS1": self._calculate_IS1_priorities
-        }[priority]
+        self._alpha = alpha
 
-        priority_fields = ('obs', 'actions', 'policies')
+        PRIORITIES = {
+            "IS": (self._calculate_IS_priorities, {'density': 'actor.density'}),
+            "IS1": (self._calculate_IS1_priorities, {'density': 'actor.density'}),
+            "prob": (self._calculate_prob_priorities, {'policies': 'actor.policies', 'mask': 'mask'}),
+            "TD": (self._calculate_TD_priorities, {'td': 'base.td',}),
+            "weightedTD": (self._calculate_weighted_TD_priorities, {'td': 'base.td', 'weights': 'actor.density'}),
+        }
+        
+        assert priority in PRIORITIES, f"priority {priority} not in {', '.join(PRIORITIES.keys())}"
+
+        priority = PRIORITIES[priority]
 
         super().__init__(
             max_size, num_buffers, action_spec, obs_spec,
             buffer_class=PrioritizedReplayBuffer, policy_spec=policy_spec,
-            priority_fields=priority_fields, *args, **kwargs)
+            priority_spec=priority, *args, **kwargs)
 
     def should_update_block(self):
         return all(buf.should_update_block() for buf in self._buffers)
@@ -167,46 +172,37 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
         for p, buf in zip(priorities.reshape((self._n_buffers, -1)), self._buffers):
             buf.update_block(p)
 
-    @tf.function(experimental_relax_shapes=True)
-    def _calculate_IS_priorities(self, actor, lengths, obs, actions, old_policies):
-        policies, _ = actor.prob(obs, actions)
+    @tf.function
+    def _priorities_postprocess(self, priorities, lower_clip, upper_clip):
 
-        mask = tf.sequence_mask(lengths, maxlen=self.n, dtype=tf.float32)
-
-        priorities = tf.reshape(self._calculate_density(policies, old_policies, mask), (-1,))
-        
-        if self._clip == -1:
-            return priorities
+        if self._alpha:
+            smoothed = priorities ** self._alpha
         else:
-            return tf.clip_by_value(priorities, 1 / self._clip, self._clip)
+            smoothed = priorities
+
+        if lower_clip < 0:
+            lower_clip = 0
+        if upper_clip < 0:
+            upper_clip = tf.float32.max
+
+        return tf.clip_by_value(smoothed, lower_clip, upper_clip)
+
 
     @tf.function(experimental_relax_shapes=True)
-    def _calculate_prob_priorities(self, actor, lengths, obs, actions, old_policies):
-        policies, _ = actor.prob(obs, actions)
+    def _calculate_IS_priorities(self, density):
+        return self._priorities_postprocess(density, 1 / self._clip, self._clip)
 
-        mask = tf.sequence_mask(lengths, maxlen=self.n, dtype=tf.float32)
-
+    @tf.function(experimental_relax_shapes=True)
+    def _calculate_prob_priorities(self, policies, mask):
         policies_masked = policies * mask + (1 - mask) * tf.ones_like(policies)
 
         priorities = tf.reshape(tf.reduce_prod(policies_masked, axis=1), (-1,))
         
-        if self._clip == -1:
-            return priorities
-        else:
-            return tf.clip_by_value(priorities, 1 / self._clip, self._clip)
+        return self._priorities_postprocess(priorities, 1 / self._clip, self._clip)
 
     @tf.function(experimental_relax_shapes=True)
-    def _calculate_IS1_priorities(self, actor, lengths, obs, actions, old_policies):
-        policies, _ = actor.prob(obs, actions)
-
-        mask = tf.sequence_mask(lengths, maxlen=self.n, dtype=tf.float32)
-
-        priorities = tf.reshape(self._calculate_density(policies, old_policies, mask), (-1,))
-        
-        if self._clip == -1:
-            return priorities
-        else:
-            return tf.clip_by_value(priorities, 1 / self._clip, 1)
+    def _calculate_IS1_priorities(self, density):
+        return self._priorities_postprocess(density, 1 / self._clip, 1)
 
     @tf.function(experimental_relax_shapes=True)
     def _calculate_density(self, policies, old_policies, mask):
@@ -218,3 +214,10 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
 
         return policies_ratio_prod
 
+    @tf.function(experimental_relax_shapes=True)
+    def _calculate_TD_priorities(self, td):
+        return self._priorities_postprocess(tf.abs(td), 1 / self._clip, self._clip)
+
+    @tf.function(experimental_relax_shapes=True)
+    def _calculate_weighted_TD_priorities(self, td, weights):
+        return self._priorities_postprocess(tf.abs(td * weights), 1 / self._clip, self._clip)

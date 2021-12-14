@@ -33,7 +33,7 @@ class FastACER(BaseACERAgent):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Optional[Tuple[int]], b: float = 3, no_truncate: bool = True,
-                 update_blocks=1, buffer_type='simple', *args, **kwargs):
+                 update_blocks=1, buffer_type='simple', log_values=(), *args, **kwargs):
         """BaseActor-Critic with Experience Replay
 
         TODO: finish docstrings
@@ -55,30 +55,52 @@ class FastACER(BaseACERAgent):
             'obs_next': self._process_observations,
             'rewards': self._process_rewards
         }
-        
+
+        self.LOG_GATHER = {
+            'mean': tf.reduce_mean,
+            'std': tf.math.reduce_std
+        }
+
+        self._log_values = []
+        for log_value in log_values:
+            vg = log_value.split(':')
+            val = vg[0]
+            gather = vg[1] if len(log_values) > 1 else lambda x: x
+
+            self._log_values.append((log_value, val, gather))
+
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
 
     def _init_automodel(self):
-        self.register_method("mask", self._calculate_mask, {"lengths": "lengths"})
+        self.register_method("mask", self._calculate_mask, {"lengths": "lengths", "n": "memory_params.n"})
         self.register_method('td', self._calculate_td, {
             "values": "critic.value",
             "values_next": "critic.value_next",
             "rewards": "rewards",
             "lengths": "lengths",
             "mask": "base.mask",
-            "dones": "dones"
+            "dones": "dones",
+            "n": "memory_params.n"
         })
         self.register_method('weighted_td', self._calculate_weighted_td, {
             "td": "base.td",
             "weights": "actor.sample_weights",
         })
+        self.register_method('time_step', lambda: self._tf_time_step, {})
 
         self.register_component('actor', self._actor)
         self.register_component('critic', self._critic)
-        # self.register_component('buffer', self._memory) TODO later
+        self.register_component('memory_params', self._memory.parameters)
         self.register_component('base', self)
 
         self._call_list, self._call_list_data = self.prepare_default_call_list(DATA_FIELDS)
+
+        if self._memory.priority:
+            self.register_method('memory_priority', *self._memory.priority)
+            self._memory_call_list, self._memory_call_list_data = self.prepare_call_list(['base.memory_priority'], DATA_FIELDS)
+            replay_gen, dtypes = self._get_experience_replay_generator(seq=True, fields=self._memory_call_list_data)
+            self._buffer_update_loader = tf.data.Dataset.from_generator(
+                replay_gen, dtypes).prefetch(1)
 
     def _init_actor(self) -> BaseActor:
         if self._is_discrete:
@@ -114,14 +136,9 @@ class FastACER(BaseACERAgent):
             **self._buffer_args
         )
 
-        gen_fields = self._memory.priority_fields
-        if gen_fields is not None:        
-            replay_gen, dtypes = self._get_experience_replay_generator(seq=True, fields=gen_fields)
-            self._buffer_update_loader = tf.data.Dataset.from_generator(
-                replay_gen, dtypes).prefetch(1)
 
-    def _calculate_mask(self, lengths):
-        return tf.sequence_mask(lengths, maxlen=self._memory.n, dtype=tf.float32)
+    def _calculate_mask(self, lengths, n):
+        return tf.sequence_mask(lengths, maxlen=n, dtype=tf.float32)
 
     def _init_critic(self) -> Critic:
         return Critic(self._observations_space, self._critic_layers, self._tf_time_step)
@@ -136,6 +153,16 @@ class FastACER(BaseACERAgent):
         collected till c value is reached.
         """
         if self._time_step > self._learning_starts:
+            if self._memory.should_update_block():
+                for batch in self._buffer_update_loader.take(self._update_blocks):
+                    data = {f: d for f, d in zip(self._memory_call_list_data, batch)}
+                    priorities = self._calculate_memory_update(data)
+                    self._memory.update_block(priorities.numpy())
+                    
+                    with tf.name_scope('priorities'):
+                        tf.summary.scalar('priorities_mean', tf.reduce_mean(priorities), step=self._tf_time_step)
+                        tf.summary.scalar('priorities_std', tf.math.reduce_std(priorities), step=self._tf_time_step)
+
             experience_replay_iterations = min([round(self._c0 * self._time_step), self._c])
             
             for batch in self._data_loader.take(experience_replay_iterations):
@@ -143,13 +170,28 @@ class FastACER(BaseACERAgent):
                 self._learn_from_experience_batch(data)
     
     @tf.function(experimental_relax_shapes=True)
-    def _learn_from_experience_batch(self, data):
-        self.call_list(self._call_list, data, self.PREPROCESSING)
+    def _calculate_memory_update(self, data):
+        data = self.call_list(self._memory_call_list, data, self.PREPROCESSING)
+
+        with tf.name_scope('memory_update_log'):
+            for name, value, gather in self._log_values:
+                tf.summary.scalar(name, gather(data[value]), self._tf_time_step)
+
+        return data['base.memory_priority']
 
     @tf.function(experimental_relax_shapes=True)
-    def _calculate_td(self, values, values_next, rewards, lengths, dones, mask):
+    def _learn_from_experience_batch(self, data):
+        data = self.call_list(self._call_list, data, self.PREPROCESSING)
+
+        with tf.name_scope('log'):
+            for name, value, gather in self._log_values:
+                tf.summary.scalar(name, gather(data[value]), self._tf_time_step)
+
+
+    @tf.function(experimental_relax_shapes=True)
+    def _calculate_td(self, values, values_next, rewards, lengths, dones, mask, n):
         dones_mask = 1 - tf.cast(
-            (tf.expand_dims(tf.range(1, self._memory.n + 1), 0) == tf.expand_dims(lengths, 1)) & tf.expand_dims(dones, 1),
+            (tf.expand_dims(tf.range(1, n + 1), 0) == tf.expand_dims(lengths, 1)) & tf.expand_dims(dones, 1),
             tf.float32
         )
 
@@ -160,10 +202,10 @@ class FastACER(BaseACERAgent):
         # TODO make it independant from memory_buffer implementation
         values_with_next = tf.concat([values[:,1:], values_next], axis=1)
 
-        next_mask = tf.cast(tf.expand_dims(tf.range(1, self._memory.n + 1), 0) == tf.expand_dims(lengths, 1), tf.float32)
+        next_mask = tf.cast(tf.expand_dims(tf.range(1, n + 1), 0) == tf.expand_dims(lengths, 1), tf.float32)
         values_next = ((1 - next_mask) * values_with_next + next_mask * values_next) * dones_mask
 
-        gamma_coeffs_masked = tf.expand_dims(tf.pow(self._gamma, tf.range(1., self._memory.n + 1)), axis=0) * mask
+        gamma_coeffs_masked = tf.expand_dims(tf.pow(self._gamma, tf.range(1., n + 1)), axis=0) * mask
 
         td_parts = rewards + self._gamma * values_next - values
         td_rewards = tf.reduce_sum(td_parts * gamma_coeffs_masked, axis=1, keepdims=True)

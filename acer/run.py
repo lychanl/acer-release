@@ -2,9 +2,14 @@ import argparse
 import signal
 
 import os
+from sys import argv
+from numpy import float32
 # os.environ["CUDA_VISIBLE_DEVICES"]="-1"
 
 import tensorflow as tf
+
+if '--debug' in argv:
+    tf.function = lambda x=None, *args, **kwargs: x if x else tf.function
 
 from runners import Runner, ALGOS
 from utils import calculate_gamma, getDTChangedEnvName
@@ -52,7 +57,6 @@ parser.add_argument('--diff_b', type=float, help='diff ratio truncation coeffici
 parser.add_argument('--diff_h', type=float, help='H scale for log std loss',
                     required=False, default=None)
 parser.add_argument('--entropy_coeff', type=float, help='Entropy coefficient for ExplorACER', default=1)
-parser.add_argument('--priority', type=str, default="IS")
 parser.add_argument('--tau', type=int, help='Tau parameter for acerac', default=2)
 parser.add_argument('--n', type=int, help='N parameter for fast acerac', default=2)
 parser.add_argument('--noise_type', type=str, help='Type of noise for ACERAC',
@@ -95,7 +99,9 @@ parser.add_argument('--buffer.levels', type=int, help='Buffer tree levels (prior
 parser.add_argument('--buffer.block', type=int, help='Block size (prioritized replay)', default=256)
 parser.add_argument('--buffer.clip', type=float, help='Buffer priority clipping param', default=-1)
 parser.add_argument('--buffer.priority', type=str, help='Buffer priority', default="IS")
+parser.add_argument('--buffer.alpha', type=float, help='Buffer priority smoothing', default=None)
 parser.add_argument('--buffer.n', type=int, help='N parameter for fast acerac', default=2)
+parser.add_argument('--buffer.n.adapt', type=str, help='N parameter adaptation')
 parser.add_argument('--reverse', action='store_true',
                     help='Reverse param for exploracer')
 parser.add_argument('--time_coeff', type=str, help='type of time-based coefficient for sigma learning', default="linear", choices=("none", "linear", "exp", "power"))
@@ -112,6 +118,7 @@ parser.add_argument('--max_time_steps', type=int, help='Maximum number of time s
 parser.add_argument('--log_dir', type=str, help='Logging directory', default='logs/')
 parser.add_argument('--no_checkpoint', help='Disable checkpoint saving', action='store_true')
 parser.add_argument('--no_tensorboard', help='Disable tensorboard logs', action='store_true')
+parser.add_argument('--log_values', help='Log values during training', type=str, nargs='*')
 parser.add_argument('--experiment_name', type=str, help='Name of the current experiment', default='')
 parser.add_argument('--save_video_on_kill', action='store_true',
                     help='True if SIGINT signal should trigger registration of the video')
@@ -124,6 +131,7 @@ parser.add_argument('--synchronous', action='store_true',
 parser.add_argument('--timesteps_increase', help='Timesteps per second increase. Affects gamma and max time steps', type=int, default=None)
 
 parser.add_argument('--dump', help='Dump memory and models on given timesteps', nargs='*', type=int)
+parser.add_argument('--debug', help='Disable tf functions', action='store_true')
 
 def main():
     args = parser.parse_args()

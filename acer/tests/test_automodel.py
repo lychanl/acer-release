@@ -1,6 +1,6 @@
 import unittest
 
-from algos.automodel import AutoModelComponent, AutoModel, AutoModelCyclicReferenceError
+from algos.common.automodel import AutoModelComponent, AutoModel, AutoModelCyclicReferenceError
 
 
 class TestAutoModel(unittest.TestCase):

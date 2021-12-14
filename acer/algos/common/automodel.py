@@ -86,7 +86,10 @@ class AutoModel:
             field: preprocessing[field](value) if field in preprocessing else value
             for field, value in data.items()
         }
+
         for name, func, args_dict in list:
             args = {arg_name: data_dict[arg_spec] for arg_name, arg_spec in args_dict.items()}
             result = func(**args)
             data_dict[name] = result
+
+        return data_dict
