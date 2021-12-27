@@ -196,7 +196,6 @@ class FastACER(BaseACERAgent):
         )
 
         values = values[:,:,0]
-        values_next = values_next
 
         # concat works despite possibly different trajectory lengths because of memory_buffer implementation
         # TODO make it independant from memory_buffer implementation

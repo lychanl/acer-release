@@ -50,6 +50,7 @@ class Run:
         self.resource = None
 
         self.last_output = None
+        self.last_err_line = None
         self.last_err = None
 
         self.last_eval_outs = []
@@ -105,6 +106,8 @@ class Run:
         self.last_output = out
         if 'ERROR' in out.upper() or 'EXCEPTION' in out.upper():
             self.last_err = out
+        if 'file' in out and 'site-packages' not in out and 'line' in out:
+            self.last_err_line = out
 
     def show(self, show_name=True):
         if not self.started:
@@ -114,7 +117,7 @@ class Run:
         else:
             status = "EXITED: " + str(self.return_code)
 
-        error = f" ({self.last_err or self.last_output})" if self.return_code else ""
+        error = f" ({self.last_err_line + self.last_err if self.last_err else self.last_output})" if self.return_code else ""
 
         descr = f'Timesteps: {self.timesteps} Last results: {" ".join(map(str, self.last_eval_out_means))}'
         name = f"{self.name}:" if show_name else " " * (len(self.name) + 1)
