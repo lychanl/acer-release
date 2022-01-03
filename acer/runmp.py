@@ -109,7 +109,7 @@ class Run:
         self.last_output = out
         if 'ERROR' in out.upper() or 'EXCEPTION' in out.upper():
             self.last_err = out
-        if 'File' in out and 'line' in out and ('acer/' in out or 'acer\\' in out):
+        if 'acer/' in out or 'acer\\' in out:
             self.last_err_line = out + " "
 
     def show(self, show_name=True):
