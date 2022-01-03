@@ -37,6 +37,9 @@ class Remote:
         self.username = username
         self.key = key
 
+    def __str__(self) -> str:
+        return self.server
+
 
 class Run:
     def __init__(self, name, params, log_outs=3) -> None:
@@ -50,7 +53,7 @@ class Run:
         self.resource = None
 
         self.last_output = None
-        self.last_err_line = None
+        self.last_err_line = "(No line)"
         self.last_err = None
 
         self.last_eval_outs = []
@@ -107,7 +110,7 @@ class Run:
         if 'ERROR' in out.upper() or 'EXCEPTION' in out.upper():
             self.last_err = out
         if 'file' in out and 'site-packages' not in out and 'line' in out:
-            self.last_err_line = out
+            self.last_err_line = out + " "
 
     def show(self, show_name=True):
         if not self.started:
