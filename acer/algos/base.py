@@ -281,6 +281,7 @@ class CategoricalActor(BaseActor):
         """BaseActor for discrete actions spaces. Uses Categorical Distribution"""
         super().__init__(observations_space, actions_space, layers, *args, **kwargs)
         self._entropy_coeff = entropy_coeff
+        self.n = actions_space.n
 
     @property
     def action_dtype(self):
@@ -338,9 +339,10 @@ class CategoricalActor(BaseActor):
         dist = tfp.distributions.Categorical(log_probs, dtype=tf.int32)
 
         actions = dist.sample()
+        actions = tf.clip_by_value(actions, 0, self.n)  # there was some weird error
 
         action_probs = tf.reshape(tf.gather(
-            tf.reshape(probs, (-1, tf.shape(probs)[-1])),
+            tf.reshape(probs, (-1, self.n)),
             tf.reshape(actions, (-1, 1)),
             batch_dims=1
         ), tf.shape(actions))
