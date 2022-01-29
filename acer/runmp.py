@@ -123,7 +123,7 @@ class Run:
 
         error = f" ({self.last_err_line + self.last_err if self.last_err else self.last_output})" if self.return_code else ""
         if error and self.resource:
-            error = error + f" @{self.reseource}"
+            error = error + f" @{self.resource}"
 
         descr = f'Timesteps: {self.timesteps} Last results: {" ".join(map(str, self.last_eval_out_means))}'
         name = f"{self.name}:" if show_name else " " * (len(self.name) + 1)
