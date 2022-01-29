@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from argparse import ArgumentError
 from algos.common.automodel import AutoModel, AutoModelComponent
 from pathlib import Path
 from typing import Tuple, Union, List, Optional, Dict
@@ -24,11 +25,19 @@ session = InteractiveSession(config=config)
 
 class BaseModel(AutoModelComponent, tf.keras.Model):
 
-    def __init__(self, input_shape_len: int, layers: Optional[Tuple[int]], output_dim: int, *args, **kwargs) -> None:
+    def __init__(
+            self, observation_space: gym.spaces.Space, layers: Optional[Tuple[int]], output_dim: int,
+            *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
-        self._hidden_layers = self._build_layers(input_shape_len, layers, output_dim)
-        self._input_shape_len = input_shape_len
+        if type(observation_space) != gym.spaces.Discrete:
+            self._hidden_layers = self._build_layers(len(observation_space.shape), layers, output_dim)
+            self._input_shape_len = len(observation_space.shape)
+            self._forward = self._nn_forward
+        else:
+            self._array = tf.Variable(np.zeros((observation_space.n, output_dim)), dtype=tf.float32)
+            self._forward = self._arr_forward
+
         self._output_dim = output_dim
 
         self.optimizer = None
@@ -48,7 +57,7 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
         return hidden_layers
 
     @tf.function(experimental_relax_shapes=True)
-    def _forward(self, input: np.array) -> tf.Tensor:
+    def _nn_forward(self, input: np.array) -> tf.Tensor:
         shape = tf.shape(input)
         batch_dims = shape[1:-self._input_shape_len]
         input_dims = shape[-self._input_shape_len:]
@@ -58,6 +67,10 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
             x = layer(x)
         
         return tf.reshape(x, tf.concat([[-1,], batch_dims, [self._output_dim,]], axis=0))
+
+    @tf.function(experimental_relax_shapes=True)
+    def _arr_forward(self, input) -> tf.Tensor:
+        return tf.gather_nd(self._array, tf.expand_dims(input, -1))
 
     def optimize(self, **loss_kwargs):
         with tf.GradientTape() as tape:
@@ -87,7 +100,7 @@ class BaseActor(BaseModel):
         else:
             actions_dim = actions_space.shape[0]
 
-        super().__init__(len(observations_space.shape), layers, actions_dim, *args, **kwargs)
+        super().__init__(observations_space, layers, actions_dim, *args, **kwargs)
 
         self.obs_shape = observations_space.shape
         self.actions_dim = actions_dim
@@ -203,7 +216,7 @@ class BaseCritic(BaseModel):
         if len(observations_space.shape) > 1:
             assert not use_additional_input
 
-        super().__init__(len(observations_space.shape), layers, 1, *args, **kwargs)
+        super().__init__(observations_space, layers, 1, *args, **kwargs)
 
         self.obs_shape = observations_space.shape
         self._tf_time_step = tf_time_step
@@ -264,9 +277,10 @@ class Critic(BaseCritic):
 class CategoricalActor(BaseActor):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 *args, **kwargs):
+                 *args, entropy_coeff=0., **kwargs):
         """BaseActor for discrete actions spaces. Uses Categorical Distribution"""
         super().__init__(observations_space, actions_space, layers, *args, **kwargs)
+        self._entropy_coeff = entropy_coeff
 
     @property
     def action_dtype(self):
@@ -277,69 +291,71 @@ class CategoricalActor(BaseActor):
         return np.int32
 
     def loss(self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor) -> tf.Tensor:
-        logits = self._forward(observations)
+        probs, log_probs, action_probs, action_log_probs = self._prob(observations, actions)
 
-        # TODO: remove hardcoded '10' and '20'
-        logits_div = tf.divide(logits, 10)
-        log_probs = tf.nn.log_softmax(logits_div)
-        action_log_probs = tf.expand_dims(
-            tf.gather_nd(log_probs, actions, batch_dims=1),
-            axis=1
-        )
-        dist = tfp.distributions.Categorical(logits_div)
-
-        penalty = tf.reduce_sum(
-            tf.scalar_mul(
-                self.beta_penalty,
-                tf.square(tf.maximum(0.0, tf.abs(logits) - 20))
-            ),
-            axis=1,
-            keepdims=True
-        )
-        total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, d) + penalty)
+        total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, d))  # + penalty)
 
         # entropy maximization penalty
-        # entropy = -tf.reduce_sum(tf.math.multiply(probs, log_probs), axis=1)
+        entropy = -tf.reduce_sum(probs * log_probs, axis=1)
         # penalty = self.beta_penalty * (-tf.reduce_sum(tf.math.multiply(probs, log_probs), axis=1))
 
         with tf.name_scope('actor'):
-            tf.summary.scalar('batch_entropy_mean', tf.reduce_mean(dist.entropy()), step=self._tf_time_step)
             tf.summary.scalar('batch_loss', total_loss, step=self._tf_time_step)
-            tf.summary.scalar('batch_penalty_mean', tf.reduce_mean(penalty), step=self._tf_time_step)
+            # tf.summary.scalar('batch_penalty_mean', tf.reduce_mean(penalty), step=self._tf_time_step)
 
-        return total_loss
+        return total_loss - entropy * self._entropy_coeff
 
     def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
-        # TODO: remove hardcoded '10' and '20'
-        logits = tf.divide(self._forward(observations), 10)
-        probs = tf.nn.softmax(logits)
-        log_probs = tf.nn.log_softmax(logits)
-        action_probs = tf.gather_nd(probs, actions, batch_dims=1)
-        action_log_probs = tf.gather_nd(log_probs, actions, batch_dims=1)
+        _, _, action_probs, action_log_probs = self._prob(observations, actions)
         return action_probs, action_log_probs
 
+    def _prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+        logits = self._forward(observations)  # tf.divide(self._forward(observations) , 10)
+
+        action_shape = tf.shape(actions)[:-1]
+        actions = tf.reshape(actions, (-1, 1))
+        logits = tf.reshape(logits, (-1, tf.shape(logits)[-1]))
+
+        probs = tf.nn.softmax(logits)
+        log_probs = tf.nn.log_softmax(logits) 
+
+        action_probs = tf.gather(probs, actions, batch_dims=1)
+        action_log_probs = tf.gather(log_probs, actions, batch_dims=1)
+
+        action_probs = tf.reshape(action_probs, action_shape)
+        action_log_probs = tf.reshape(action_probs, action_shape)
+
+        return probs, log_probs, action_probs, action_log_probs
+
+    @tf.function(experimental_relax_shapes=True)
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
 
         # TODO: remove hardcoded '10' and '20'
-        logits = tf.divide(self._forward(observations), 10)
+        logits = self._forward(observations)  # tf.divide(self._forward(observations) , 10)
         probs = tf.nn.softmax(logits)
         log_probs = tf.nn.log_softmax(logits)
 
-        actions = tf.random.categorical(log_probs, num_samples=1, dtype=tf.dtypes.int32)
-        actions_probs = tf.gather_nd(probs, actions, batch_dims=1)
+        dist = tfp.distributions.Categorical(log_probs, dtype=tf.int32)
+
+        actions = dist.sample()
+
+        action_probs = tf.reshape(tf.gather(
+            tf.reshape(probs, (-1, tf.shape(probs)[-1])),
+            tf.reshape(actions, (-1, 1)),
+            batch_dims=1
+        ), tf.shape(actions))
 
         with tf.name_scope('actor'):
-            # TODO: refactor
+            tf.summary.scalar('entropy', tf.reduce_mean(dist.entropy()), step=self._tf_time_step)
             tf.summary.histogram('action', actions, step=self._tf_time_step)
-        return tf.squeeze(actions, axis=[1]), actions_probs
+        return actions, action_probs
 
     @tf.function(experimental_relax_shapes=True)
     def act_deterministic(self, observations: tf.Tensor, **kwargs) -> tf.Tensor:
         """Performs most probable action"""
-        logits = tf.divide(self._forward(observations), 10)
-        probs = tf.nn.softmax(logits)
+        logits = self._forward(observations)  # tf.divide(self._forward(observations) , 10)
 
-        actions = tf.argmax(probs, axis=1)
+        actions = tf.argmax(logits, axis=1)
         return actions
 
 
@@ -491,6 +507,8 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
 
         self._actor_gradient_norm_median = tf.Variable(initial_value=1.0, trainable=False)
         self._critic_gradient_norm_median = tf.Variable(initial_value=1.0, trainable=False)
+
+        self._is_obs_discrete = type(observations_space) == gym.spaces.Discrete
 
         if type(actions_space) == gym.spaces.Discrete:
             self._is_discrete = True

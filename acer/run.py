@@ -102,6 +102,7 @@ parser.add_argument('--buffer.priority', type=str, help='Buffer priority', defau
 parser.add_argument('--buffer.alpha', type=float, help='Buffer priority smoothing', default=None)
 parser.add_argument('--buffer.n', type=int, help='N parameter for fast acerac', default=2)
 parser.add_argument('--buffer.n.adapt', type=str, help='N parameter adaptation')
+parser.add_argument('--actor.entropy_coeff', type=float, help='entropy bonus coefficient')
 parser.add_argument('--reverse', action='store_true',
                     help='Reverse param for exploracer')
 parser.add_argument('--time_coeff', type=str, help='type of time-based coefficient for sigma learning', default="linear", choices=("none", "linear", "exp", "power"))

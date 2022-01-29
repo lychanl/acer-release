@@ -221,3 +221,7 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
     @tf.function(experimental_relax_shapes=True)
     def _calculate_weighted_TD_priorities(self, td, weights):
         return self._priorities_postprocess(tf.abs(td * weights), 1 / self._clip, self._clip)
+
+    @tf.function(experimental_relax_shapes=True)
+    def _calculate_oTD_priorities(self, td):
+        return self._priorities_postprocess(td, 0.5, self._clip)

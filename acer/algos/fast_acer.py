@@ -44,6 +44,11 @@ class FastACER(BaseACERAgent):
             if key.startswith('buffer.'):
                 self._buffer_args[key[len('buffer.'):]] = value
 
+        self._actor_args = {}
+        for key, value in kwargs.items():
+            if key.startswith('actor.'):
+                self._actor_args[key[len('actor.'):]] = value
+
         self._update_blocks = update_blocks
         self._buffer_type=buffer_type
 
@@ -106,12 +111,14 @@ class FastACER(BaseACERAgent):
         if self._is_discrete:
             return CategoricalActor(
                 self._observations_space, self._actions_space, self._actor_layers,
-                self._actor_beta_penalty, self._tf_time_step, truncate=self._truncate, b=self._b
+                self._actor_beta_penalty, self._tf_time_step, truncate=self._truncate, b=self._b,
+                **self._actor_args
             )
         else:
             return GaussianActor(
                 self._observations_space, self._actions_space, self._actor_layers,
-                self._actor_beta_penalty, self._actions_bound, self._std, self._tf_time_step, truncate=self._truncate, b=self._b
+                self._actor_beta_penalty, self._actions_bound, self._std, self._tf_time_step, truncate=self._truncate, b=self._b,
+                **self._actor_args
             )
 
     def _init_data_loader(self, _) -> None:
@@ -136,11 +143,13 @@ class FastACER(BaseACERAgent):
             **self._buffer_args
         )
 
-
     def _calculate_mask(self, lengths, n):
         return tf.sequence_mask(lengths, maxlen=n, dtype=tf.float32)
 
     def _init_critic(self) -> Critic:
+        # if self._is_obs_discrete:
+        #     return TabularCritic(self._observations_space, None, self._tf_time_step)
+        # else:
         return Critic(self._observations_space, self._critic_layers, self._tf_time_step)
 
     def learn(self):
@@ -235,8 +244,8 @@ class FastACER(BaseACERAgent):
 
         dtypes = {
             'lengths': tf.int32,
-            'obs': tf.float32,
-            'obs_next': tf.float32,
+            'obs': tf.int32 if self._is_obs_discrete else tf.float32,
+            'obs_next': tf.int32 if self._is_obs_discrete else tf.float32,
             'actions': self._actor.action_dtype,
             'policies': tf.float32,
             'rewards': tf.float32,
