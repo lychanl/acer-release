@@ -339,7 +339,7 @@ class CategoricalActor(BaseActor):
         dist = tfp.distributions.Categorical(log_probs, dtype=tf.int32)
 
         actions = dist.sample()
-        actions = tf.clip_by_value(actions, 0, self.n)  # there was some weird error
+        actions = tf.clip_by_value(actions, 0, self.n - 1)  # there was some weird error
 
         action_probs = tf.reshape(tf.gather(
             tf.reshape(probs, (-1, self.n)),
