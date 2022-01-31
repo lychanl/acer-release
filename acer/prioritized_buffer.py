@@ -130,15 +130,18 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
     def __init__(
             self, max_size: int, num_buffers: int,
             action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec,
-            clip: float, priority: str, alpha: float, *args, **kwargs):
+            priority: str, block: int, clip: float = -1, alpha: float = 1, beta: float = 1, *args, **kwargs):
         self._clip = clip
         self._alpha = alpha
+        self._beta = beta
+        self.block = block * num_buffers
 
         PRIORITIES = {
             "IS": (self._calculate_IS_priorities, {'density': 'actor.density'}),
             "IS1": (self._calculate_IS1_priorities, {'density': 'actor.density'}),
             "prob": (self._calculate_prob_priorities, {'policies': 'actor.policies', 'mask': 'mask'}),
             "TD": (self._calculate_TD_priorities, {'td': 'base.td',}),
+            "oTD": (self._calculate_oTD_priorities, {'td': 'base.td',}),
             "weightedTD": (self._calculate_weighted_TD_priorities, {'td': 'base.td', 'weights': 'actor.density'}),
         }
         
@@ -149,7 +152,7 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
         super().__init__(
             max_size, num_buffers, action_spec, obs_spec,
             buffer_class=PrioritizedReplayBuffer, policy_spec=policy_spec,
-            priority_spec=priority, *args, **kwargs)
+            priority_spec=priority, block=block, *args, **kwargs)
 
     def should_update_block(self):
         return all(buf.should_update_block() for buf in self._buffers)
@@ -190,7 +193,7 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
 
     @tf.function(experimental_relax_shapes=True)
     def _calculate_IS_priorities(self, density):
-        return self._priorities_postprocess(density, 1 / self._clip, self._clip)
+        return self._priorities_postprocess(tf.reduce_mean(density, -1), 1 / self._clip, self._clip)
 
     @tf.function(experimental_relax_shapes=True)
     def _calculate_prob_priorities(self, policies, mask):
@@ -210,18 +213,18 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
         old_policies_masked = old_policies * mask + (1 - mask) * tf.ones_like(old_policies)
 
         policies_ratio = policies_masked / old_policies_masked
-        policies_ratio_prod = tf.reduce_prod(policies_ratio, axis=-1, keepdims=True)
+        policies_ratio_prod = tf.math.cumprod(policies_ratio, axis=-1, keepdims=True)
 
         return policies_ratio_prod
 
     @tf.function(experimental_relax_shapes=True)
     def _calculate_TD_priorities(self, td):
-        return self._priorities_postprocess(tf.abs(td), 1 / self._clip, self._clip)
+        return self._priorities_postprocess(tf.abs(tf.reduce_mean(td, -1)), 1 / self._clip, self._clip)
 
     @tf.function(experimental_relax_shapes=True)
     def _calculate_weighted_TD_priorities(self, td, weights):
-        return self._priorities_postprocess(tf.abs(td * weights), 1 / self._clip, self._clip)
+        return self._priorities_postprocess(tf.abs(tf.reduce_mean(td * weights, -1)), 1 / self._clip, self._clip)
 
     @tf.function(experimental_relax_shapes=True)
     def _calculate_oTD_priorities(self, td):
-        return self._priorities_postprocess(td, 0.5, self._clip)
+        return self._priorities_postprocess(tf.maximum(tf.reduce_mean(td, -1) + self._beta, 0), self._beta, self._clip)

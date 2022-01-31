@@ -216,7 +216,7 @@ class FastACER(BaseACERAgent):
         gamma_coeffs_masked = tf.expand_dims(tf.pow(self._gamma, tf.range(1., n + 1)), axis=0) * mask
 
         td_parts = rewards + self._gamma * values_next - values
-        td_rewards = tf.reduce_sum(td_parts * gamma_coeffs_masked, axis=1, keepdims=True)
+        td_rewards = tf.math.cumsum(td_parts * gamma_coeffs_masked, axis=1)
 
         return td_rewards
 
@@ -229,7 +229,7 @@ class FastACER(BaseACERAgent):
 
     def _get_experience_replay_generator(
             self, seq=False, fields=DATA_FIELDS):
-        batch_size_ids = np.arange(self._batch_size)
+        batch_size_ids = np.arange(self._memory.block if seq else self._batch_size)
         specs = {
             'lengths': ('lengths', lambda x, lens: x),
             'obs': ('observations', lambda x, lens: x),

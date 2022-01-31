@@ -100,6 +100,7 @@ parser.add_argument('--buffer.block', type=int, help='Block size (prioritized re
 parser.add_argument('--buffer.clip', type=float, help='Buffer priority clipping param', default=-1)
 parser.add_argument('--buffer.priority', type=str, help='Buffer priority', default="IS")
 parser.add_argument('--buffer.alpha', type=float, help='Buffer priority smoothing', default=None)
+parser.add_argument('--buffer.beta', type=float, help='Generic buffer priority parameter', default=0)
 parser.add_argument('--buffer.n', type=int, help='N parameter for fast acerac', default=2)
 parser.add_argument('--buffer.n.adapt', type=str, help='N parameter adaptation')
 parser.add_argument('--actor.entropy_coeff', type=float, help='entropy bonus coefficient')

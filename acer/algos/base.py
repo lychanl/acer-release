@@ -188,7 +188,7 @@ class BaseActor(BaseModel):
         old_policies_masked = old_policies * mask + (1 - mask) * tf.ones_like(old_policies)
 
         policies_ratio = policies_masked / old_policies_masked
-        policies_ratio_prod = tf.reduce_prod(policies_ratio, axis=-1, keepdims=True)
+        policies_ratio_prod = tf.math.cumprod(policies_ratio, axis=-1)
 
         return policies_ratio_prod
 
@@ -294,7 +294,7 @@ class CategoricalActor(BaseActor):
     def loss(self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor) -> tf.Tensor:
         probs, log_probs, action_probs, action_log_probs = self._prob(observations, actions)
 
-        total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, d))  # + penalty)
+        total_loss = tf.reduce_mean(-tf.math.multiply(tf.expand_dims(action_log_probs, 1), d))  # + penalty)
 
         # entropy maximization penalty
         entropy = -tf.reduce_sum(probs * log_probs, axis=1)
