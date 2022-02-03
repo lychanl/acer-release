@@ -450,7 +450,7 @@ class VecReplayBuffer(ReplayBuffer):
             action_spec: BufferFieldSpec with actions space specification
             obs_spec: BufferFieldSpec with observations space specification
         """
-        super().__init__(max_size, action_spec, obs_spec, policy_spec or action_spec)
+        super().__init__(max_size, action_spec, obs_spec, policy_spec)
         self._prev_n = prev_n
 
     def _zero(self):

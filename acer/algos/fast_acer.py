@@ -235,7 +235,7 @@ class FastACER(BaseACERAgent):
             'obs': ('observations', lambda x, lens: x),
             'obs_next': ('next_observations', lambda x, lens: x[batch_size_ids, lens - 1]),
             'actions': ('actions', lambda x, lens: x),
-            'policies': ('policies', lambda x, lens: x[:, :, 0]),
+            'policies': ('policies', lambda x, lens: x),
             'rewards': ('rewards', lambda x, lens: x),
             'dones': ('dones', lambda x, lens: x[batch_size_ids, lens - 1]),
             'priorities': ('priors', lambda x, lens: x[:, 0]),

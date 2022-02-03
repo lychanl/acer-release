@@ -112,6 +112,7 @@ class BaseActor(BaseModel):
 
         self.register_method('policies', self.policy, {'observations': 'obs', 'actions': 'actions'})
         self.register_method('actions', self.act_deterministic, {'observations': 'obs'})
+        self.register_method('expected_probs', self.expected_probs, {'observations': 'obs'})
         self.register_method(
             'density', self._calculate_density, {
                 'policies': 'actor.policies',
@@ -181,6 +182,10 @@ class BaseActor(BaseModel):
         Returns:
             Tensor of actions [batch_size, actions_dim]
         """
+
+    @abstractmethod
+    def expected_probs(self, observations: tf.Tensor) -> tf.Tensor:
+        """expected value of action probability"""
 
     @tf.function(experimental_relax_shapes=True)
     def _calculate_density(self, policies, old_policies, mask):
@@ -360,6 +365,13 @@ class CategoricalActor(BaseActor):
         actions = tf.argmax(logits, axis=1)
         return actions
 
+    @tf.function(experimental_relax_shapes=True)
+    def expected_probs(self, observations: tf.Tensor) -> tf.Tensor:
+        logits = self._forward(observations)
+        probs = tf.nn.softmax(logits)
+        eprobs = tf.math.cumprod(tf.reduce_sum(probs ** 2, -1),axis=-1)
+
+        return eprobs
 
 class GaussianActor(BaseActor):
 
@@ -468,6 +480,13 @@ class GaussianActor(BaseActor):
         """Returns mean of the Gaussian"""
         mean = self._forward(observations)
         return mean
+
+    @tf.function(experimental_relax_shapes=True)
+    def expected_probs(self, observations: tf.Tensor) -> tf.Tensor:
+        det = tf.exp(tf.reduce_sum(self.log_std))
+        mult = np.pi ** tf.cast(tf.shape(self.log_std)[0], tf.float32)
+
+        return tf.math.cumprod(tf.ones(tf.shape(observations)[:2], tf.float32) / tf.sqrt(mult * det), axis=1)
 
 
 class BaseACERAgent(AutoModelComponent, AutoModel):

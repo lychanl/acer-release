@@ -142,6 +142,7 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
             "prob": (self._calculate_prob_priorities, {'policies': 'actor.policies', 'mask': 'mask'}),
             "TD": (self._calculate_TD_priorities, {'td': 'base.td',}),
             "oTD": (self._calculate_oTD_priorities, {'td': 'base.td',}),
+            "piTD": (self._calculate_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
             "weightedTD": (self._calculate_weighted_TD_priorities, {'td': 'base.td', 'weights': 'actor.density'}),
         }
         
@@ -228,3 +229,12 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
     @tf.function(experimental_relax_shapes=True)
     def _calculate_oTD_priorities(self, td):
         return self._priorities_postprocess(tf.maximum(tf.reduce_mean(td, -1) + self._beta, 0), self._beta, self._clip)
+
+    @tf.function(experimental_relax_shapes=True)
+    def _calculate_piTD_priorities(self, td, policies, e_probs):
+
+        policies_norm = (tf.math.cumprod(policies, -1) - e_probs) / e_probs
+
+        base = -policies_norm * td
+
+        return self._priorities_postprocess(tf.maximum(tf.reduce_mean(base, -1) + self._beta, 0), self._beta, self._clip)
