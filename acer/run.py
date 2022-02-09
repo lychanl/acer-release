@@ -59,6 +59,7 @@ parser.add_argument('--diff_h', type=float, help='H scale for log std loss',
 parser.add_argument('--entropy_coeff', type=float, help='Entropy coefficient for ExplorACER', default=1)
 parser.add_argument('--tau', type=int, help='Tau parameter for acerac', default=2)
 parser.add_argument('--n', type=int, help='N parameter for fast acerac', default=2)
+parser.add_argument('--keep_n', action='store_true', help='Do not autoadapt n', default=False)
 parser.add_argument('--noise_type', type=str, help='Type of noise for ACERAC',
                     default='autocor', choices=list(AUTOCORRELATED_ACTORS))
 parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
@@ -171,8 +172,9 @@ def main():
         print(f'Auto-adapted memory_size to {parameters["memory_size"]}')
         parameters['learning_starts'] = parameters['learning_starts'] * timesteps_increase
         print(f'Auto-adapted learning_starts to {parameters["learning_starts"]}')
-        parameters['n'] = parameters['n'] * timesteps_increase
-        print(f'Auto-adapted n to {parameters["n"]}')
+        if not parameters['keep_n']:
+            parameters['n'] = parameters['n'] * timesteps_increase
+            print(f'Auto-adapted n to {parameters["n"]}')
         if 'alpha' in parameters:
             parameters['alpha'] = parameters['alpha'] ** (1 / timesteps_increase)
             print(f'Auto-adapted alpha to {parameters["alpha"]}')

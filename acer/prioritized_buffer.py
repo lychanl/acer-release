@@ -1,3 +1,4 @@
+import functools
 from replay_buffer import BufferFieldSpec, VecReplayBuffer, MultiReplayBuffer
 
 import numpy as np
@@ -142,9 +143,22 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
             "prob": (self._calculate_prob_priorities, {'policies': 'actor.policies', 'mask': 'mask'}),
             "TD": (self._calculate_TD_priorities, {'td': 'base.td',}),
             "oTD": (self._calculate_oTD_priorities, {'td': 'base.td',}),
-            "piTD": (self._calculate_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
+            # "piTD": (self._calculate_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
+            # "soft_piTD": (self._calculate_soft_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
+            # "softsign_piTD": (self._calculate_softsign_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
+            # "nd_piTD": (self._calculate_nd_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
+            # "soft_nd_piTD": (self._calculate_soft_nd_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
             "weightedTD": (self._calculate_weighted_TD_priorities, {'td': 'base.td', 'weights': 'actor.density'}),
         }
+
+        for pre in ("", "nd", "first", "last"):
+            for post in ("", "soft", "softsign", "sign"):
+                name = "_".join(filter(lambda x: x, [post, pre, "piTD"]))
+
+                PRIORITIES[name] = (
+                    functools.partial(self._calculate_piTD_priorities, pre=pre, post=post),
+                    {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}
+                )
         
         assert priority in PRIORITIES, f"priority {priority} not in {', '.join(PRIORITIES.keys())}"
 
@@ -231,10 +245,68 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
         return self._priorities_postprocess(tf.maximum(tf.reduce_mean(td, -1) + self._beta, 0), self._beta, self._clip)
 
     @tf.function(experimental_relax_shapes=True)
-    def _calculate_piTD_priorities(self, td, policies, e_probs):
+    def _calculate_piTD_priorities(self, td, policies, e_probs, pre="", post=""):
+
+        policies_norm = (tf.math.cumprod(policies, -1) - e_probs)
+        if pre == "nd":
+            policies_norm = policies_norm / e_probs
+
+        elif pre == "first":
+            policies_norm = policies_norm[:,0]
+            td = td[:,:1]
+
+        elif pre == "last":
+            policies_norm = policies_norm[:,-1]
+            td = td[:,-1:]
+
+        base = -policies_norm * td
+
+        if post == "":
+            processed = tf.maximum(base, 0) + 1
+
+        elif post == "soft":
+            processed = tf.nn.elu(base) + 1
+
+        elif post == "sign":
+            processed = tf.nn.softsign(base) + 1
+
+        elif post == "softsign":
+            processed = tf.sign(base) + 1
+
+        return self._priorities_postprocess(tf.reduce_mean(processed, -1) * (1 - self._beta) + self._beta, 0, self._clip)
+
+    @tf.function(experimental_relax_shapes=True)
+    def _calculate_soft_piTD_priorities(self, td, policies, e_probs):
 
         policies_norm = (tf.math.cumprod(policies, -1) - e_probs) / e_probs
 
         base = -policies_norm * td
 
+        return self._priorities_postprocess(self._beta + (1 - self._beta) * (1 + tf.nn.elu(tf.reduce_mean(base, -1))), 0, self._clip)
+
+    @tf.function(experimental_relax_shapes=True)
+    def _calculate_softsign_piTD_priorities(self, td, policies, e_probs):
+
+        policies_norm = (tf.math.cumprod(policies, -1) - e_probs) / e_probs
+
+        base = -policies_norm * td
+
+        return self._priorities_postprocess(self._beta + (1 - self._beta) * (1 + tf.nn.softsign(tf.reduce_mean(base, -1))), 0, self._clip)
+
+    @tf.function(experimental_relax_shapes=True)
+    def _calculate_nd_piTD_priorities(self, td, policies, e_probs):
+
+        policies_norm = (tf.math.cumprod(policies, -1) - e_probs)
+
+        base = -policies_norm * td
+
         return self._priorities_postprocess(tf.maximum(tf.reduce_mean(base, -1) + self._beta, 0), self._beta, self._clip)
+
+    @tf.function(experimental_relax_shapes=True)
+    def _calculate_soft_nd_piTD_priorities(self, td, policies, e_probs):
+
+        policies_norm = (tf.math.cumprod(policies, -1) - e_probs)
+
+        base = -policies_norm * td
+
+        return self._priorities_postprocess(self._beta + (1 - self._beta) * (1 + tf.nn.elu(tf.reduce_mean(base, -1))), 0, self._clip)

@@ -391,11 +391,12 @@ class GaussianActor(BaseActor):
         super().__init__(observations_space, actions_space, layers, beta_penalty, *args, **kwargs)
 
         self._actions_bound = actions_bound
+        self._k = actions_space.shape[0]
 
         if std:
             # change constant to Variable to make std a learned parameter
             self.log_std = tf.constant(
-                tf.math.log([std] * actions_space.shape[0]),
+                tf.math.log([std] * self._k),
                 name="actor_std",
             )
         else:
@@ -483,8 +484,8 @@ class GaussianActor(BaseActor):
 
     @tf.function(experimental_relax_shapes=True)
     def expected_probs(self, observations: tf.Tensor) -> tf.Tensor:
-        det = tf.exp(tf.reduce_sum(self.log_std))
-        mult = np.pi ** tf.cast(tf.shape(self.log_std)[0], tf.float32)
+        det = tf.exp(2 * tf.reduce_sum(self.log_std))
+        mult = (4 * np.pi) ** tf.cast(self._k, tf.float32)
 
         return tf.math.cumprod(tf.ones(tf.shape(observations)[:2], tf.float32) / tf.sqrt(mult * det), axis=1)
 
