@@ -161,7 +161,7 @@ class NoiseGaussianActor(NoiseGaussianActorBase):
 
 
 class NoiseGaussianActorWithU(NoiseGaussianActorBase):
-    @tf.function
+    @tf.function(experimental_relax_shapes=True)
     def calculate_q_noise(self, actions: tf.Tensor, actor_outs: tf.Tensor, lengths: tf.Tensor,
             prev_actions: tf.Tensor, prev_actor_outs: tf.Tensor, prev_samples_len: tf.Tensor, actor_outs_next: tf.Tensor):
         prev_u = tf.where(
@@ -170,7 +170,7 @@ class NoiseGaussianActorWithU(NoiseGaussianActorBase):
             actions[:,0]
         )
 
-        last_noise = tf.gather_nd(actions - actor_outs ,tf.maximum(0, tf.expand_dims(lengths, 1) - 1), batch_dims=1)
+        last_noise = tf.gather(actions - actor_outs, tf.maximum(lengths - 1, 0), batch_dims=1)
         last_u = actor_outs_next + self._alpha * last_noise
         return tf.stack([prev_u, last_u], axis=1)
 
@@ -437,7 +437,7 @@ class ACERAC(BaseACERAgent):
         self._memory = MultiReplayBuffer(
             action_spec=BufferFieldSpec(shape=actions_shape, dtype=self._actor.action_dtype_np),
             obs_spec=BufferFieldSpec(shape=self._observations_space.shape, dtype=self._observations_space.dtype),
-            policy_spec=policy_spec,
+            policy_spec=policy_spec or BufferFieldSpec(shape=actions_shape, dtype=self._actor.action_dtype_np),
             max_size=memory_size,
             num_buffers=self._num_parallel_envs,
             buffer_class=PrevReplayBuffer(self._actor.required_prev_samples)

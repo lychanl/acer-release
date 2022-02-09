@@ -327,7 +327,8 @@ class MultiReplayBuffer:
         self._n_buffers = num_buffers
         self._max_size = max_size
         self.priority = priority_spec
-        self.parameters = Parameters("memory_params", n=n, **get_adapts_from_kwargs(kwargs, ['n']))
+        if n:
+            self.parameters = Parameters("memory_params", n=n, **get_adapts_from_kwargs(kwargs, ['n']))
 
         # assert issubclass(buffer_class, ReplayBuffer), "Buffer class should derive from ReplayBuffer"
 
