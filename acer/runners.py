@@ -1,7 +1,6 @@
 import datetime
 import json
 
-import logging
 import time
 from typing import Optional, List, Union, Tuple
 from pathlib import Path
@@ -19,13 +18,8 @@ from algos.base import BaseACERAgent
 from algos.quantile_acer import QACER
 from algos.qacerac import QACERAC
 from algos.exploracer import DistExplorACER, StdExplorACER, SingleSigmaExplorACER, MultiSigmaExplorACER
-from logger import CSVLogger
+from logger import CSVLogger, DefaultConsoleLogger, PeriodicConsoleLogger
 from utils import is_atari, getPossiblyDTChangedEnvBuilder
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)-5.5s]  %(message)s",
-)
 
 
 ALGOS = {
@@ -75,7 +69,8 @@ class Runner:
                  num_parallel_envs: int = 5, evaluate_time_steps_interval: int = 1500, n_step: int = 1,
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
                  record_end: bool = True, experiment_name: str = None, asynchronous: bool = True,
-                 log_tensorboard: bool = True, do_checkpoint: bool = True, record_time_steps: int = None, dump=()):
+                 log_tensorboard: bool = True, do_checkpoint: bool = True, record_time_steps: int = None,
+                 periodic_log: int = -1, dump=()):
         """Trains and evaluates the agent.
 
         Args:
@@ -131,6 +126,10 @@ class Runner:
             self._log_dir / 'results.csv',
             keys=['time_step', 'eval_return_mean', 'eval_std_mean']
         )
+        if periodic_log > 0:
+            self._logger = PeriodicConsoleLogger(periodic_log)
+        else:
+            self._logger = DefaultConsoleLogger()
 
         self._save_parameters(algorithm_parameters)
         self._agent = _get_agent(algorithm, algorithm_parameters, self._env.single_observation_space, self._env.single_action_space)
@@ -164,34 +163,39 @@ class Runner:
         """Performs training. If 'evaluate' is True, evaluation of the policy is performed. The evaluation
         uses policy that is being optimized, not the one used in training (i.e. randomness is turned off)
         """
-        while self._max_time_steps == -1 or self._time_step <= self._max_time_steps:
-            if self._is_time_to_evaluate():
-                self._evaluate()
-                if self._time_step != 0:
-                    self._save_results()
-                    if self._do_checkpoint:
-                        self._save_checkpoint()
+        try:
+            while self._max_time_steps == -1 or self._time_step <= self._max_time_steps:
+                if self._is_time_to_evaluate():
+                    self._evaluate()
+                    if self._time_step != 0:
+                        self._save_results()
+                        if self._do_checkpoint:
+                            self._save_checkpoint()
 
-            if self._is_time_to_record():
+                if self._is_time_to_record():
+                    self.record_video()
+
+                start_time = time.time()
+                experience = self._step()
+                self._agent.save_experience(experience)
+                if self._time_step % self._n_step == 0:
+                    self._agent.learn()
+                self._elapsed_time_measure += time.time() - start_time
+
+                if self._time_step in self._dump:
+                    self.dump()
+                self._logger.timestep(self._time_step - 1)
+
+            self._logger.flush(self._time_step)
+            self._csv_logger.close()
+            if self._record_end:
                 self.record_video()
-
-            start_time = time.time()
-            experience = self._step()
-            self._agent.save_experience(experience)
-            if self._time_step % self._n_step == 0:
-                self._agent.learn()
-            self._elapsed_time_measure += time.time() - start_time
-
-            if self._time_step in self._dump:
-                self.dump()
-
-        self._csv_logger.close()
-        if self._record_end:
-            self.record_video()
+        except:
+            self._logger.error()
 
     def _save_results(self):
         self._csv_logger.dump()
-        logging.info(f"saved evaluation results in {self._log_dir}")
+        self._logger.info(f"saved evaluation results in {self._log_dir}")
 
     def _step(self) -> List[Tuple[Union[int, float], np.array, float, float, bool, bool]]:
         actions, policies = self._agent.predict_action(self._current_obs)
@@ -226,10 +230,7 @@ class Runner:
 
             if is_end:
                 self._done_episodes += 1
-
-                logging.info(f"finished episode {self._done_episodes}, "
-                             f"return: {self._returns[i]}, "
-                             f"total time steps done: {self._time_step}")
+                self._logger.episode_finish(self._time_step, self._done_episodes, self._returns[i])
 
                 with tf.name_scope('rewards'):
                     tf.summary.histogram('rewards', self._rewards[i], self._done_episodes)
@@ -266,10 +267,8 @@ class Runner:
 
                     is_end = is_done_gym or is_maximum_number_of_steps_reached
                     envs_finished[i] = is_end
-                    if is_end:
-                        logging.info(f"evaluation run, "
-                                     f"return: {returns[i]}")
 
+        self._logger.evaluation_results(self._time_step, returns)
         mean_returns = np.mean(returns)
         std_returns = np.std(returns)
 
@@ -284,7 +283,7 @@ class Runner:
     def record_video(self):
         if self._record_time_steps:
             self._next_record_timestamp += self._record_time_steps
-        logging.info(f"saving video...")
+        self._logger.info(f"saving video...")
         try:
             env = wrappers.Monitor(gym.make(self._env_name), self._log_dir / f'video-{self._time_step}',
                                    force=True, video_callable=lambda x: True)
@@ -304,9 +303,9 @@ class Runner:
                 is_end = is_done_gym or is_maximum_number_of_steps_reached
 
             env.close()
-            logging.info(f"saved video in {str(self._log_dir / f'video-{self._time_step}')}")
+            self._logger.info(f"saved video in {str(self._log_dir / f'video-{self._time_step}')}")
         except Exception as e:
-            logging.error(f"Error while recording the video. Make sure you've got proper drivers"
+            self._logger.error(f"Error while recording the video. Make sure you've got proper drivers"
                           f"and libraries installed (i.e ffmpeg). Error message:\n {e}")
 
     def _is_time_to_evaluate(self):
@@ -342,7 +341,7 @@ class Runner:
 
         self._agent.save(checkpoint_dir / 'model')
 
-        logging.info(f"saved checkpoint in '{str(checkpoint_dir)}'")
+        self._logger.info(f"saved checkpoint in '{str(checkpoint_dir)}'")
 
     def dump(self):
         dump_dir = self._log_dir / f'dump_{self._time_step}'

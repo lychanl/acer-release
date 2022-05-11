@@ -1,5 +1,4 @@
 import argparse
-import resource
 import subprocess
 import os
 import sys
@@ -7,13 +6,34 @@ import datetime
 import time
 import select
 import json
-from tensorflow.python import client
-
-from tensorflow.python.ops.gen_array_ops import reshape
 
 
 def cls():
     os.system('cls' if os.name=='nt' else 'clear')
+
+
+def time_str(time):
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def dt_str(dt):
+    return str(dt).split('.')[0]
+
+def print_row(row, widths):
+    print('|'.join(str(cell).ljust(width) for cell, width in zip(row, widths)))
+
+def show_table(table, colnames):
+    widths = [len(name) for name in colnames]
+
+    for row in table:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(str(cell)))
+
+    print_row(colnames, widths)
+    print('+'.join('-' * width for width in widths))
+    for row in table:
+        print_row(row, widths)
+
 
 
 GPUS_ENV = 'CUDA_VISIBLE_DEVICES'
@@ -21,13 +41,12 @@ DEFAULT_LOC = "~/acer_research/acer/run.py"
 
 
 class RunGroup:
-    def __init__(self, RunClss, name, params, log_outs=3, repeats=1) -> None:
-        self.processes = [RunClss(name, params, log_outs) for _ in range(repeats)]
+    def __init__(self, RunClss, name_params, name, params, log_outs=3, repeats=1) -> None:
+        self.processes = [RunClss(name, name_params, params, log_outs) for _ in range(repeats)]
 
     def show(self):
-        for i, p in enumerate(self.processes):
-            p.show(show_name=(i == 0))
-
+        return [p.show() for p in self.processes]
+            
 
 class Remote:
     def __init__(self, server, username, key, max_procs, python, loc) -> None:
@@ -43,8 +62,9 @@ class Remote:
 
 
 class Run:
-    def __init__(self, name, params, log_outs=3) -> None:
+    def __init__(self, name, name_params, params, log_outs=3) -> None:
         self.name = name
+        self.name_params = name_params
         self.params = params
         self.open = True
         self.process = None
@@ -52,6 +72,9 @@ class Run:
         self.log_outs = log_outs
         self.started = False
         self.resource = None
+
+        self.started_t = None
+        self.finished = None
 
         self.last_output = None
         self.last_err_line = "(No line)"
@@ -70,6 +93,7 @@ class Run:
         self._start(verbose)
 
         self.started = True
+        self.started_t = datetime.datetime.now()
 
         time.sleep(5)
 
@@ -89,6 +113,7 @@ class Run:
             for out in self.process.stdout.readlines():
                 self.process_output(out, verbose)
             self.open = False
+            self.finished = datetime.datetime.now()
 
     def process_output(self, out, verbose):
         out = out.strip()
@@ -121,13 +146,23 @@ class Run:
         else:
             status = "EXITED: " + str(self.return_code)
 
-        error = f" ({self.last_err_line + self.last_err if self.last_err else self.last_output})" if self.return_code else ""
-        if error and self.resource:
-            error = error + f" @{self.resource}"
+        error = f" {self.last_err_line + self.last_err if self.last_err else self.last_output}" if self.return_code else "-"
 
-        descr = f'Timesteps: {self.timesteps} Last results: {" ".join(map(str, self.last_eval_out_means))}'
-        name = f"{self.name}:" if show_name else " " * (len(self.name) + 1)
-        print(f"{name}\t{descr}\t{status}{error}")
+        # descr = f'Timesteps: {self.timesteps} Last results: {" ".join(map(str, self.last_eval_out_means))}'
+        # name = f"{self.name}:" if show_name else " " * (len(self.name) + 1)
+        # print(f"{name}\t{descr}\t{status}{error}")
+
+        return [
+            *[param if show_name else "" for param in self.name_params],
+            self.timesteps,
+            *[f'{out:.2f}' if out is not None else "-" for out in self.last_eval_out_means],
+            self.resource,
+            status,
+            time_str(self.started_t) if self.started_t else "-",
+            time_str(self.finished) if self.finished else "-",
+            dt_str(self.finished - self.started_t if self.finished else datetime.datetime.now() - self.started_t) if self.started_t else "-",
+            error,
+        ]
 
     def alive(self):
         return self.process and self.open
@@ -176,8 +211,19 @@ class RemoteRun(Run):
             print('Started')
 
 
-def make_procs(base_params, params, repeats, remote):
-    return RunGroup(RemoteRun if remote else LocalRun, name(params), base_params + params, repeats=repeats)
+def make_procs(base_params, params, repeats, remote, param_names):
+    return RunGroup(RemoteRun if remote else LocalRun, name_params(params, param_names), name(params), base_params + params, repeats=repeats)
+
+
+def name_params(params, param_names):
+    splitted = [par.split() for par in ' '.join(params).split('--') if par]
+    out = {name: False for name in param_names}
+    for par in splitted:
+        if len(par) > 1:
+            out[par[0]] = ' '.join(par[1:])
+        else:
+            out[par[0]] = True
+    return [out[par] for par in param_names]
 
 
 def name(params):
@@ -225,8 +271,10 @@ def get_next_resource(resources, running):
     return max(available, key=counters.get)
 
 
-def run(base_params, splitted_sets, repeats, resources, max_procs, remote, verbose):
-    processes_groups = [make_procs(base_params, set, repeats, remote) for set in splitted_sets]
+def run(base_params, splitted_sets, repeats, resources, max_procs, remote, param_names, verbose):
+    columns = param_names + ["Timesteps", "Out (-1)", "Out (-2)", "Out (-3)", "Resource", "Status", "Start", "Finish", "Duration", "Error"]
+
+    processes_groups = [make_procs(base_params, set, repeats, remote, param_names) for set in splitted_sets]
     processes = [p for g in processes_groups for p in g.processes]
 
     running = []
@@ -255,10 +303,12 @@ def run(base_params, splitted_sets, repeats, resources, max_procs, remote, verbo
             now = datetime.datetime.now()
             print(f"START: {start} ACTUALIZATION: {now} DURATION: {now - start}")
             print("Base params: " + " ".join(map(str, base_params)))
+            print(f"Running: {len(running)}\tAwaiting: {len(awaitng)}\tFinished: {len(finished)}")
             print()
-            for g in processes_groups:
-                g.show()
-            print()
+            show_table([p for g in processes_groups for p in g.show()], columns)
+            
+            if verbose:
+                print()
             
             while len(running) < max_procs and awaitng:
                 res = get_next_resource(resources, running)
@@ -293,7 +343,7 @@ def split_run_params(optimized_params, optimized_flags):
     else:
         param_sets = split_run_params([], optimized_flags[1:])
         flag = '--' + optimized_flags[0]
-        [[flag] + params for params in param_sets] + param_sets
+        return [[flag] + params for params in param_sets] + param_sets
 
 
 def load_remotes(remote):
@@ -312,8 +362,8 @@ def load_remotes(remote):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--optim', action='append', nargs='+', type=str)
-    parser.add_argument('--optim_flag', action='append', type=str)
+    parser.add_argument('--optim', action='append', nargs='+', type=str, default=[])
+    parser.add_argument('--optim_flag', action='append', type=str, default=[])
     parser.add_argument('--verbose', action='store_true', default=False)
     parser.add_argument('--gpus', nargs='+', default=None, type=str)
     parser.add_argument('--repeats', default=1, type=int)
@@ -334,7 +384,8 @@ def main():
         resources = {None: args.max_procs}
     max_procs = sum(resources.values())
 
-    run(params, splitted_params, args.repeats, resources, max_procs, args.remote is not None, args.verbose)
+    param_names = [par[0] for par in args.optim]
+    run(params, splitted_params, args.repeats, resources, max_procs, args.remote is not None, param_names, args.verbose)
 
 
 if __name__ == "__main__":

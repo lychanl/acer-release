@@ -135,6 +135,7 @@ parser.add_argument('--timesteps_increase', help='Timesteps per second increase.
 
 parser.add_argument('--dump', help='Dump memory and models on given timesteps', nargs='*', type=int)
 parser.add_argument('--debug', help='Disable tf functions', action='store_true')
+parser.add_argument('--force_periodic_log', help='Force logging every n timesteps instead of on episode finish etc', type=int, default=0)
 
 def main():
     args = parser.parse_args()
@@ -204,7 +205,8 @@ def main():
         do_checkpoint=not no_checkpoint,
         record_time_steps=record_time_steps,
         n_step=n_step,
-        dump=dump
+        dump=dump,
+        periodic_log=args.force_periodic_log
     )
 
     def handle_sigint(sig, frame):
