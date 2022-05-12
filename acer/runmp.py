@@ -123,6 +123,29 @@ class Run:
         if verbose:
             print(out)
 
+        parts = out.split(':')
+        if parts[0] == 'Step':
+            self.timesteps = int(parts[1])
+        elif parts[0] == 'Evaluations':
+            for eval_ in parts[1].split(';'):
+                self.last_eval_outs = list(map(float, eval_.strip().split()))
+                self.last_eval_out_means = [
+                    sum(self.last_eval_outs) / len(self.last_eval_outs)
+                ] + self.last_eval_out_means[:-1]
+        elif parts[0] == 'Error type':
+            self.last_err = ':'.join(parts[1:]).strip()
+        elif parts[0] == 'Error function':
+            self.last_err_line = ':'.join(parts[1:]).strip()
+        self.last_output = out
+
+    def process_output_old(self, out, verbose):
+        out = out.strip()
+        if not out:
+            return
+
+        if verbose:
+            print(out)
+
         if 'evaluation run, return' in out:
             self.last_eval_outs.append(float(out.split()[-1]))
         elif 'saved evaluation results' in out:
@@ -146,7 +169,7 @@ class Run:
         else:
             status = "EXITED: " + str(self.return_code)
 
-        error = f" {self.last_err_line + self.last_err if self.last_err else self.last_output}" if self.return_code else "-"
+        error = f" {self.last_err + ' in ' + self.last_err_line + ' ' if self.last_err else self.last_output}" if self.return_code else "-"
 
         # descr = f'Timesteps: {self.timesteps} Last results: {" ".join(map(str, self.last_eval_out_means))}'
         # name = f"{self.name}:" if show_name else " " * (len(self.name) + 1)
@@ -369,8 +392,14 @@ def main():
     parser.add_argument('--repeats', default=1, type=int)
     parser.add_argument('--max_procs', default=1, type=int)
     parser.add_argument('--remote', type=str)
+    parser.add_argument('--log_period', type=int, default=1000)
 
     args, params = parser.parse_known_args()
+
+    if '--force_periodic_log' in params:
+        params[params.index('--force_periodic_log') + 1] = str(args.log_period)
+    else:
+        params = params + ["--force_periodic_log", str(args.log_period)]
 
     splitted_params = split_run_params(args.optim, args.optim_flag)
 

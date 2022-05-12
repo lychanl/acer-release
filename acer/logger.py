@@ -167,11 +167,10 @@ class PeriodicConsoleLogger(ConsoleLogger):
 
     def error(self):
         exc_type, exc_value, exc_tb = sys.exc_info()
-        print(f'Error type: {exc_type.__name__}')
+        print(f'Error type: {exc_type.__name__}({exc_value})')
         while exc_tb.tb_next and 'site-packages' not in exc_tb.tb_next.tb_frame.f_code.co_filename:
             exc_tb = exc_tb.tb_next
-        print(f'Error function: {exc_tb.tb_frame.f_code.co_name}')
-        print(f'Error from: {exc_tb.tb_frame.f_code.co_filename} ({exc_tb.tb_frame.f_lineno})')
+        print(f'Error function: {exc_tb.tb_frame.f_code.co_name} in {exc_tb.tb_frame.f_code.co_filename} ({exc_tb.tb_frame.f_lineno})')
         traceback.print_exc()
 
     def flush(self, step):

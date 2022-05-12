@@ -186,12 +186,13 @@ class Runner:
                     self.dump()
                 self._logger.timestep(self._time_step - 1)
 
-            self._logger.flush(self._time_step)
+            self._logger.flush(self._time_step - 1)
             self._csv_logger.close()
             if self._record_end:
                 self.record_video()
         except:
             self._logger.error()
+            exit(1)
 
     def _save_results(self):
         self._csv_logger.dump()
@@ -305,7 +306,7 @@ class Runner:
             env.close()
             self._logger.info(f"saved video in {str(self._log_dir / f'video-{self._time_step}')}")
         except Exception as e:
-            self._logger.error(f"Error while recording the video. Make sure you've got proper drivers"
+            self._logger.info(f"Error while recording the video. Make sure you've got proper drivers"
                           f"and libraries installed (i.e ffmpeg). Error message:\n {e}")
 
     def _is_time_to_evaluate(self):
