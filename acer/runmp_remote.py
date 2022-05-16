@@ -19,11 +19,11 @@ with paramiko.SSHClient() as client:
     while not stdout.channel.exit_status_ready():
         char = stdout.read(1).decode('ascii')
         if char == '\n':
-            print(''.join(line))
+            print(''.join(line), flush=True)
             line = []
         else:
             line.append(char)
 
-    print(''.join(line))
+    print(''.join(line), flush=True)
 
     exit(stdout.channel.recv_exit_status())

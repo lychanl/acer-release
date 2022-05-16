@@ -160,6 +160,7 @@ class PeriodicConsoleLogger(ConsoleLogger):
             print(f'Episodes: {"; ".join(" ".join([str(s), str(e), str(r)]) for s, e, r in self._episodes_finished)}')
         if self._evaluations:
             print(f'Evaluations: {"; ".join(" ".join([str(r) for r in rewards[1]]) for rewards in self._evaluations)}')
+        sys.stdout.flush()
 
         self._infos = []
         self._episodes_finished = []
@@ -172,6 +173,7 @@ class PeriodicConsoleLogger(ConsoleLogger):
             exc_tb = exc_tb.tb_next
         print(f'Error function: {exc_tb.tb_frame.f_code.co_name} in {exc_tb.tb_frame.f_code.co_filename} ({exc_tb.tb_frame.f_lineno})')
         traceback.print_exc()
+        sys.stdout.flush()
 
     def flush(self, step):
         self._print(step)
