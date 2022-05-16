@@ -143,7 +143,7 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
     def __init__(
             self, max_size: int, num_buffers: int,
             action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec,
-            priority: str, block: int, clip: float = -1, alpha: float = 1, beta: float = 1, eps=1e-4, *args, **kwargs):
+            priority: str, block: int, clip: float = -1, alpha: float = 1, beta: float = 0, eps=1e-4, *args, **kwargs):
         self._clip = clip
         self._alpha = alpha
         self._beta = beta
