@@ -12,7 +12,7 @@ with paramiko.SSHClient() as client:
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(server, username=username, key_filename=key)
     transport = client.get_transport()
-    transport.set_keepalive(5)
+    transport.set_keepalive(1)
     stdin, stdout, stderr = client.exec_command(command)
 
     line = []
