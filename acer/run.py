@@ -122,6 +122,7 @@ parser.add_argument('--log_dir', type=str, help='Logging directory', default='lo
 parser.add_argument('--no_checkpoint', help='Disable checkpoint saving', action='store_true')
 parser.add_argument('--no_tensorboard', help='Disable tensorboard logs', action='store_true')
 parser.add_argument('--log_values', help='Log values during training', type=str, nargs='*')
+parser.add_argument('--log_memory_values', help='Log values during memory update', type=str, nargs='*')
 parser.add_argument('--experiment_name', type=str, help='Name of the current experiment', default='')
 parser.add_argument('--save_video_on_kill', action='store_true',
                     help='True if SIGINT signal should trigger registration of the video')

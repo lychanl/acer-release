@@ -23,6 +23,9 @@ class PrioritizedReplayBuffer(VecReplayBuffer):
         self._block_starts = []
         self._block_ends = []
         self._total_priorities = 0
+        self._total_abs_reward = 0
+        self._total_reward = 0
+        self._total_2_reward = 0
 
         self._level_block_size = int((max_size // block) ** (1 / levels))
         if self._level_block_size ** levels * block < max_size:
@@ -43,6 +46,15 @@ class PrioritizedReplayBuffer(VecReplayBuffer):
     def put(self, action: Union[int, float, list], observation: np.array, next_observation: np.array, reward: float, policy: float, is_done: bool, end: bool):
         self._priorities[0][self._pointer] = 1
         self._update_block_priorities(self._pointer // self._block)
+
+        if self._current_size == self._max_size:
+            self._total_abs_reward -= abs(self._rewards[self._pointer])
+            self._total_reward -= self._rewards[self._pointer]
+            self._total_2_reward -= self._rewards[self._pointer] ** 2
+        self._total_abs_reward += abs(reward)
+        self._total_reward += reward
+        self._total_2_reward += reward ** 2
+
         return super().put(action, observation, next_observation, reward, policy, is_done, end)
 
     def _update_block_priorities(self, block):
@@ -131,11 +143,15 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
     def __init__(
             self, max_size: int, num_buffers: int,
             action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec,
-            priority: str, block: int, clip: float = -1, alpha: float = 1, beta: float = 1, *args, **kwargs):
+            priority: str, block: int, clip: float = -1, alpha: float = 1, beta: float = 1, eps=1e-4, *args, **kwargs):
         self._clip = clip
         self._alpha = alpha
         self._beta = beta
+        self._eps = eps
         self.block = block * num_buffers
+
+        self._mean_abs_reward = tf.Variable(0, dtype=tf.float32)
+        self._std_reward = tf.Variable(0, dtype=tf.float32)
 
         PRIORITIES = {
             "IS": (self._calculate_IS_priorities, {'density': 'actor.density'}),
@@ -153,12 +169,16 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
 
         for pre in ("", "nd", "first", "last"):
             for post in ("", "soft", "softsign", "sign"):
-                name = "_".join(filter(lambda x: x, [post, pre, "piTD"]))
+                for scale in ("", "abs", "std"):
+                    name = "_".join(filter(lambda x: x, [post, pre, "piTD", scale]))
 
-                PRIORITIES[name] = (
-                    functools.partial(self._calculate_piTD_priorities, pre=pre, post=post),
-                    {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}
-                )
+                    PRIORITIES[name] = (
+                        functools.partial(self._calculate_piTD_priorities, pre=pre, post=post, scale=scale),
+                        {
+                            'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs',
+                            'mean_abs_rewards': 'memory.mean_abs_rewards', 'std_rewards': 'memory.std_rewards'
+                        }
+                    )
         
         assert priority in PRIORITIES, f"priority {priority} not in {', '.join(PRIORITIES.keys())}"
 
@@ -168,6 +188,25 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
             max_size, num_buffers, action_spec, obs_spec,
             buffer_class=PrioritizedReplayBuffer, policy_spec=policy_spec,
             priority_spec=priority, block=block, *args, **kwargs)
+
+        self.register_method('mean_abs_rewards', self.mean_abs_reward, {})
+        self.register_method('std_rewards', self.mean_abs_reward, {})
+
+    def put(self, *args, **kwargs):
+        super().put(*args, **kwargs)
+        self._mean_abs_reward.assign(sum(b._total_abs_reward / b._current_size for b in self._buffers) / len(self._buffers))
+        self._std_reward.assign(
+            (sum(b._total_2_reward for b in self._buffers) - sum(b._total_reward for b in self._buffers) ** 2)
+            / sum(b._current_size for b in self._buffers)
+        )
+
+    @tf.function
+    def mean_abs_reward(self):
+        return self._mean_abs_reward
+
+    @tf.function
+    def std_reward(self):
+        return self._std_reward
 
     def should_update_block(self):
         return all(buf.should_update_block() for buf in self._buffers)
@@ -245,7 +284,7 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
         return self._priorities_postprocess(tf.maximum(tf.reduce_mean(td, -1) + self._beta, 0), self._beta, self._clip)
 
     @tf.function(experimental_relax_shapes=True)
-    def _calculate_piTD_priorities(self, td, policies, e_probs, pre="", post=""):
+    def _calculate_piTD_priorities(self, td, policies, e_probs, mean_abs_rewards, std_rewards, pre="", post="", scale=""):
 
         policies_norm = (tf.math.cumprod(policies, -1) - e_probs)
         if pre == "nd":
@@ -258,6 +297,12 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
         elif pre == "last":
             policies_norm = policies_norm[:,-1]
             td = td[:,-1:]
+
+        if scale == "abs":
+            td = td / tf.minimum(mean_abs_rewards, self._eps)
+
+        elif scale == "std":
+            td = td / tf.minimum(std_rewards, self._eps)
 
         base = -policies_norm * td
 

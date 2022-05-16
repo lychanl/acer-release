@@ -1,5 +1,6 @@
 import datetime
 import json
+import os
 
 import time
 from typing import Optional, List, Union, Tuple
@@ -111,6 +112,7 @@ class Runner:
         self._returns = [0] * self._n_envs
         self._rewards = [[] for _ in range(self._n_envs)]
 
+        experiment_name = (experiment_name + "_" if experiment_name else "") + str(os.getpid())
         self._prepare_log_dir(experiment_name, log_dir, environment_name, algorithm)
 
         dummy_env = self._env.env_fns[0]()
@@ -234,9 +236,8 @@ class Runner:
                 self._logger.episode_finish(self._time_step, self._done_episodes, self._returns[i])
 
                 with tf.name_scope('rewards'):
-                    tf.summary.histogram('rewards', self._rewards[i], self._done_episodes)
-                    tf.summary.scalar('return', self._returns[i], self._done_episodes)
-                    tf.summary.scalar('episode length', self._done_steps_in_a_episode[i], self._done_episodes)
+                    tf.summary.scalar('return', self._returns[i], self._time_step)
+                    tf.summary.scalar('episode length', self._done_steps_in_a_episode[i], self._time_step)
 
                 self._returns[i] = 0
                 self._rewards[i] = []

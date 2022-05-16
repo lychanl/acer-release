@@ -33,7 +33,7 @@ class FastACER(BaseACERAgent):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Optional[Tuple[int]], b: float = 3, no_truncate: bool = True,
-                 update_blocks=1, buffer_type='simple', log_values=(), *args, **kwargs):
+                 update_blocks=1, buffer_type='simple', log_values=(), log_memory_values=(), *args, **kwargs):
         """BaseActor-Critic with Experience Replay
 
         TODO: finish docstrings
@@ -66,13 +66,18 @@ class FastACER(BaseACERAgent):
             'std': tf.math.reduce_std
         }
 
-        self._log_values = []
-        for log_value in log_values:
-            vg = log_value.split(':')
-            val = vg[0]
-            gather = vg[1] if len(log_values) > 1 else lambda x: x
+        def prepare_log_values(spec):
+            target_list = []
+            for log_value in spec:
+                vg = log_value.split(':')
+                val = vg[0]
+                gather = self.LOG_GATHER[vg[1]] if len(vg) > 1 else lambda x: x
 
-            self._log_values.append((log_value, val, gather))
+                target_list.append((log_value, val, gather))
+            return target_list
+
+        self._log_values = prepare_log_values(log_values)
+        self._log_memory_values = prepare_log_values(log_memory_values)
 
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
 
@@ -96,6 +101,7 @@ class FastACER(BaseACERAgent):
         self.register_component('actor', self._actor)
         self.register_component('critic', self._critic)
         self.register_component('memory_params', self._memory.parameters)
+        self.register_component('memory', self._memory)
         self.register_component('base', self)
 
         self._call_list, self._call_list_data = self.prepare_default_call_list(DATA_FIELDS)
@@ -167,10 +173,6 @@ class FastACER(BaseACERAgent):
                     data = {f: d for f, d in zip(self._memory_call_list_data, batch)}
                     priorities = self._calculate_memory_update(data)
                     self._memory.update_block(priorities.numpy())
-                    
-                    with tf.name_scope('priorities'):
-                        tf.summary.scalar('priorities_mean', tf.reduce_mean(priorities), step=self._tf_time_step)
-                        tf.summary.scalar('priorities_std', tf.math.reduce_std(priorities), step=self._tf_time_step)
 
             experience_replay_iterations = min([round(self._c0 * self._time_step), self._c])
             
@@ -183,8 +185,8 @@ class FastACER(BaseACERAgent):
         data = self.call_list(self._memory_call_list, data, self.PREPROCESSING)
 
         with tf.name_scope('memory_update_log'):
-            for name, value, gather in self._log_values:
-                tf.summary.scalar(name, gather(data[value]), self._tf_time_step)
+            for name, value, gather in self._log_memory_values:
+                tf.summary.scalar(name + " (mem)", gather(data[value]), self._tf_time_step)
 
         return data['base.memory_priority']
 

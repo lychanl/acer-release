@@ -1,4 +1,5 @@
 from __future__ import annotations
+from algos.common.automodel import AutoModelComponent
 from algos.common.parameters import Parameters, get_adapts_from_kwargs
 import pickle
 from dataclasses import dataclass
@@ -311,7 +312,7 @@ def PrevReplayBuffer(n: int = 1):
 #         return batch
 
 
-class MultiReplayBuffer:
+class MultiReplayBuffer(AutoModelComponent):
 
     def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec,
                 buffer_class: Callable[[int, BufferFieldSpec, BufferFieldSpec], ReplayBuffer] = ReplayBuffer,
@@ -324,6 +325,8 @@ class MultiReplayBuffer:
             obs_spec: BufferFieldSpec with observations space specification
             buffer_class: class of a buffer to be created
         """
+        super().__init__()
+
         self._n_buffers = num_buffers
         self._max_size = max_size
         self.priority = priority_spec

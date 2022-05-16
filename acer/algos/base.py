@@ -273,9 +273,6 @@ class Critic(BaseCritic):
         value = self.value(observations, additional_input=additional_input)
         loss = tf.reduce_mean(-tf.math.multiply(value, d))
 
-        with tf.name_scope('critic'):
-            tf.summary.scalar('batch_value_mean', tf.reduce_mean(value), step=self._tf_time_step)
-            tf.summary.scalar('batch_loss', loss, step=self._tf_time_step)
         return loss
 
 
@@ -304,10 +301,6 @@ class CategoricalActor(BaseActor):
         # entropy maximization penalty
         entropy = -tf.reduce_sum(probs * log_probs, axis=1)
         # penalty = self.beta_penalty * (-tf.reduce_sum(tf.math.multiply(probs, log_probs), axis=1))
-
-        with tf.name_scope('actor'):
-            tf.summary.scalar('batch_loss', total_loss, step=self._tf_time_step)
-            # tf.summary.scalar('batch_penalty_mean', tf.reduce_mean(penalty), step=self._tf_time_step)
 
         return total_loss - entropy * self._entropy_coeff
 
@@ -352,9 +345,6 @@ class CategoricalActor(BaseActor):
             batch_dims=1
         ), tf.shape(actions))
 
-        with tf.name_scope('actor'):
-            tf.summary.scalar('entropy', tf.reduce_mean(dist.entropy()), step=self._tf_time_step)
-            tf.summary.histogram('action', actions, step=self._tf_time_step)
         return actions, action_probs
 
     @tf.function(experimental_relax_shapes=True)
@@ -433,15 +423,8 @@ class GaussianActor(BaseActor):
             axis=1,
             keepdims=True
         )
-        entropy = dist.entropy()
-        # entropy_penalty = 0.01 * entropy
 
         total_loss = tf.reduce_mean(-tf.math.multiply(action_log_probs, d) + bounds_penalty)
-
-        with tf.name_scope('actor'):
-            tf.summary.scalar('batch_loss', total_loss, step=self._tf_time_step)
-            tf.summary.scalar('batch_bounds_penalty_mean', tf.reduce_mean(bounds_penalty), step=self._tf_time_step)
-            tf.summary.scalar('batch_entropy_mean', tf.reduce_mean(entropy), step=self._tf_time_step)
 
         return total_loss
 
@@ -469,10 +452,6 @@ class GaussianActor(BaseActor):
     def _act(self, dist: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         actions = dist.sample(dtype=self.dtype)
         actions_probs = dist.prob(actions)
-
-        with tf.name_scope('actor'):
-            tf.summary.scalar(f'batch_action_mean', tf.reduce_mean(actions), step=self._tf_time_step)
-            tf.summary.scalar(f'batch_std_mean', tf.reduce_mean(dist.scale.H.diag), step=self._tf_time_step)
 
         return actions, actions_probs
 
@@ -621,15 +600,11 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
             norm_variable.assign_add(
                 update_sign * norm_variable * 0.01
             )
-            with tf.name_scope(scope):
-                tf.summary.scalar("gradient_norm_median", norm_variable, self._tf_time_step)
         else:
             grads_clipped, grads_norm = tf.clip_by_global_norm(
                 grads,
                 self._gradient_norm
             )
-        with tf.name_scope(scope):
-            tf.summary.scalar("gradient_norm", grads_norm, self._tf_time_step)
         return grads_clipped
 
     def save_experience(self, steps: List[
@@ -655,26 +630,11 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
     def _update_obs_rms(self, obs):
         if self._running_mean_obs:
             self._running_mean_obs.update(obs)
-            with tf.name_scope('observations'):
-                tf.summary.scalar(
-                    f'obs_running_mean_norm',
-                    tf.linalg.norm(self._running_mean_obs.mean),
-                    step=self._tf_time_step
-                )
-                tf.summary.scalar(
-                    f'obs_running_std_norm',
-                    tf.linalg.norm(tf.sqrt(self._running_mean_obs.var)),
-                    step=self._tf_time_step
-                )
 
     @tf.function(experimental_relax_shapes=True)
     def _update_rewards_rms(self, rewards):
         if self._running_mean_rewards:
             self._running_mean_rewards.update(tf.expand_dims(tf.cast(rewards, dtype=tf.float32), axis=1))
-            with tf.name_scope('rewards'):
-                tf.summary.scalar(
-                    f'rewards_running_std', tf.sqrt(self._running_mean_rewards.var[0]), step=self._tf_time_step
-                )
 
     def predict_action(self, observations: np.array, is_deterministic: bool = False) \
             -> Tuple[np.array, Optional[np.array]]:
