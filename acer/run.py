@@ -1,4 +1,5 @@
 import argparse
+from ctypes import ArgumentError
 import signal
 
 import os
@@ -140,6 +141,9 @@ parser.add_argument('--force_periodic_log', help='Force logging every n timestep
 
 def main():
     args = parser.parse_args()
+    
+    if args.algo not in ('acer', 'acerac', 'qacer', 'exploracer', 'qacerac', 'quantile_acer') and '--n' in argv:
+        raise ArgumentError("Use --buffer.n instead of --n!")
 
     cmd_parameters, unknown_args = parser.parse_known_args()
     if len(unknown_args):
