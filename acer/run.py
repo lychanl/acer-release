@@ -138,6 +138,7 @@ parser.add_argument('--timesteps_increase', help='Timesteps per second increase.
 parser.add_argument('--dump', help='Dump memory and models on given timesteps', nargs='*', type=int)
 parser.add_argument('--debug', help='Disable tf functions', action='store_true')
 parser.add_argument('--force_periodic_log', help='Force logging every n timesteps instead of on episode finish etc', type=int, default=0)
+parser.add_argument('--nan_guard', help='Force logging every n timesteps instead of on episode finish etc', action='store_true')
 
 def main():
     args = parser.parse_args()

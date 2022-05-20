@@ -167,18 +167,26 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
             "weightedTD": (self._calculate_weighted_TD_priorities, {'td': 'base.td', 'weights': 'actor.density'}),
         }
 
+        TDS = {
+            "": 'base.td',
+            "trIS": 'base.density_weighted_td',
+        }
+    
         for pre in ("", "nd", "first", "last"):
             for post in ("", "soft", "softsign", "sign"):
                 for scale in ("", "abs", "std"):
-                    name = "_".join(filter(lambda x: x, [post, pre, "piTD", scale]))
+                    for td in ("", "trIS"):
+                        name = "_".join(filter(lambda x: x, [post, pre, td, "piTD", scale]))
 
-                    PRIORITIES[name] = (
-                        functools.partial(self._calculate_piTD_priorities, pre=pre, post=post, scale=scale),
-                        {
-                            'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs',
-                            'mean_abs_rewards': 'memory.mean_abs_rewards', 'std_rewards': 'memory.std_rewards'
-                        }
-                    )
+    
+                        PRIORITIES[name] = (
+                            functools.partial(self._calculate_piTD_priorities, pre=pre, post=post, scale=scale),
+                            {
+                                'td': TDS[td],
+                                'policies': 'actor.policies', 'e_probs': 'actor.expected_probs',
+                                'mean_abs_rewards': 'memory.mean_abs_rewards', 'std_rewards': 'memory.std_rewards'
+                            }
+                        )
         
         assert priority in PRIORITIES, f"priority {priority} not in {', '.join(PRIORITIES.keys())}"
 
@@ -299,10 +307,10 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
             td = td[:,-1:]
 
         if scale == "abs":
-            td = td / tf.minimum(mean_abs_rewards, self._eps)
+            td = td / tf.maximum(mean_abs_rewards, self._eps)
 
         elif scale == "std":
-            td = td / tf.minimum(std_rewards, self._eps)
+            td = td / tf.maximum(std_rewards, self._eps)
 
         base = -policies_norm * td
 
@@ -312,10 +320,10 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
         elif post == "soft":
             processed = tf.nn.elu(base) + 1
 
-        elif post == "sign":
+        elif post == "softsign":
             processed = tf.nn.softsign(base) + 1
 
-        elif post == "softsign":
+        elif post == "sign":
             processed = tf.sign(base) + 1
 
         return self._priorities_postprocess(tf.reduce_mean(processed, -1) * (1 - self._beta) + self._beta, 0, self._clip)

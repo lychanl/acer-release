@@ -126,6 +126,11 @@ class BaseActor(BaseModel):
                 'priorities': 'priorities'
             }
         )
+        self.register_method(
+            'truncated_density', self._calculate_truncated_density, {
+                'density': 'actor.density'
+            }
+        )
 
         self.register_method('optimize', self.optimize, {
             'observations': 'base.first_obs',
@@ -196,6 +201,12 @@ class BaseActor(BaseModel):
         policies_ratio_prod = tf.math.cumprod(policies_ratio, axis=-1)
 
         return policies_ratio_prod
+
+    def _calculate_truncated_density(self, density):
+        if self._truncate:
+            density = tf.tanh(density / self._b) * self._b
+
+        return density
 
     def _calculate_truncated_weights(self, density, priorities):
         weights = density / tf.reshape(priorities, (-1, 1))

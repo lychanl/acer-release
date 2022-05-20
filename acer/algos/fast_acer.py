@@ -29,11 +29,36 @@ BUFFERS = {
 DATA_FIELDS = ('lengths', 'obs', 'obs_next', 'actions', 'policies', 'rewards', 'dones', 'priorities')
 
 
+def print_batch(batch):
+    if batch is None:
+        return
+
+    def print_el(el):
+        if len(np.shape(el)) == 0:
+            if isinstance(el, float) or isinstance(el, np.ndarray) and el.dtype == np.float32:
+                return f'{el:.2e}'
+            return str(el)
+        else:
+            return f"[{','.join(map(print_el, el)) if np.shape(el)[0] < 10 else ','.join(map(print_el, el[:10])) + '...'}]"
+
+    keys = []
+    vals = []
+    for k, v in batch.items():
+        keys.append(k)
+        vals.append(v.numpy())
+    
+    print(*keys, sep='\t')
+
+    for row in zip(*vals):
+        print(*map(print_el, row), sep='\t')
+
+
 class FastACER(BaseACERAgent):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Optional[Tuple[int]], b: float = 3, no_truncate: bool = True,
-                 update_blocks=1, buffer_type='simple', log_values=(), log_memory_values=(), *args, **kwargs):
+                 update_blocks=1, buffer_type='simple', log_values=(), log_memory_values=(),
+                 nan_guard=False, *args, **kwargs):
         """BaseActor-Critic with Experience Replay
 
         TODO: finish docstrings
@@ -78,6 +103,9 @@ class FastACER(BaseACERAgent):
 
         self._log_values = prepare_log_values(log_values)
         self._log_memory_values = prepare_log_values(log_memory_values)
+        self._nan_guard = nan_guard
+        self._nan_log_prev_mem_batch = None
+        self._nan_log_prev_batch = None
 
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
 
@@ -91,6 +119,10 @@ class FastACER(BaseACERAgent):
             "mask": "base.mask",
             "dones": "dones",
             "n": "memory_params.n"
+        })
+        self.register_method('density_weighted_td', self._calculate_weighted_td, {
+            "td": "base.td",
+            "weights": "actor.truncated_density",
         })
         self.register_method('weighted_td', self._calculate_weighted_td, {
             "td": "base.td",
@@ -173,12 +205,28 @@ class FastACER(BaseACERAgent):
                     data = {f: d for f, d in zip(self._memory_call_list_data, batch)}
                     priorities = self._calculate_memory_update(data)
                     self._memory.update_block(priorities.numpy())
+                    if self._nan_guard:
+                        if not np.isfinite(priorities.numpy()).all():
+                            print('NaN on memory update')
+                            print('Last mem batch:')
+                            print_batch(self._nan_log_prev_mem_batch)
+                            print('Last batch:')
+                            print_batch(self._nan_log_prev_batch)
+                        self._nan_log_prev_mem_batch = data
 
             experience_replay_iterations = min([round(self._c0 * self._time_step), self._c])
             
             for batch in self._data_loader.take(experience_replay_iterations):
                 data = {f: d for f, d in zip(self._call_list_data, batch)}
                 self._learn_from_experience_batch(data)
+                if self._nan_guard:
+                    if not np.isfinite(self._actor.act_deterministic(data['obs']).numpy()).all():
+                        print('NaN on learn step')
+                        print('Last mem batch:')
+                        print_batch(self._nan_log_prev_mem_batch)
+                        print('Last batch:')
+                        print_batch(self._nan_log_prev_batch)
+                    self._nan_log_prev_batch = data
     
     @tf.function(experimental_relax_shapes=True)
     def _calculate_memory_update(self, data):
