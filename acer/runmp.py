@@ -49,7 +49,8 @@ class RunGroup:
             
 
 class Remote:
-    def __init__(self, server, username, key, max_procs, python, loc) -> None:
+    def __init__(self, name, server, username, key, max_procs, python, loc) -> None:
+        self.name = name
         self.server = server
         self.max_procs = max_procs
         self.python = python
@@ -58,7 +59,7 @@ class Remote:
         self.key = key
 
     def __str__(self) -> str:
-        return self.server
+        return self.name
 
 
 class Run:
@@ -374,6 +375,7 @@ def load_remotes(remote):
         raw = json.load(remote_list)
 
     return {r: r.max_procs for r in [Remote(
+        spec['name'],
         spec['server'],
         spec['username'],
         spec['key'],
@@ -392,6 +394,7 @@ def main():
     parser.add_argument('--repeats', default=1, type=int)
     parser.add_argument('--max_procs', default=1, type=int)
     parser.add_argument('--remote', type=str)
+    parser.add_argument('--limit_remote', nargs='+', default=[], type=str)
     parser.add_argument('--log_period', type=int, default=1000)
 
     args, params = parser.parse_known_args()
@@ -404,7 +407,7 @@ def main():
     splitted_params = split_run_params(args.optim, args.optim_flag)
 
     if args.remote:
-        resources = load_remotes(args.remote)
+        resources = {k: v for k, v in load_remotes(args.remote) if not args.limit or k.name in args.limit}
     elif args.gpus:
         resources = {
             gpu: args.max_procs // len(args.gpus) for gpu in args.gpus
