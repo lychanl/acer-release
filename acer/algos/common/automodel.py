@@ -41,8 +41,13 @@ class AutoModel:
             changed = False
 
             for method in to_call:
-                fun, args = self._get_method(method)
+                component, fun, args = self._get_method(method)
                 args_ready = True
+
+                args = {
+                    arg: source.replace('self.',  f'{component}.') if source.startswith('self.') else source
+                    for arg, source in args.items()
+                }
 
                 for arg in args.values():
                     if arg in data:
@@ -79,7 +84,7 @@ class AutoModel:
         if method_name not in componenet.methods:
             raise ValueError(f"Missing method {method_name} in {component_name}")
 
-        return componenet.methods[method_name]
+        return (component_name,) + componenet.methods[method_name]
 
     def call_list(self, list: Iterable[Tuple[str, Callable, Dict[str, str]]], data: Dict[str, Any], preprocessing: Dict[str, Callable]):
         data_dict = {

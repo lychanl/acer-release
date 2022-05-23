@@ -17,7 +17,7 @@ from utils import calculate_gamma, getDTChangedEnvName
 
 from algos.acerac import AUTOCORRELATED_ACTORS
 from algos.exploracer import DIFF_FUNCTIONS
-from algos.fast_acer import BUFFERS
+from algos.fast_acer import BUFFERS, ACTORS, CRITICS
 
 parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
 parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer", choices=ALGOS)
@@ -105,7 +105,15 @@ parser.add_argument('--buffer.alpha', type=float, help='Buffer priority smoothin
 parser.add_argument('--buffer.beta', type=float, help='Generic buffer priority parameter', default=0)
 parser.add_argument('--buffer.n', type=int, help='N parameter for fast acerac', default=2)
 parser.add_argument('--buffer.n.adapt', type=str, help='N parameter adaptation')
+parser.add_argument('--critic_type', type=str, choices=CRITICS.keys())
+parser.add_argument('--critic.variance_diff', action='store_true', help='If the variance or just E[R^2] is to be estimated')
+parser.add_argument('--actor_type', type=str, choices=ACTORS.keys())
 parser.add_argument('--actor.entropy_coeff', type=float, help='entropy bonus coefficient')
+parser.add_argument('--actor.std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
+                                              '0.4 * actions_bound is set.', required=False, default=None)
+parser.add_argument('--actor.alpha', type=float)
+parser.add_argument('--actor.eps', type=float)
+parser.add_argument('--actor.scale_td', action='store_true', help='If TD is to be scaled in StdClippedActor')
 parser.add_argument('--reverse', action='store_true',
                     help='Reverse param for exploracer')
 parser.add_argument('--time_coeff', type=str, help='type of time-based coefficient for sigma learning', default="linear", choices=("none", "linear", "exp", "power"))
@@ -143,8 +151,13 @@ parser.add_argument('--nan_guard', help='Force logging every n timesteps instead
 def main():
     args = parser.parse_args()
     
-    if args.algo not in ('acer', 'acerac', 'qacer', 'exploracer', 'qacerac', 'quantile_acer') and '--n' in argv:
-        raise ArgumentError("Use --buffer.n instead of --n!")
+    if args.algo not in ('acer', 'acerac', 'qacer', 'exploracer', 'qacerac', 'quantile_acer'):
+        for old, new in [
+            ('--n', '--buffer.n'),
+            ('--std', '--actor.std')
+        ]:
+            if old in argv:
+                raise ArgumentError(f"Use {new} instead of {old}!")
 
     cmd_parameters, unknown_args = parser.parse_known_args()
     if len(unknown_args):

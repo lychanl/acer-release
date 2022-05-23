@@ -80,6 +80,10 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
 
         self.optimizer.apply_gradients(gradients)
 
+    def init_optimizer(self, *args, **kwargs):
+        self.optimizer = tf.keras.optimizers.Adam(*args, **kwargs)
+        return self.optimizer
+
 class BaseActor(BaseModel):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
@@ -377,7 +381,7 @@ class CategoricalActor(BaseActor):
 class GaussianActor(BaseActor):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 beta_penalty: float, actions_bound: float, std: float = None, *args, **kwargs):
+                 beta_penalty: float, actions_bound: float = None, std: float = None, *args, **kwargs):
         """BaseActor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
 
         TODO: introduce [a, b] intervals as allowed actions bounds
@@ -387,11 +391,11 @@ class GaussianActor(BaseActor):
             layers: list of hidden layer sizes
             beta_penalty: penalty for too confident actions coefficient
             actions_bound: upper (lower == '-actions_bound') bound for allowed actions,
-             required in case of continuous actions
+             required in case of continuous actions, deprecated (now taken as actions_space.high)
         """
         super().__init__(observations_space, actions_space, layers, beta_penalty, *args, **kwargs)
 
-        self._actions_bound = actions_bound
+        self._actions_bound = actions_space.high
         self._k = actions_space.shape[0]
 
         if std:
@@ -402,7 +406,7 @@ class GaussianActor(BaseActor):
             )
         else:
             self.log_std = tf.constant(
-                tf.math.log(0.4 * actions_bound),
+                tf.math.log(0.4 * self._actions_bound),
                 name="actor_std",
             )
 
@@ -541,14 +545,14 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
 
         self._init_data_loader(additional_buffer_types)
 
-        self._actor_optimizer = self._actor.optimizer = tf.keras.optimizers.Adam(
+        self._actor_optimizer = self._actor.init_optimizer(
             lr=actor_lr,
             beta_1=actor_adam_beta1,
             beta_2=actor_adam_beta2,
             epsilon=actor_adam_epsilon
         )
 
-        self._critic_optimizer = self._critic.optimizer = tf.keras.optimizers.Adam(
+        self._critic_optimizer = self._critic.init_optimizer(
             lr=critic_lr,
             beta_1=critic_adam_beta1,
             beta_2=critic_adam_beta2,

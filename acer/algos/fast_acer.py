@@ -17,9 +17,22 @@ import tensorflow as tf
 import numpy as np
 
 from algos.base import BaseACERAgent, BaseActor, CategoricalActor, GaussianActor, Critic
+from algos.actors import StdClippedCategoricalActor, StdClippedGaussianActor
+from algos.critics import VarianceCritic
 from replay_buffer import BufferFieldSpec, VecReplayBuffer, MultiReplayBuffer
 from prioritized_buffer import MultiPrioritizedReplayBuffer
 
+
+ACTORS = {
+    'simple': {True: CategoricalActor, False: GaussianActor},
+    'std_clipped': {True: StdClippedCategoricalActor, False: StdClippedGaussianActor}
+}
+
+
+CRITICS = {
+    'simple': Critic,
+    'variance': VarianceCritic
+}
 
 BUFFERS = {
     'simple': (MultiReplayBuffer, {'buffer_class': VecReplayBuffer}),
@@ -58,11 +71,13 @@ class FastACER(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Optional[Tuple[int]], b: float = 3, no_truncate: bool = True,
                  update_blocks=1, buffer_type='simple', log_values=(), log_memory_values=(),
-                 nan_guard=False, *args, **kwargs):
+                 actor_type='simple', critic_type='simple', nan_guard=False, *args, **kwargs):
         """BaseActor-Critic with Experience Replay
 
         TODO: finish docstrings
         """
+        self._actor_type = actor_type
+        self._critic_type = critic_type
 
         self._buffer_args = {}
         for key, value in kwargs.items():
@@ -73,6 +88,11 @@ class FastACER(BaseACERAgent):
         for key, value in kwargs.items():
             if key.startswith('actor.'):
                 self._actor_args[key[len('actor.'):]] = value
+
+        self._critic_args = {}
+        for key, value in kwargs.items():
+            if key.startswith('critic.'):
+                self._critic_args[key[len('critic.'):]] = value
 
         self._update_blocks = update_blocks
         self._buffer_type=buffer_type
@@ -129,6 +149,7 @@ class FastACER(BaseACERAgent):
             "weights": "actor.sample_weights",
         })
         self.register_method('time_step', lambda: self._tf_time_step, {})
+        self.register_method('gamma', lambda: self._gamma, {})
 
         self.register_component('actor', self._actor)
         self.register_component('critic', self._critic)
@@ -146,18 +167,11 @@ class FastACER(BaseACERAgent):
                 replay_gen, dtypes).prefetch(1)
 
     def _init_actor(self) -> BaseActor:
-        if self._is_discrete:
-            return CategoricalActor(
-                self._observations_space, self._actions_space, self._actor_layers,
-                self._actor_beta_penalty, self._tf_time_step, truncate=self._truncate, b=self._b,
-                **self._actor_args
-            )
-        else:
-            return GaussianActor(
-                self._observations_space, self._actions_space, self._actor_layers,
-                self._actor_beta_penalty, self._actions_bound, self._std, self._tf_time_step, truncate=self._truncate, b=self._b,
-                **self._actor_args
-            )
+        return ACTORS[self._actor_type][self._is_discrete](
+            self._observations_space, self._actions_space, self._actor_layers,
+            self._actor_beta_penalty, tf_time_step=self._tf_time_step, truncate=self._truncate, b=self._b,
+            **self._actor_args
+        )
 
     def _init_data_loader(self, _) -> None:
         gen, dtypes = self._get_experience_replay_generator(fields=self._call_list_data)
@@ -188,7 +202,7 @@ class FastACER(BaseACERAgent):
         # if self._is_obs_discrete:
         #     return TabularCritic(self._observations_space, None, self._tf_time_step)
         # else:
-        return Critic(self._observations_space, self._critic_layers, self._tf_time_step)
+        return CRITICS[self._critic_type](self._observations_space, self._critic_layers, self._tf_time_step, **self._critic_args)
 
     def learn(self):
         """
@@ -260,6 +274,7 @@ class FastACER(BaseACERAgent):
         # TODO make it independant from memory_buffer implementation
         values_with_next = tf.concat([values[:,1:], values_next], axis=1)
 
+        # move next value to the right position 
         next_mask = tf.cast(tf.expand_dims(tf.range(1, n + 1), 0) == tf.expand_dims(lengths, 1), tf.float32)
         values_next = ((1 - next_mask) * values_with_next + next_mask * values_next) * dones_mask
 
