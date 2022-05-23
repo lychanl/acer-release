@@ -407,7 +407,7 @@ def main():
     splitted_params = split_run_params(args.optim, args.optim_flag)
 
     if args.remote:
-        resources = {k: v for k, v in load_remotes(args.remote) if not args.limit or k.name in args.limit}
+        resources = {k: v for k, v in load_remotes(args.remote).items() if not args.limit_remote or k.name in args.limit_remote}
     elif args.gpus:
         resources = {
             gpu: args.max_procs // len(args.gpus) for gpu in args.gpus
