@@ -416,7 +416,7 @@ def main():
         resources = {None: args.max_procs}
     max_procs = sum(resources.values())
 
-    param_names = [par[0] for par in args.optim]
+    param_names = [par[0] for par in args.optim] + args.optim_flag
     run(params, splitted_params, args.repeats, resources, max_procs, args.remote is not None, param_names, args.verbose)
 
 
