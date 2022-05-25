@@ -47,7 +47,6 @@ parser.add_argument('--c', type=int, help='experience replay intensity', require
 parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=1)
 parser.add_argument('--kappa', type=float, help='kappa parameter for qacer and time scaling', default=1.)
 parser.add_argument('--atoms', type=int, help='number of atoms for qacer', default=50)
-parser.add_argument('--alpha', type=float, help='Alpha parameter.', default=0.5)
 parser.add_argument('--rho', type=float, help='Rho parameter.', default=1)
 parser.add_argument('--std_loss_mult', type=float, help='std loss to actor loss ration', default=0.1)
 parser.add_argument('--std_diff_fun', type=str, help='Distribution difference function.',
@@ -95,6 +94,9 @@ parser.add_argument('--gradient_norm_median_threshold', help='Number of medians 
                     type=float, default=4)
 parser.add_argument('--use_v', action='store_true',
                     help='If true then value instead of noise-value will be used (ACERAC only)')
+parser.add_argument('--alpha', type=float, help='Alpha parameter.')
+parser.add_argument('--eps', type=float)
+parser.add_argument('--scale_td', action='store_true', help='If TD is to be scaled in StdClippedACER')
 parser.add_argument('--no_truncate', action='store_true', help='Experimental (FastACER only)')
 parser.add_argument('--buffer_type', type=str, choices=BUFFERS.keys(), default='simple')
 parser.add_argument('--buffer.levels', type=int, help='Buffer tree levels (prioritized replay)', default=2)

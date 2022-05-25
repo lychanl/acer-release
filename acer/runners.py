@@ -14,6 +14,7 @@ from gym import wrappers
 
 from algos.acer import ACER
 from algos.fast_acer import FastACER
+from algos.std_clipped_acer import StdClippedACER
 from algos.acerac import ACERAC
 from algos.base import BaseACERAgent
 from algos.quantile_acer import QACER
@@ -26,6 +27,7 @@ from utils import is_atari, getPossiblyDTChangedEnvBuilder
 ALGOS = {
     'acer': ACER,
     'fastacer': FastACER,
+    'stdclippedacer': StdClippedACER,
     'acerac': ACERAC,
     'qacer': QACER,
     'qacerac': QACERAC,
