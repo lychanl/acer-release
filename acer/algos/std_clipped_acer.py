@@ -6,7 +6,7 @@ import tensorflow as tf
 
 class StdClippedACER(FastACER):
     def __init__(self, *args, alpha=1, eps=0, scale_td=False, **kwargs) -> None:
-        super(FastACER, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self._alpha = alpha
         self._eps = eps
         self._scale_td = scale_td
