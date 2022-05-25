@@ -44,7 +44,7 @@ class Refinder:
 
 
     def check_param(self, params, param, value):
-        if '.' in param:
+        if '.' in param and param not in params:
             parts = param.split('.')
             if parts[0] in params:
                 return self.check_param(params[parts[0]], '.'.join(parts[1:]), value)

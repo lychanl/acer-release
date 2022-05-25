@@ -96,7 +96,7 @@ class Run:
         self.started = True
         self.started_t = datetime.datetime.now()
 
-        time.sleep(5)
+        time.sleep(1)
 
     def refresh(self, verbose):
         if not self.alive():
