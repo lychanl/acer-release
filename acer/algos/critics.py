@@ -19,7 +19,7 @@ class VarianceCritic(AutoModelComponent):
         self.register_method('value2', self.value2, {'observations': 'obs'})
         self.register_method('value2_next', self.value2, {'observations': 'obs_next'})
 
-        self.register_method('std', self.std, {'value': 'self.value', 'value2': 'self.value2'})
+        self.register_method('std', self.std, {'value2': 'self.value2'})
 
         self.register_method('td2', self._calculate_td2, {
             "td": "base.td",

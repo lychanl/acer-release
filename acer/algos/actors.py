@@ -5,8 +5,6 @@ import tensorflow as tf
 
 class StdClippedBaseActor:
     def __init__(self, *args, alpha=1, eps=0, scale_td=False, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-
         self._alpha = alpha
         self._eps = eps
         self._scale_td = scale_td
@@ -23,8 +21,9 @@ class StdClippedBaseActor:
             "std": "critic.std"
         })
 
+    @tf.function
     def _calculate_weighted_clipped_td(self, td, weights, std):
-        std = tf.maximum(std, self._eps)
+        std = tf.maximum(std, self._eps)[:,:,0]
         clipped = tf.clip_by_value(td, -self._alpha * std, self._alpha * std)
         if self._scale_td:
             clipped = clipped / std
@@ -33,9 +32,13 @@ class StdClippedBaseActor:
 
 
 class StdClippedCategoricalActor(CategoricalActor, StdClippedBaseActor):
-    pass
+    def __init__(self, *args, **kwargs) -> None:
+        CategoricalActor.__init__(self, *args, **kwargs)
+        StdClippedBaseActor.__init__(self, *args, **kwargs)
 
 
 class StdClippedGaussianActor(GaussianActor, StdClippedBaseActor):
-    pass
+    def __init__(self, *args, **kwargs) -> None:
+        GaussianActor.__init__(self, *args, **kwargs)
+        StdClippedBaseActor.__init__(self, *args, **kwargs)
 

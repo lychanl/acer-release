@@ -129,7 +129,7 @@ class FastACER(BaseACERAgent):
 
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
 
-    def _init_automodel(self):
+    def _init_automodel(self, skip=()):
         self.register_method("mask", self._calculate_mask, {"lengths": "lengths", "n": "memory_params.n"})
         self.register_method('td', self._calculate_td, {
             "values": "critic.value",
@@ -157,6 +157,8 @@ class FastACER(BaseACERAgent):
         self.register_component('memory', self._memory)
         self.register_component('base', self)
 
+        self._init_automodel_overrides()
+
         self._call_list, self._call_list_data = self.prepare_default_call_list(DATA_FIELDS)
 
         if self._memory.priority:
@@ -165,6 +167,9 @@ class FastACER(BaseACERAgent):
             replay_gen, dtypes = self._get_experience_replay_generator(seq=True, fields=self._memory_call_list_data)
             self._buffer_update_loader = tf.data.Dataset.from_generator(
                 replay_gen, dtypes).prefetch(1)
+
+    def _init_automodel_overrides(self) -> None:
+        pass
 
     def _init_actor(self) -> BaseActor:
         return ACTORS[self._actor_type][self._is_discrete](
