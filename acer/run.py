@@ -115,6 +115,8 @@ parser.add_argument('--actor.std', type=float, help='value on diagonal of Normal
                                               '0.4 * actions_bound is set.', required=False, default=None)
 parser.add_argument('--actor.alpha', type=float)
 parser.add_argument('--actor.eps', type=float)
+parser.add_argument('--actor.eta', type=float)
+parser.add_argument('--actor.kappa', type=float)
 parser.add_argument('--actor.scale_td', action='store_true', help='If TD is to be scaled in StdClippedActor')
 parser.add_argument('--reverse', action='store_true',
                     help='Reverse param for exploracer')

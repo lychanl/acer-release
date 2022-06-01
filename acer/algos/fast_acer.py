@@ -17,7 +17,10 @@ import tensorflow as tf
 import numpy as np
 
 from algos.base import BaseACERAgent, BaseActor, CategoricalActor, GaussianActor, Critic
-from algos.actors import StdClippedCategoricalActor, StdClippedGaussianActor
+from algos.actors import (
+    StdClippedCategoricalActor, StdClippedGaussianActor,
+    TD2RegularizedCategoricalActor, TD2RegularizedGaussianActor
+)
 from algos.critics import VarianceCritic
 from replay_buffer import BufferFieldSpec, VecReplayBuffer, MultiReplayBuffer
 from prioritized_buffer import MultiPrioritizedReplayBuffer
@@ -25,7 +28,8 @@ from prioritized_buffer import MultiPrioritizedReplayBuffer
 
 ACTORS = {
     'simple': {True: CategoricalActor, False: GaussianActor},
-    'std_clipped': {True: StdClippedCategoricalActor, False: StdClippedGaussianActor}
+    'std_clipped': {True: StdClippedCategoricalActor, False: StdClippedGaussianActor},
+    'td2_regularized': {True: TD2RegularizedCategoricalActor, False: TD2RegularizedGaussianActor}
 }
 
 

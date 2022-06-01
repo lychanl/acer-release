@@ -1,3 +1,4 @@
+import functools
 from algos.base import GaussianActor, CategoricalActor
 
 import tensorflow as tf
@@ -42,3 +43,51 @@ class StdClippedGaussianActor(GaussianActor, StdClippedBaseActor):
         GaussianActor.__init__(self, *args, **kwargs)
         StdClippedBaseActor.__init__(self, *args, **kwargs)
 
+
+class TD2RegularizedActor:
+    def __init__(self, *args, eta=0.1, kappa=1, **kwargs) -> None:
+        self._eta = tf.Variable(eta)
+        self._kappa = kappa
+
+        self.register_method('optimize', self.optimize, {
+            'observations': 'base.first_obs',
+            'actions': 'base.first_actions',
+            'd': 'self.regularized_d'
+        })
+
+        self.register_method('regularized_d', self._calculate_regularized_d, {
+            'd': 'base.weighted_td',
+            'td': 'base.td',
+            'weights': 'self.sample_weights',
+            'eta': 'self.eta'
+        })
+
+        self.register_method('eta', self.eta, {})
+
+        self.register_method('eta_decay', self._eta_decay, {
+            'eta': 'self.eta'
+        })
+
+        self.targets.append('eta_decay')
+
+    def _calculate_regularized_d(self, d, td, weights, eta):
+        g = td ** 2 * weights
+        return d - eta * g
+
+    def _eta_decay(self, eta):
+        self._eta.assign(eta * self._kappa)
+
+    def eta(self):
+        return self._eta
+
+
+class TD2RegularizedCategoricalActor(CategoricalActor, TD2RegularizedActor):
+    def __init__(self, *args, **kwargs) -> None:
+        CategoricalActor.__init__(self, *args, **kwargs)
+        TD2RegularizedActor.__init__(self, *args, **kwargs)
+
+
+class TD2RegularizedGaussianActor(GaussianActor, TD2RegularizedActor):
+    def __init__(self, *args, **kwargs) -> None:
+        GaussianActor.__init__(self, *args, **kwargs)
+        TD2RegularizedActor.__init__(self, *args, **kwargs)
