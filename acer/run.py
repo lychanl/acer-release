@@ -118,6 +118,7 @@ parser.add_argument('--actor.eps', type=float)
 parser.add_argument('--actor.eta', type=float)
 parser.add_argument('--actor.kappa', type=float)
 parser.add_argument('--actor.scale_td', action='store_true', help='If TD is to be scaled in StdClippedActor')
+parser.add_argument('--actor.clip_weighted', action='store_true', help='clipping is to be performed on weighted td in StdClippedActor')
 parser.add_argument('--reverse', action='store_true',
                     help='Reverse param for exploracer')
 parser.add_argument('--time_coeff', type=str, help='type of time-based coefficient for sigma learning', default="linear", choices=("none", "linear", "exp", "power"))
