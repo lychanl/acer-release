@@ -19,7 +19,8 @@ import numpy as np
 from algos.base import BaseACERAgent, BaseActor, CategoricalActor, GaussianActor, Critic
 from algos.actors import (
     StdClippedCategoricalActor, StdClippedGaussianActor,
-    TD2RegularizedCategoricalActor, TD2RegularizedGaussianActor
+    TD2RegularizedCategoricalActor, TD2RegularizedGaussianActor,
+    TD2RegStdClippedCategoricalActor, TD2RegStdClippedGaussianActor
 )
 from algos.critics import VarianceCritic
 from replay_buffer import BufferFieldSpec, VecReplayBuffer, MultiReplayBuffer
@@ -29,7 +30,8 @@ from prioritized_buffer import MultiPrioritizedReplayBuffer
 ACTORS = {
     'simple': {True: CategoricalActor, False: GaussianActor},
     'std_clipped': {True: StdClippedCategoricalActor, False: StdClippedGaussianActor},
-    'td2_regularized': {True: TD2RegularizedCategoricalActor, False: TD2RegularizedGaussianActor}
+    'td2_regularized': {True: TD2RegularizedCategoricalActor, False: TD2RegularizedGaussianActor},
+    'td2_reg_std_clipped': {True: TD2RegStdClippedCategoricalActor, False: TD2RegStdClippedGaussianActor}
 }
 
 
