@@ -105,9 +105,10 @@ class TD2RegularizedGaussianActor(GaussianActor, TD2RegularizedActor):
         TD2RegularizedActor.__init__(self, *args, **kwargs)
 
 class TD2RegStdClippedBaseActor(TD2RegularizedActor):
-    def __init__(self, *args, alpha=1, eps=0, eta=0.1, kappa=1, **kwargs) -> None:
+    def __init__(self, *args, alpha=1, eps=0, eta=0.1, kappa=1, scale2_td2, **kwargs) -> None:
         self._alpha = alpha
         self._eps = eps
+        self._scale2_td2 = scale2_td2
         super().__init__(*args, eta=eta, kappa=kappa, **kwargs)
 
         self.register_method('optimize', self.optimize, {
@@ -129,9 +130,17 @@ class TD2RegStdClippedBaseActor(TD2RegularizedActor):
         std = tf.maximum(std, self._eps)[:,:,0]
         clip = self._alpha * std
         clipped = tf.clip_by_value(td * weights, -clip, clip)
-        clipped2 = tf.clip_by_value(td ** 2 * weights, -clip ** 2, clip)
+        clipped2 = tf.clip_by_value(td ** 2 * weights, -clip ** 2, clip ** 2)
+
+        clipped = clipped / std
+
+        if self._scale2_td2:
+            clipped2 = clipped2 / std**2
+        else:
+            clipped2 = clipped2 / std
 
         return tf.stop_gradient(clipped - eta * clipped2)
+
 
 class TD2RegStdClippedCategoricalActor(CategoricalActor, TD2RegStdClippedBaseActor):
     def __init__(self, *args, **kwargs) -> None:

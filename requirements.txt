@@ -4,3 +4,4 @@ pybullet==2.6.6
 tensorflow-gpu==2.2.0
 tensorflow-probability==0.10.0
 numpy==1.17.3
+protobuf<=3.20.1
