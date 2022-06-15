@@ -5,14 +5,22 @@ import numpy as np
 import tensorflow as tf
 
 
+VARIANCE_FUNS = {
+    'identity': tf.identity,
+    'exp': tf.exp
+}
+
+
 class VarianceCritic(AutoModelComponent):
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, variance_fun='identity', **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._value_critic = Critic(*args, **kwargs)
         self._value2_critic = Critic(*args, **kwargs)
 
         self.value = self._value_critic.value
         self.value2 = self._value2_critic.value
+
+        self.variance_fun = VARIANCE_FUNS[variance_fun]
 
         self.register_method('value', self.value, {'observations': 'obs'})
         self.register_method('value_next', self.value, {'observations': 'obs_next'})
@@ -41,12 +49,12 @@ class VarianceCritic(AutoModelComponent):
 
     @tf.function
     def std(self, value2):
-        variance = value2
+        variance = self.variance_fun(value2)
         return tf.sqrt(tf.maximum(variance, 0))
 
     @tf.function
     def _calculate_td2(self, td, values2):
-        td2 = td ** 2 - values2[:,:1]
+        td2 = td ** 2 - self.variance_fun(values2[:,:1])
 
         return td2
 
@@ -55,18 +63,18 @@ class VarianceCritic(AutoModelComponent):
         return tf.stop_gradient(td2 * weights)
 
     @tf.function
-    def loss(self, critic, obs, d) -> tf.Tensor:
-        value = critic.value(obs)
+    def loss(self, critic, fun, obs, d) -> tf.Tensor:
+        value = fun(critic.value(obs))
         return tf.reduce_mean(-tf.math.multiply(value, d))
 
     @tf.function
     def optimize(self, obs, d, d2):
-        for critic, cd, in [
-            (self._value_critic, d),
-            (self._value2_critic, d2)
+        for critic, fun, cd, in [
+            (self._value_critic, tf.identity, d),
+            (self._value2_critic, self.variance_fun, d2)
         ]:
             with tf.GradientTape() as tape:
-                loss_v = self.loss(critic, obs, cd)
+                loss_v = self.loss(critic, fun, obs, cd)
             grads = tape.gradient(loss_v, critic.trainable_variables)
             gradients = zip(grads, critic.trainable_variables)
 

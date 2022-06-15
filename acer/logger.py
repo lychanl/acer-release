@@ -93,6 +93,10 @@ class ConsoleLogger(ABC):
     def flush(self, step):
         ...
 
+    @abstractmethod
+    def log_values(self, values):
+        ...
+
 
 class DefaultConsoleLogger(ConsoleLogger):
     def __init__(self) -> None:
@@ -125,6 +129,9 @@ class DefaultConsoleLogger(ConsoleLogger):
     def flush(self, step):
         pass
 
+    def log_values(self, values):
+        logging.info(f'Logged values to file: {values}')
+
 
 class PeriodicConsoleLogger(ConsoleLogger):
     def __init__(self, n) -> None:
@@ -135,6 +142,7 @@ class PeriodicConsoleLogger(ConsoleLogger):
         self._infos = []
         self._episodes_finished = []
         self._evaluations = []
+        self._values_logged = []
 
     def info(self, message):
         self._infos.append(message)
@@ -160,11 +168,14 @@ class PeriodicConsoleLogger(ConsoleLogger):
             print(f'Episodes: {"; ".join(" ".join([str(s), str(e), str(r)]) for s, e, r in self._episodes_finished)}')
         if self._evaluations:
             print(f'Evaluations: {"; ".join(" ".join([str(r) for r in rewards[1]]) for rewards in self._evaluations)}')
+        if self._values_logged:
+            print(f'Values logged: {";".join(self._values_logged)}')
         sys.stdout.flush()
 
         self._infos = []
         self._episodes_finished = []
         self._evaluations = []
+        self._values_logged = []
 
     def error(self):
         exc_type, exc_value, exc_tb = sys.exc_info()
@@ -177,4 +188,7 @@ class PeriodicConsoleLogger(ConsoleLogger):
 
     def flush(self, step):
         self._print(step)
+
+    def log_values(self, values):
+        self._values_logged.append(values)
 

@@ -18,6 +18,7 @@ from utils import calculate_gamma, getDTChangedEnvName
 from algos.acerac import AUTOCORRELATED_ACTORS
 from algos.exploracer import DIFF_FUNCTIONS
 from algos.fast_acer import BUFFERS, ACTORS, CRITICS
+from algos.critics import VARIANCE_FUNS
 
 parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
 parser.add_argument('--algo', type=str, help='Algorithm to be used', default="acer", choices=ALGOS)
@@ -108,7 +109,8 @@ parser.add_argument('--buffer.beta', type=float, help='Generic buffer priority p
 parser.add_argument('--buffer.n', type=int, help='N parameter for fast acerac', default=2)
 parser.add_argument('--buffer.n.adapt', type=str, help='N parameter adaptation')
 parser.add_argument('--critic_type', type=str, choices=CRITICS.keys())
-parser.add_argument('--critic.variance_diff', action='store_true', help='If the variance or just E[R^2] is to be estimated')
+# parser.add_argument('--critic.variance_diff', action='store_true', help='If the variance or just E[R^2] is to be estimated')
+parser.add_argument('--critic.variance_fun', type=str, choices=VARIANCE_FUNS.keys(), help='Function to postprocess the variance')
 parser.add_argument('--actor_type', type=str, choices=ACTORS.keys())
 parser.add_argument('--actor.entropy_coeff', type=float, help='entropy bonus coefficient')
 parser.add_argument('--actor.std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
@@ -138,6 +140,8 @@ parser.add_argument('--no_checkpoint', help='Disable checkpoint saving', action=
 parser.add_argument('--no_tensorboard', help='Disable tensorboard logs', action='store_true')
 parser.add_argument('--log_values', help='Log values during training', type=str, nargs='*')
 parser.add_argument('--log_memory_values', help='Log values during memory update', type=str, nargs='*')
+parser.add_argument('--log_to_file_values', help='Log values during training to a file every n steps, averaged over these steps', type=str, nargs='*')
+parser.add_argument('--log_to_file_steps', help='Log values during training to a file every n steps, averaged over these steps', type=int, default=1000)
 parser.add_argument('--experiment_name', type=str, help='Name of the current experiment', default='')
 parser.add_argument('--save_video_on_kill', action='store_true',
                     help='True if SIGINT signal should trigger registration of the video')
@@ -186,6 +190,8 @@ def main():
     use_cpu = parameters.pop('use_cpu')
     synchronous = parameters.pop('synchronous')
     env_name = cmd_parameters.env_name
+    log_to_file_values = cmd_parameters.log_to_file_values
+    log_to_file_steps = parameters.pop('log_to_file_steps')
     dump = args.dump or ()
 
     timesteps_increase = parameters.pop('timesteps_increase', None)
@@ -231,7 +237,9 @@ def main():
         record_time_steps=record_time_steps,
         n_step=n_step,
         dump=dump,
-        periodic_log=args.force_periodic_log
+        periodic_log=args.force_periodic_log,
+        log_to_file_values=log_to_file_values,
+        log_to_file_steps=log_to_file_steps,
     )
 
     def handle_sigint(sig, frame):

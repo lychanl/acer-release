@@ -73,7 +73,7 @@ class Runner:
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
                  record_end: bool = True, experiment_name: str = None, asynchronous: bool = True,
                  log_tensorboard: bool = True, do_checkpoint: bool = True, record_time_steps: int = None,
-                 periodic_log: int = -1, dump=()):
+                 periodic_log: int = -1, dump=(), log_to_file_values=(), log_to_file_steps=1000):
         """Trains and evaluates the agent.
 
         Args:
@@ -96,6 +96,7 @@ class Runner:
         self._done_episodes = 0
         self._next_evaluation_timestamp = 0
         self._next_record_timestamp = 0
+        self._next_log_values_timestamp = log_to_file_steps  # don't log at the beginning
         self._n_envs = num_parallel_envs
         self._evaluate_time_steps_interval = evaluate_time_steps_interval
         self._n_step = n_step
@@ -104,6 +105,9 @@ class Runner:
         self._log_tensorboard = log_tensorboard
         self._do_checkpoint = do_checkpoint
         self._env_name = environment_name
+
+        self._log_to_file_values = log_to_file_values
+        self._log_to_file_steps = log_to_file_steps
 
         self._record_end = record_end
         self._record_time_steps = record_time_steps
@@ -130,6 +134,10 @@ class Runner:
             self._log_dir / 'results.csv',
             keys=['time_step', 'eval_return_mean', 'eval_std_mean']
         )
+        if self._log_to_file_values:
+            self._values_csv_logger = CSVLogger(self._log_dir / 'values.csv', keys=['time_step'] + list(self._log_to_file_values))
+        else:
+            self._values_csv_logger = None
         if periodic_log > 0:
             self._logger = PeriodicConsoleLogger(periodic_log)
         else:
@@ -168,6 +176,7 @@ class Runner:
         uses policy that is being optimized, not the one used in training (i.e. randomness is turned off)
         """
         try:
+            logged_values = []
             while self._max_time_steps == -1 or self._time_step <= self._max_time_steps:
                 if self._is_time_to_evaluate():
                     self._evaluate()
@@ -175,6 +184,10 @@ class Runner:
                         self._save_results()
                         if self._do_checkpoint:
                             self._save_checkpoint()
+                
+                if self._is_time_to_log_values():
+                    self._log_values(logged_values)
+                    logged_values = []
 
                 if self._is_time_to_record():
                     self.record_video()
@@ -183,7 +196,9 @@ class Runner:
                 experience = self._step()
                 self._agent.save_experience(experience)
                 if self._time_step % self._n_step == 0:
-                    self._agent.learn()
+                    values = self._agent.learn()
+                    if values is not None:
+                        logged_values.append(values)
                 self._elapsed_time_measure += time.time() - start_time
 
                 if self._time_step in self._dump:
@@ -192,6 +207,8 @@ class Runner:
 
             self._logger.flush(self._time_step - 1)
             self._csv_logger.close()
+            if self._values_csv_logger:
+                self._values_csv_logger.close()
             if self._record_end:
                 self.record_video()
         except:
@@ -326,6 +343,23 @@ class Runner:
                 self._time_step
             )
         self._elapsed_time_measure = 0
+
+    def _is_time_to_log_values(self):
+        return self._log_to_file_values and self._time_step >= self._next_log_values_timestamp
+
+    def _log_values(self, values):
+        self._next_log_values_timestamp += self._log_to_file_steps
+
+        if not values:
+            return
+
+        means = np.mean(values, 0)
+        means_dict = {name: value for name, value in zip(self._log_to_file_values, means)}
+        means_dict['time_step'] = self._time_step
+
+        self._values_csv_logger.log_values(means_dict)
+        self._values_csv_logger.dump()
+        self._logger.log_values(means_dict)
 
     def _save_parameters(self, algorithm_parameters: dict):
         with open(str(self._log_dir / 'parameters.json'), 'wt') as f:

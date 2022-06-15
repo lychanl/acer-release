@@ -80,6 +80,8 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
 
         self.optimizer.apply_gradients(gradients)
 
+        return loss
+
     def init_optimizer(self, *args, **kwargs):
         self.optimizer = tf.keras.optimizers.Adam(*args, **kwargs)
         return self.optimizer

@@ -41,7 +41,7 @@ class StdClippedBaseActor:
         if self._scale_td:
             clipped = clipped / std
 
-        return tf.stop_gradient(weighted)
+        return tf.stop_gradient(clipped)
 
 
 class StdClippedCategoricalActor(CategoricalActor, StdClippedBaseActor):
@@ -105,10 +105,11 @@ class TD2RegularizedGaussianActor(GaussianActor, TD2RegularizedActor):
         TD2RegularizedActor.__init__(self, *args, **kwargs)
 
 class TD2RegStdClippedBaseActor(TD2RegularizedActor):
-    def __init__(self, *args, alpha=1, eps=0, eta=0.1, kappa=1, scale2_td2, **kwargs) -> None:
+    def __init__(self, *args, alpha=1, eps=0, eta=0.1, kappa=1, scale2_td2=False, clip_weighted=False, **kwargs) -> None:
         self._alpha = alpha
         self._eps = eps
         self._scale2_td2 = scale2_td2
+        self._clip_weighted = clip_weighted
         super().__init__(*args, eta=eta, kappa=kappa, **kwargs)
 
         self.register_method('optimize', self.optimize, {
@@ -129,8 +130,15 @@ class TD2RegStdClippedBaseActor(TD2RegularizedActor):
     def _calculate_clipped_regularized_weighted_td(self, td, weights, std, eta):
         std = tf.maximum(std, self._eps)[:,:,0]
         clip = self._alpha * std
-        clipped = tf.clip_by_value(td * weights, -clip, clip)
-        clipped2 = tf.clip_by_value(td ** 2 * weights, -clip ** 2, clip ** 2)
+
+        if self._clip_weighted:
+            td = td * weights
+            td2 = td ** 2 * weights
+        else:
+            td2 = td ** 2
+
+        clipped = tf.clip_by_value(td, -clip, clip)
+        clipped2 = tf.clip_by_value(td2, -clip ** 2, clip ** 2)
 
         clipped = clipped / std
 
@@ -139,7 +147,12 @@ class TD2RegStdClippedBaseActor(TD2RegularizedActor):
         else:
             clipped2 = clipped2 / std
 
-        return tf.stop_gradient(clipped - eta * clipped2)
+        regularized = clipped - eta * clipped2
+
+        if self._clip_weighted:
+            return tf.stop_gradient(regularized)
+        else:
+            return tf.stop_gradient(regularized * weights)
 
 
 class TD2RegStdClippedCategoricalActor(CategoricalActor, TD2RegStdClippedBaseActor):

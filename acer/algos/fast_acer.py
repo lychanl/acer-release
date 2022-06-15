@@ -11,6 +11,7 @@ Neural Networks : the Official Journal of the International Neural Network Socie
 Wawrzyński, Paweł. "Real-time reinforcement learning by sequential actor–critics
 and experience replay." Neural Networks 22.10 (2009): 1484-1497.
 """
+from tabnanny import check
 from typing import Optional, List, Union, Dict, Tuple
 import gym
 import tensorflow as tf
@@ -77,7 +78,8 @@ class FastACER(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Optional[Tuple[int]], b: float = 3, no_truncate: bool = True,
                  update_blocks=1, buffer_type='simple', log_values=(), log_memory_values=(),
-                 actor_type='simple', critic_type='simple', nan_guard=False, *args, **kwargs):
+                 actor_type='simple', critic_type='simple', nan_guard=False, log_to_file_values=(),
+                 *args, **kwargs):
         """BaseActor-Critic with Experience Replay
 
         TODO: finish docstrings
@@ -106,6 +108,8 @@ class FastACER(BaseACERAgent):
         self._b = b
         self._truncate = not no_truncate
 
+        super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
+
         self.PREPROCESSING = {
             'obs': self._process_observations,
             'obs_next': self._process_observations,
@@ -127,13 +131,22 @@ class FastACER(BaseACERAgent):
                 target_list.append((log_value, val, gather))
             return target_list
 
+        def check_log_values(log_values, call_list_data, call_list, where=""):
+            for _, value, _ in log_values:
+                assert value in call_list_data or value in [n for n, _, _ in call_list],\
+                    f'Error: {value} not calculated {where}'
+
+
         self._log_values = prepare_log_values(log_values)
         self._log_memory_values = prepare_log_values(log_memory_values)
+        self._log_to_file_values = prepare_log_values(log_to_file_values)
         self._nan_guard = nan_guard
         self._nan_log_prev_mem_batch = None
         self._nan_log_prev_batch = None
 
-        super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
+        check_log_values(self._log_values, self._call_list_data, self._call_list)
+        check_log_values(self._log_to_file_values, self._call_list_data, self._call_list)
+        check_log_values(self._log_memory_values, self._memory_call_list_data, self._memory_call_list, "in memory updates")
 
     def _init_automodel(self, skip=()):
         self.register_method("mask", self._calculate_mask, {"lengths": "lengths", "n": "memory_params.n"})
@@ -173,6 +186,8 @@ class FastACER(BaseACERAgent):
             replay_gen, dtypes = self._get_experience_replay_generator(seq=True, fields=self._memory_call_list_data)
             self._buffer_update_loader = tf.data.Dataset.from_generator(
                 replay_gen, dtypes).prefetch(1)
+        else:
+            self._memory_call_list = self._memory_call_list_data = None
 
     def _init_automodel_overrides(self) -> None:
         pass
@@ -241,9 +256,11 @@ class FastACER(BaseACERAgent):
 
             experience_replay_iterations = min([round(self._c0 * self._time_step), self._c])
             
+            outs = []
             for batch in self._data_loader.take(experience_replay_iterations):
                 data = {f: d for f, d in zip(self._call_list_data, batch)}
-                self._learn_from_experience_batch(data)
+                out = self._learn_from_experience_batch(data)
+                outs.append(out)
                 if self._nan_guard:
                     if not np.isfinite(self._actor.act_deterministic(data['obs']).numpy()).all():
                         print('NaN on learn step')
@@ -252,6 +269,7 @@ class FastACER(BaseACERAgent):
                         print('Last batch:')
                         print_batch(self._nan_log_prev_batch)
                     self._nan_log_prev_batch = data
+            return np.mean(outs, 0)
     
     @tf.function(experimental_relax_shapes=True)
     def _calculate_memory_update(self, data):
@@ -270,6 +288,8 @@ class FastACER(BaseACERAgent):
         with tf.name_scope('log'):
             for name, value, gather in self._log_values:
                 tf.summary.scalar(name, gather(data[value]), self._tf_time_step)
+        return [gather(data[value]) for _, value, gather in self._log_to_file_values]
+
 
 
     @tf.function(experimental_relax_shapes=True)
