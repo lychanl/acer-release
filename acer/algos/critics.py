@@ -7,7 +7,9 @@ import tensorflow as tf
 
 VARIANCE_FUNS = {
     'identity': tf.identity,
-    'exp': tf.exp
+    'exp': tf.exp,
+    'square': tf.square,
+    'abs': tf.abs
 }
 
 
