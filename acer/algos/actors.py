@@ -105,9 +105,12 @@ class TD2RegularizedGaussianActor(GaussianActor, TD2RegularizedActor):
         TD2RegularizedActor.__init__(self, *args, **kwargs)
 
 class TD2RegStdClippedBaseActor(TD2RegularizedActor):
-    def __init__(self, *args, alpha=1, eps=0, eta=0.1, kappa=1, scale2_td2=False, clip_weighted=False, **kwargs) -> None:
+    def __init__(
+            self, *args, alpha=1, eps=0, eta=0.1, kappa=1, scale2_td2=False, 
+            clip_weighted=False, no_clip_td2=False, **kwargs) -> None:
         self._alpha = alpha
         self._eps = eps
+        self._no_clip_td2 = no_clip_td2
         self._scale2_td2 = scale2_td2
         self._clip_weighted = clip_weighted
         super().__init__(*args, eta=eta, kappa=kappa, **kwargs)
@@ -138,9 +141,12 @@ class TD2RegStdClippedBaseActor(TD2RegularizedActor):
             td2 = td ** 2
 
         clipped = tf.clip_by_value(td, -clip, clip)
-        clipped2 = tf.clip_by_value(td2, -clip ** 2, clip ** 2)
-
         clipped = clipped / std
+
+        if self._no_clip_td2:
+            clipped2 = td2
+        else:
+            clipped2 = tf.clip_by_value(td2, -clip ** 2, clip ** 2)
 
         if self._scale2_td2:
             clipped2 = clipped2 / std**2

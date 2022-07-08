@@ -121,6 +121,7 @@ parser.add_argument('--actor.eta', type=float)
 parser.add_argument('--actor.kappa', type=float)
 parser.add_argument('--actor.scale_td', action='store_true', help='If TD is to be scaled in StdClippedActor')
 parser.add_argument('--actor.scale2_td2', action='store_true', help='If reg is to be scaled by std2 in TD2RegStdClippedActor')
+parser.add_argument('--actor.no_clip_td2', action='store_true', help='Disable clipping of reg component in TD2RegStdClippedActor')
 parser.add_argument('--actor.clip_weighted', action='store_true', help='clipping is to be performed on weighted td in StdClippedActor')
 parser.add_argument('--reverse', action='store_true',
                     help='Reverse param for exploracer')
