@@ -21,7 +21,12 @@ class SusActor:
         if self.previous_actions is None:
             self.previous_actions = new_actions
 
-        mask = (1 - self.ends) * (np.random.random(size=observations.shape[0]) < self.sustain)
+        mask = (
+            1 - tf.cast(self.ends, tf.float32)
+        ) * tf.cast(
+            tf.random.uniform(shape=(observations.shape[0],)) < self.parameters.get_value('sustain'),
+            tf.float32
+        )
 
         actions = self.previous_actions * mask + new_actions * (1 - mask)
         self.previous_actions = actions
