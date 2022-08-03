@@ -21,7 +21,7 @@ class Adaptation:
 
 
 class Parameters(AutoModelComponent):
-    def __init__(self, name, **kwargs) -> None:
+    def __init__(self, name='self', **kwargs) -> None:
         super().__init__()
         self.name = name
         self.params = {}
@@ -31,13 +31,13 @@ class Parameters(AutoModelComponent):
             'exp_decay': {
                 'func': self.exp_decay,
                 'args': {'time': 'base.time_step'},
-                'ctypes': (float, float),
+                'ctypes': (float, float),  # coefficient, limit
                 'cdefaults': (0.99, 1.)
             },
             'linear': {
                 'func': self.linear,
                 'args': {'time': 'base.time_step'},
-                'ctypes': (float, float),
+                'ctypes': (float, float),  # to value, to time
                 'cdefaults': (None, None)
             }
         }

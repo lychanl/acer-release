@@ -9,12 +9,13 @@ from typing import Union, Dict
 class PrioritizedReplayBuffer(VecReplayBuffer):
     def __init__(
             self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec,
-            block: int, levels: int = 2, *args, **kwargs):
+            block: int, levels: int = 2, probability_as_actor_out: bool = False, *args, **kwargs):
         super().__init__(max_size, action_spec, obs_spec, policy_spec=policy_spec, *args, **kwargs)
         self._udpate_pointer = 0
 
         self._block = block
         self._levels = levels
+        self._prob_as_actor_out = probability_as_actor_out
 
         self._rands = None
 
@@ -44,7 +45,12 @@ class PrioritizedReplayBuffer(VecReplayBuffer):
             self._block_ends.append(np.minimum((np.arange(level_blocks) + 1) * block_size, prev_level_block))
 
     def put(self, action: Union[int, float, list], observation: np.array, next_observation: np.array, reward: float, policy: float, is_done: bool, end: bool):
-        self._priorities[0][self._pointer] = 1
+        if self._prob_as_actor_out:
+            self._priorities[0][self._pointer] = policy[0]    
+            policy = policy[1:]
+        else:
+            self._priorities[0][self._pointer] = 1
+
         self._update_block_priorities(self._pointer // self._block)
 
         if self._current_size == self._max_size:
@@ -143,12 +149,13 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
     def __init__(
             self, max_size: int, num_buffers: int,
             action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec,
-            priority: str, block: int, clip: float = -1, alpha: float = 1, beta: float = 0, eps=1e-4, *args, **kwargs):
+            priority: str, block: int, clip: float = -1, alpha: float = 1, beta: float = 0, eps=1e-4, *args, updatable=True, **kwargs):
         self._clip = clip
         self._alpha = alpha
         self._beta = beta
         self._eps = eps
         self.block = block * num_buffers
+        self.updatable = updatable
 
         self._mean_abs_reward = tf.Variable(0, dtype=tf.float32)
         self._std_reward = tf.Variable(0, dtype=tf.float32)
@@ -217,7 +224,7 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
         return self._std_reward
 
     def should_update_block(self):
-        return all(buf.should_update_block() for buf in self._buffers)
+        return self.updatable and all(buf.should_update_block() for buf in self._buffers)
 
     def get_next_block_to_update(self):
         ret = dict()

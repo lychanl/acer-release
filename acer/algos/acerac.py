@@ -456,13 +456,6 @@ class ACERAC(BaseACERAgent):
     def _init_critic(self) -> Critic:
         return Critic(self._observations_space, self._critic_layers, self._tf_time_step, use_additional_input=self._use_q)
 
-    def save_experience(self, steps: List[
-        Tuple[Union[int, float, list], np.array, np.array, np.array, bool, bool]
-    ]):
-        super().save_experience(steps)
-
-        self._actor.update_ends(np.array([[step[5]] for step in steps]))
-
     def learn(self):
         """
         Performs experience replay learning. Experience trajectory is sampled from every replay buffer once, thus

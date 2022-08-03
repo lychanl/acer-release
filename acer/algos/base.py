@@ -222,6 +222,9 @@ class BaseActor(BaseModel):
 
         return weights
 
+    def _update_ends(self, ends):
+        pass
+
 class BaseCritic(BaseModel):
 
     def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]],
@@ -642,6 +645,8 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
         if self._running_mean_rewards:
             rewards = np.array([step[2] for step in steps])
             self._update_rewards_rms(rewards)
+
+        self._actor.update_ends(np.array([[step[5]] for step in steps]))
 
     @tf.function(experimental_relax_shapes=True)
     def _update_obs_rms(self, obs):
