@@ -1,3 +1,4 @@
+from operator import xor
 from algos.common.parameters import Parameters, get_adapts_from_kwargs
 from typing import Tuple
 from algos.base import GaussianActor
@@ -6,9 +7,24 @@ import numpy as np
 import tensorflow as tf
 
 
+def _calc_sustain(esteps):
+    return 1 - 1 / esteps
+
+
+def _calc_esteps(sustain):
+    return 1 / (1 - sustain)
+
+
 class SusActor:
-    def __init__(self, *args, sustain, **kwargs):
-        self.parameters = Parameters("actor_params", sustain=sustain, **get_adapts_from_kwargs(kwargs, ['sustain']))
+    def __init__(self, *args, sustain=None, esteps=None, **kwargs):
+        assert xor(sustain is None, esteps is None)
+
+        self.parameters = Parameters(
+            "actor_params", calculatables={
+                'sustain': (_calc_sustain, {'esteps': 'self.esteps'}),
+                'esteps': (_calc_esteps, {'sustain': 'self.sustain'})
+            },
+            sustain=sustain, esteps=esteps, **get_adapts_from_kwargs(kwargs, ['sustain', 'esteps']))
 
         self.previous_actions = None
         self.ends = 1
@@ -17,14 +33,22 @@ class SusActor:
     def sustain(self):
         return self.parameters['sustain']
 
+    @property
+    def esteps(self):
+        return self.parameters['esteps']
+
     def act(self, observations, new_actions, policies):
         if self.previous_actions is None:
             self.previous_actions = new_actions
 
+        sustain = self.parameters.get_value('sustain')
+        if sustain is None:
+            sustain = _calc_sustain(self.parameters.get_value('esteps'))
+
         mask = (
             1 - tf.cast(self.ends, tf.float32)
         ) * tf.cast(
-            tf.random.uniform(shape=(observations.shape[0],)) < self.parameters.get_value('sustain'),
+            tf.random.uniform(shape=(observations.shape[0],)) < sustain,
             tf.float32
         )
 

@@ -21,7 +21,7 @@ class Adaptation:
 
 
 class Parameters(AutoModelComponent):
-    def __init__(self, name='self', **kwargs) -> None:
+    def __init__(self, name='self', calculatables={}, **kwargs) -> None:
         super().__init__()
         self.name = name
         self.params = {}
@@ -51,12 +51,23 @@ class Parameters(AutoModelComponent):
                 self.adaptations[arg] = self._parse_adaptation(arg, value, kwargs[f'{arg}.adapt'])
                 self.register_method(f'adapt_{arg}', self.adaptations[arg].adaptation, self.adaptations[arg].adaptation_args)
                 self.targets.append(f'adapt_{arg}')
-            else:
+            elif value is not None:
                 self.params[arg] = tf.constant(value)
-            self.register_method(arg, tf.function(functools.partial(self.get_value, arg)), {})
+            else:
+                self.params[arg] = value
+
+            if value is not None:
+                self.register_method(arg, tf.function(functools.partial(self.get_value, arg)), {})
+            elif arg in calculatables:
+                self.register_method(arg, tf.function(calculatables[arg][0]), calculatables[arg][1])
+
 
     def get_value(self, param):
-        return tf.identity(self.params[param])
+        value = self.params[param]
+        if value is None:
+            return value
+        else:
+            return tf.identity(value)
 
     def _parse_adaptation(self, arg, initial, adaptation):
         assert re.match(r'\w+(\((\w+,\s*)*(\w+\s*)\))?', adaptation), "Invalid adaptation format, should be func("
