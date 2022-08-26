@@ -1,3 +1,4 @@
+import functools
 from algos.base import Critic
 from algos.common.automodel import AutoModelComponent
 
@@ -85,3 +86,92 @@ class VarianceCritic(AutoModelComponent):
     def init_optimizer(self, *args, **kwargs):
         self._value_critic.init_optimizer(*args, **kwargs)
         self._value2_critic.init_optimizer(*args, **kwargs)
+
+
+class QuantileCritic(Critic):
+    def __init__(self, *args, n_quantiles=50, kappa=0, **kwargs) -> None:
+        super().__init__(*args, nouts=n_quantiles, **kwargs)
+
+        self.nouts = n_quantiles
+        quantiles_loc = (np.arange(0, n_quantiles) + 0.5) / n_quantiles
+        self.quantiles = quantiles_loc.reshape((1, 1, n_quantiles))
+        self.kappa = kappa
+
+        self.register_method('quantiles', self.calc_quantiles, {'observations': 'obs'})
+        self.register_method('quantiles_next', self.calc_quantiles, {'observations': 'obs_next'})
+
+        self.register_method('quantile_td', self.calculate_quantile_tds, {
+            'quantiles': 'self.quantiles', 'values': 'self.value', 'td': 'base.td'
+        })
+        self.register_method('quantile_d', self.calculate_quantile_d, {'qtd': 'self.quantile_td', 'weights': 'actor.sample_weights'})
+
+        self.register_method('value', self.value, {'quantiles': 'self.quantiles'})
+        self.register_method('value_next', self.value, {'quantiles': 'self.quantiles_next'})
+
+        self.register_method('optimize', self.optimize, {
+            'observations': 'base.first_obs',
+            'd': 'self.quantile_d'
+        })
+
+        if n_quantiles % 2 == 0:
+            self.register_method('median', functools.partial(self.mq, n=n_quantiles // 2 - 1), {'quantiles': 'self.quantiles'})
+
+        for n in range(n_quantiles):
+            self.register_method(f'q{n}', functools.partial(self.q, n=n), {'quantiles': 'self.quantiles'})
+    
+    @tf.function(experimental_relax_shapes=True)
+    def calc_quantiles(self, observations):
+        return self._forward(observations)
+
+    @tf.function(experimental_relax_shapes=True)
+    def calculate_quantile_tds(self, quantiles, values, td):
+        qtd = tf.expand_dims(td + values[:,0], -1) - quantiles[:,:1]
+        return qtd
+
+    @tf.function
+    def calculate_quantile_d(self, qtd, weights):
+        quantile_weights = (self.quantiles - tf.cast(qtd < 0, tf.float32))
+        weights = tf.expand_dims(weights, axis=-1)
+
+        if self.kappa > 0:
+            # Quantile Huber loss gradient
+            huber = tf.where(
+                tf.abs(qtd) < self.kappa, 
+                qtd / self.kappa,
+                tf.sign(qtd)
+            )
+            return tf.stop_gradient(huber * quantile_weights * weights)
+        else:
+            # Quantile loss gradient
+            return tf.stop_gradient(quantile_weights * weights)
+
+    @tf.function
+    def value(self, quantiles):
+        return tf.reduce_mean(quantiles, -1, keepdims=True)
+
+    @tf.function
+    def q(self, quantiles, n):
+        return quantiles[:,:,n]
+
+    @tf.function
+    def mq(self, quantiles, n):
+        return (quantiles[:, :, n] + quantiles[:, :, n + 1]) / 2
+
+    @tf.function
+    def dqnqm(self, quantiles, n, m):
+        return quantiles[:,:,n] - quantiles[:,:,m]
+
+    @tf.function
+    def loss(self, observations: np.array, d: np.array) -> tf.Tensor:
+        """Computes Critic's loss.
+
+        Args:
+            observations: batch [batch_size, observations_dim] of observations vectors
+            d: batch [batch_size, 1] of gradient update coefficient (summation term in the Equation (9)) from
+                the paper (1))
+        """
+
+        qs = self.calc_quantiles(observations)
+        loss = tf.reduce_mean(-tf.expand_dims(qs, axis=1) * d)
+
+        return loss

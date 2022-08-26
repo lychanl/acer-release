@@ -23,7 +23,8 @@ from algos.actors import (
     TD2RegularizedCategoricalActor, TD2RegularizedGaussianActor,
     TD2RegStdClippedCategoricalActor, TD2RegStdClippedGaussianActor
 )
-from algos.critics import VarianceCritic
+from algos.varsigmaactors import VarSigmaActor
+from algos.critics import VarianceCritic, QuantileCritic
 from replay_buffer import BufferFieldSpec, VecReplayBuffer, MultiReplayBuffer
 from prioritized_buffer import MultiPrioritizedReplayBuffer
 
@@ -32,21 +33,21 @@ ACTORS = {
     'simple': {True: CategoricalActor, False: GaussianActor},
     'std_clipped': {True: StdClippedCategoricalActor, False: StdClippedGaussianActor},
     'td2_regularized': {True: TD2RegularizedCategoricalActor, False: TD2RegularizedGaussianActor},
-    'td2_reg_std_clipped': {True: TD2RegStdClippedCategoricalActor, False: TD2RegStdClippedGaussianActor}
+    'td2_reg_std_clipped': {True: TD2RegStdClippedCategoricalActor, False: TD2RegStdClippedGaussianActor},
+    'varsigma': {False: VarSigmaActor}
 }
 
 
 CRITICS = {
     'simple': Critic,
-    'variance': VarianceCritic
+    'variance': VarianceCritic,
+    'quantile': QuantileCritic
 }
 
 BUFFERS = {
     'simple': (MultiReplayBuffer, {'buffer_class': VecReplayBuffer}),
     'prioritized': (MultiPrioritizedReplayBuffer, {})
 }
-
-DATA_FIELDS = ('lengths', 'obs', 'obs_next', 'actions', 'policies', 'rewards', 'dones', 'priorities')
 
 
 def print_batch(batch):
@@ -74,6 +75,7 @@ def print_batch(batch):
 
 
 class FastACER(BaseACERAgent):
+    DATA_FIELDS = ('lengths', 'obs', 'obs_next', 'actions', 'policies', 'rewards', 'dones', 'priorities')
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Optional[Tuple[int]], b: float = 3, no_truncate: bool = True,
@@ -108,6 +110,12 @@ class FastACER(BaseACERAgent):
         self._b = b
         self._truncate = not no_truncate
 
+        self._force_log = (
+            [v[1:].split(':')[0] for v in log_values if v[0] == '!']
+            + [v[1:].split(':')[0] for v in log_to_file_values if v[0] == '!']
+        )
+        self._force_log_memory = [v[1:].split(':')[0] for v in log_memory_values if v[0] == '!']
+
         super().__init__(observations_space, actions_space, actor_layers, critic_layers, *args, **kwargs)
 
         self.PREPROCESSING = {
@@ -118,13 +126,15 @@ class FastACER(BaseACERAgent):
 
         self.LOG_GATHER = {
             'mean': tf.reduce_mean,
-            'std': tf.math.reduce_std
+            'std': tf.math.reduce_std,
+            'min': tf.reduce_min,
+            'max': tf.reduce_max,
         }
 
         def prepare_log_values(spec):
             target_list = []
             for log_value in spec:
-                vg = log_value.split(':')
+                vg = log_value.lstrip('!').split(':')
                 val = vg[0]
                 gather = self.LOG_GATHER[vg[1]] if len(vg) > 1 else lambda x: x
 
@@ -178,11 +188,13 @@ class FastACER(BaseACERAgent):
 
         self._init_automodel_overrides()
 
-        self._call_list, self._call_list_data = self.prepare_default_call_list(DATA_FIELDS)
+        self._call_list, self._call_list_data = self.prepare_default_call_list(self.DATA_FIELDS, additional=self._force_log)
 
         if self._memory.priority:
             self.register_method('memory_priority', *self._memory.priority)
-            self._memory_call_list, self._memory_call_list_data = self.prepare_call_list(['base.memory_priority'], DATA_FIELDS)
+            self._memory_call_list, self._memory_call_list_data = self.prepare_call_list(
+                ['base.memory_priority'] + self._force_log_memory, self.DATA_FIELDS)
+
             replay_gen, dtypes = self._get_experience_replay_generator(seq=True, fields=self._memory_call_list_data)
             self._buffer_update_loader = tf.data.Dataset.from_generator(
                 replay_gen, dtypes).prefetch(1)
@@ -323,9 +335,9 @@ class FastACER(BaseACERAgent):
     def _fetch_offline_batch(self) -> List[Dict[str, Union[np.array, list]]]:
         return self._memory.get_vec(self._batches_per_env, self._memory.n)
 
-    def _get_experience_replay_generator(
-            self, seq=False, fields=DATA_FIELDS):
-        batch_size_ids = np.arange(self._memory.block if seq else self._batch_size)
+    def _prepare_generator_fields(self, size):
+        batch_size_ids = np.arange(size)
+
         specs = {
             'lengths': ('lengths', lambda x, lens: x),
             'obs': ('observations', lambda x, lens: x),
@@ -349,6 +361,15 @@ class FastACER(BaseACERAgent):
             'priorities': tf.float32,
             'time': tf.int32,
         }
+
+        return specs, dtypes
+
+    def _get_experience_replay_generator(
+            self, seq=False, fields=None):
+        if fields is None:
+            fields = self.DATA_FIELDS
+
+        specs, dtypes = self._prepare_generator_fields(self._memory.block if seq else self._batch_size)
 
         field_specs = [specs[f] for f in fields]
         field_dtypes = tuple(dtypes[f] for f in fields)

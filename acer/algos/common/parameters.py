@@ -61,7 +61,6 @@ class Parameters(AutoModelComponent):
             elif arg in calculatables:
                 self.register_method(arg, tf.function(calculatables[arg][0]), calculatables[arg][1])
 
-
     def get_value(self, param):
         value = self.params[param]
         if value is None:
@@ -83,6 +82,7 @@ class Parameters(AutoModelComponent):
 
         return Adaptation(arg, functools.partial(spec['func'], var=self.params[arg], initial=initial, cparams=params), args)
 
+    @tf.function
     def exp_decay(self, var, param, initial, cparams, time):
         coeff, limit = cparams
 
@@ -90,6 +90,7 @@ class Parameters(AutoModelComponent):
 
         var.assign(tf.cast(value, var.dtype))
 
+    @tf.function
     def linear(self, var, param, initial, cparams, time):
         to_val, to_time = cparams
 

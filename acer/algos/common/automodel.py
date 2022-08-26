@@ -24,8 +24,10 @@ class AutoModel:
     def register_component(self, name: str, component: AutoModelComponent):
         self._components[name] = component
 
-    def prepare_default_call_list(self, data: Collection[str]) -> Tuple[Iterable[Tuple[str, Callable, Dict[str, str]]], Collection[str]]:
-        targets = []
+    def prepare_default_call_list(
+        self, data: Collection[str], additional: Iterable[str] = ()
+    ) -> Tuple[Iterable[Tuple[str, Callable, Dict[str, str]]], Collection[str]]:
+        targets = list(additional)
         for name, comp in self._components.items():
             targets.extend(f"{name}.{target}" for target in comp.targets)
 

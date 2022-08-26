@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from argparse import ArgumentError
 from algos.common.automodel import AutoModel, AutoModelComponent
 from pathlib import Path
-from typing import Tuple, Union, List, Optional, Dict
+from typing import Iterable, Tuple, Union, List, Optional, Dict
 
 import gym
 import numpy as np
@@ -26,17 +26,27 @@ session = InteractiveSession(config=config)
 class BaseModel(AutoModelComponent, tf.keras.Model):
 
     def __init__(
-            self, observation_space: gym.spaces.Space, layers: Optional[Tuple[int]], output_dim: int,
+            self, observation_space: gym.spaces.Space, layers: Optional[Tuple[int]], output_dim: int, extra_models: Tuple[Iterable[int]] = (),
             *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
+        self.extra_models = extra_models
+
         if type(observation_space) != gym.spaces.Discrete:
             self._hidden_layers = self._build_layers(len(observation_space.shape), layers, output_dim)
+            self._extra_hidden_layers = [
+                self._build_layers(len(observation_space.shape), elayers, outs) for *elayers, outs in extra_models
+            ]
             self._input_shape_len = len(observation_space.shape)
             self._forward = self._nn_forward
+            self._extras_forward = self._extras_nn_forward
         else:
             self._array = tf.Variable(np.zeros((observation_space.n, output_dim)), dtype=tf.float32)
+            self._extra_array = [
+                tf.Variable(np.zeros((observation_space.n, outs)), dtype=tf.float32) for outs in extra_models
+            ]
             self._forward = self._arr_forward
+            self._extras_forward = self._extras_arr_forward
 
         self._output_dim = output_dim
 
@@ -65,12 +75,37 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
         x = tf.reshape(input, tf.concat([[-1,], input_dims], axis=0))
         for layer in self._hidden_layers:
             x = layer(x)
+
+        x = tf.reshape(x, tf.concat([[-1,], batch_dims, [self._output_dim,]], axis=0))
+
+        return x
+
+    @tf.function
+    def _extras_nn_forward(self, input: np.array):
+        shape = tf.shape(input)
+        batch_dims = shape[1:-self._input_shape_len]
+        input_dims = shape[-self._input_shape_len:]
         
-        return tf.reshape(x, tf.concat([[-1,], batch_dims, [self._output_dim,]], axis=0))
+        inp = tf.reshape(input, tf.concat([[-1,], input_dims], axis=0))
+        
+        extras = []
+        for extra, extra_out in zip(self._extra_hidden_layers, self.extra_models):
+            extra_x = inp
+            for layer in extra:
+                extra_x = layer(extra_x)
+            extra_x = tf.reshape(extra_x, tf.concat([[-1,], batch_dims, [extra_out[-1],]], axis=0))
+            extras.append(extra_x)
+
+        return tuple(extras)
+
 
     @tf.function(experimental_relax_shapes=True)
     def _arr_forward(self, input) -> tf.Tensor:
         return tf.gather_nd(self._array, tf.expand_dims(input, -1))
+
+    @tf.function(experimental_relax_shapes=True)
+    def _extras_arr_forward(self, input) -> tf.Tensor:
+        tuple([tf.gather_nd(extra_arr, tf.expand_dims(input, -1)) for extra_arr in self._extra_array])
 
     def optimize(self, **loss_kwargs):
         with tf.GradientTape() as tape:
@@ -89,7 +124,8 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
 class BaseActor(BaseModel):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 beta_penalty: float, tf_time_step: tf.Variable, *args, truncate: bool = True, b: float = 2, **kwargs):
+                 beta_penalty: float, tf_time_step: tf.Variable, *args, truncate: bool = True, b: float = 2, additional_outputs=0,
+                 **kwargs):
         """Base abstract Actor class
 
         Args:
@@ -106,7 +142,7 @@ class BaseActor(BaseModel):
         else:
             actions_dim = actions_space.shape[0]
 
-        super().__init__(observations_space, layers, actions_dim, *args, **kwargs)
+        super().__init__(observations_space, layers, actions_dim + additional_outputs, *args, **kwargs)
 
         self.obs_shape = observations_space.shape
         self.actions_dim = actions_dim
@@ -222,13 +258,13 @@ class BaseActor(BaseModel):
 
         return weights
 
-    def _update_ends(self, ends):
+    def update_ends(self, ends):
         pass
 
 class BaseCritic(BaseModel):
 
     def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]],
-                 tf_time_step: tf.Variable, use_additional_input: bool = False, *args, **kwargs):
+                 tf_time_step: tf.Variable, use_additional_input: bool = False, *args, nouts: int = 1, **kwargs):
         """Value function approximation as MLP network neural network.
 
         Args:
@@ -241,7 +277,7 @@ class BaseCritic(BaseModel):
         if len(observations_space.shape) > 1:
             assert not use_additional_input
 
-        super().__init__(observations_space, layers, 1, *args, **kwargs)
+        super().__init__(observations_space, layers, nouts, *args, **kwargs)
 
         self.obs_shape = observations_space.shape
         self._tf_time_step = tf_time_step
@@ -277,9 +313,9 @@ class BaseCritic(BaseModel):
 class Critic(BaseCritic):
 
     def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]], tf_time_step: tf.Variable,
-                 use_additional_input: bool = False, *args, **kwargs):
+                 use_additional_input: bool = False, *args, nouts=1, **kwargs):
         """Basic Critic that outputs single value"""
-        super().__init__(observations_space, layers, tf_time_step, *args, use_additional_input=use_additional_input, **kwargs)
+        super().__init__(observations_space, layers, tf_time_step, *args, use_additional_input=use_additional_input, nouts=nouts, **kwargs)
 
     def loss(self, observations: np.array, d: np.array, additional_input=None) -> tf.Tensor:
         """Computes Critic's loss.
@@ -415,6 +451,10 @@ class GaussianActor(BaseActor):
                 name="actor_std",
             )
 
+    def mean_and_std(self, observation):
+        return self._forward(observation), tf.exp(self.log_std)
+
+
     @property
     def action_dtype(self):
         return tf.dtypes.float32
@@ -424,10 +464,10 @@ class GaussianActor(BaseActor):
         return np.float32
 
     def loss(self, observations: np.array, actions: np.array, d: np.array) -> tf.Tensor:
-        mean = self._forward(observations)
+        mean, std = self.mean_and_std(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
-            scale_diag=tf.exp(self.log_std)
+            scale_diag=std
         )
 
         return self._loss(mean, dist, actions, d)
@@ -449,10 +489,10 @@ class GaussianActor(BaseActor):
         return total_loss
 
     def _dist(self, observations: tf.Tensor) -> tf.Tensor:
-        mean = self._forward(observations)
+        mean, std = self.mean_and_std(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
             loc=mean,
-            scale_diag=tf.exp(self.log_std)
+            scale_diag=std
         )
         return dist
 
@@ -478,12 +518,13 @@ class GaussianActor(BaseActor):
     @tf.function
     def act_deterministic(self, observations: tf.Tensor, **kwargs) -> tf.Tensor:
         """Returns mean of the Gaussian"""
-        mean = self._forward(observations)
+        mean, _ = self.mean_and_std(observations)
         return mean
 
     @tf.function(experimental_relax_shapes=True)
     def expected_probs(self, observations: tf.Tensor) -> tf.Tensor:
-        det = tf.exp(2 * tf.reduce_sum(self.log_std))
+        _, std = self.mean_and_std(observations)
+        det = tf.exp(2 * tf.reduce_sum(tf.math.log(std)))
         mult = (4 * np.pi) ** tf.cast(self._k, tf.float32)
 
         return tf.math.cumprod(tf.ones(tf.shape(observations)[:2], tf.float32) / tf.sqrt(mult * det), axis=1)

@@ -15,6 +15,7 @@ from gym import wrappers
 from algos.acer import ACER
 from algos.fast_acer import FastACER
 from algos.susacer import SusACER
+from algos.acerax import ACERAX
 from algos.std_clipped_acer import StdClippedACER
 from algos.acerac import ACERAC
 from algos.base import BaseACERAgent
@@ -29,6 +30,7 @@ ALGOS = {
     'acer': ACER,
     'fastacer': FastACER,
     'susacer': SusACER,
+    'acerax': ACERAX,
     'stdclippedacer': StdClippedACER,
     'acerac': ACERAC,
     'qacer': QACER,
