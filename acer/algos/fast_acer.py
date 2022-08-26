@@ -208,7 +208,7 @@ class FastACER(BaseACERAgent):
         return ACTORS[self._actor_type][self._is_discrete](
             self._observations_space, self._actions_space, self._actor_layers,
             self._actor_beta_penalty, tf_time_step=self._tf_time_step, truncate=self._truncate, b=self._b,
-            **self._actor_args
+            num_parallel_envs=self._num_parallel_envs, **self._actor_args
         )
 
     def _init_data_loader(self, _) -> None:

@@ -42,16 +42,16 @@ class AceraxActor(VarSigmaActor):
         no_alpha =  tf.reduce_sum(
             tf.scalar_mul(0.5, tf.square(
                 tf.math.multiply(m - mean,
-                tf.math.reciprocal(tf.exp(std)))
+                tf.math.reciprocal(std))
             )))
         with_alpha = tf.reduce_sum(
             tf.scalar_mul(0.5, tf.square(
                 tf.math.multiply(actions - mean,
-                tf.math.reciprocal(tf.exp(std)))
+                tf.math.reciprocal(std))
             )))
         total_loss = no_alpha + tf.scalar_mul(alpha, with_alpha) + tf.scalar_mul(
             (1 + alpha),
-            tf.reduce_sum(std)
+            tf.reduce_sum(tf.math.log(std))
         )
 
         return total_loss

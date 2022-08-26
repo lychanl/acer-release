@@ -17,7 +17,7 @@ def _calc_esteps(sustain):
 
 
 class SusActor:
-    def __init__(self, *args, sustain=None, esteps=None, limit_sustain_length=None, **kwargs):
+    def __init__(self, obs_space, action_space, *args, sustain=None, esteps=None, limit_sustain_length=None, num_parallel_envs=1, **kwargs):
         assert xor(sustain is None, esteps is None)
 
         self.parameters = Parameters(
@@ -28,9 +28,10 @@ class SusActor:
             sustain=sustain, esteps=esteps, **get_adapts_from_kwargs(kwargs, ['sustain', 'esteps']))
 
         self.limit_sustain_length = limit_sustain_length or np.inf
-        self.sustain_length = None
-        self.previous_actions = None
-        self.ends = 1
+        self.ends = np.zeros(num_parallel_envs)
+
+        self.previous_actions = tf.Variable(tf.zeros((num_parallel_envs, *action_space.shape)), dtype=tf.float32)
+        self.action_lengths = tf.Variable(tf.zeros((num_parallel_envs,)), dtype=tf.float32)
 
     @property
     def sustain(self):
@@ -41,10 +42,6 @@ class SusActor:
         return self.parameters['esteps']
 
     def act(self, observations, new_actions, policies):
-        if self.previous_actions is None:
-            self.previous_actions = new_actions
-            self.action_lengths = tf.zeros_like(new_actions[:,0])
-
         sustain = self.parameters.get_value('sustain')
         if sustain is None:
             sustain = _calc_sustain(self.parameters.get_value('esteps'))
@@ -59,7 +56,7 @@ class SusActor:
             tf.float32
         )
 
-        self.action_lengths = self.action_lengths * mask + 1
+        self.action_lengths.assign(self.action_lengths * mask + 1)
 
         actions = self.previous_actions * mask + new_actions * (1 - mask)
         sustain_policies = (
@@ -67,7 +64,7 @@ class SusActor:
             + policies * (1 - sustain) * (1 - (mask - first_mask * limit_mask)) 
             + policies * (1 - first_mask * limit_mask)
         )
-        self.previous_actions = actions
+        self.previous_actions.assign(actions)
         return actions, tf.stack([1 - mask, sustain_policies, policies], axis=1)
 
     def update_ends(self, ends):
