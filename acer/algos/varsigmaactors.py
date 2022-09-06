@@ -9,7 +9,8 @@ class VarSigmaActor(GaussianActor):
             self, obs_space, action_space,
             *args, entropy_bonus=0, dist_std_gradient=True,
             single_std=False, nn_std=False, separate_nn_std=None,
-            std_lr=None, initial_log_std=0, **kwargs):
+            std_lr=None, initial_log_std=0, std_loss_args=None, **kwargs):
+
         self.entropy_bonus = entropy_bonus
         self.dist_std_gradient = dist_std_gradient
         self.separate_nn_std = separate_nn_std
@@ -19,7 +20,7 @@ class VarSigmaActor(GaussianActor):
         self.initial_log_std = initial_log_std
 
         if std_lr:
-            assert separate_nn_std is not None
+            assert separate_nn_std is not None or not nn_std
 
         if separate_nn_std is not None:
             additional_outputs = 0
@@ -37,25 +38,31 @@ class VarSigmaActor(GaussianActor):
             additional_outputs = 0
             extra_models = ()
             if single_std:
-                self.log_std = tf.Variable(inital_log_std, dtype=tf.float32)
+                self.var_log_std = tf.Variable(initial_log_std, dtype=tf.float32, name='log_std')
             else:
-                self.log_std = tf.Variable(np.zeros(action_space.shape) + inital_log_std, dtype=tf.float32)
+                self.var_log_std = tf.Variable(np.zeros(action_space.shape) + initial_log_std, dtype=tf.float32, name='log_std')
 
         GaussianActor.__init__(self, obs_space, action_space, *args, **kwargs, additional_outputs=additional_outputs, extra_models=extra_models)
 
-        self.register_method('std', self.std, {'observations': 'obs'})
-        if self.std_lr:
-            self.register_method('optimize_std', self.optimize_std, {
+        if std_loss_args is None:
+            std_loss_args = {
                 'observations': 'base.first_obs',
                 'actions': 'base.first_actions',
                 'd': 'base.weighted_td'
-            })
+            }
+
+        self.register_method('std', self.std, {'observations': 'obs'})
+        if self.std_lr:
+            self.register_method('optimize_std', self.optimize_std, std_loss_args)
             self.register_method('optimize', self.optimize_mean, {
                 'observations': 'base.first_obs',
                 'actions': 'base.first_actions',
                 'd': 'base.weighted_td'
             })
             self.targets.append('optimize_std')
+        else:
+            for k, v in std_loss_args.items():
+                self.methods['optimize'][1][k] = v
 
     @property
     def mean_trainable_variables(self):
@@ -63,24 +70,33 @@ class VarSigmaActor(GaussianActor):
 
     @property
     def std_trainable_variables(self):
-        return self._extra_hidden_layers.trainable_variables
+        if self.separate_nn_std:
+            return self._extra_hidden_layers.trainable_variables
+        else:
+            return [self.var_log_std]
 
     @tf.function(experimental_relax_shapes=True)
-    def mean_and_std(self, observations):
+    def mean_and_log_std(self, observations):
         out = self._forward(observations)
         if self.separate_nn_std:
             mean = out
             log_std, = self._extras_forward(observations)
-            log_std +=  + self.initial_log_std
+            log_std += self.initial_log_std
         elif self.nn_std:
             mean = out[..., :self._k]
             log_std = out[..., self._k:] + self.initial_log_std
         else:
             mean = out
-            log_std = self.log_std
-        std = tf.exp(log_std)
+            log_std = tf.ones_like(mean[...,:1]) * tf.expand_dims(self.var_log_std, 0)
         if self.single_std:
-            std = tf.repeat(std, self._k, axis=-1)
+            log_std = tf.repeat(log_std, self._k, axis=-1)
+        
+        return mean, log_std
+
+    @tf.function(experimental_relax_shapes=True)
+    def mean_and_std(self, observations):
+        mean, log_std = self.mean_and_log_std(observations)
+        std = tf.exp(log_std)
         return mean, std if self.dist_std_gradient else tf.stop_gradient(std)
 
     @tf.function(experimental_relax_shapes=True)

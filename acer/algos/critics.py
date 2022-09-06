@@ -89,8 +89,13 @@ class VarianceCritic(AutoModelComponent):
 
 
 class QuantileCritic(Critic):
-    def __init__(self, *args, n_quantiles=50, kappa=0, **kwargs) -> None:
+    def __init__(self, *args, n_quantiles=50, kappa=0, outliers_q=None, **kwargs) -> None:
         super().__init__(*args, nouts=n_quantiles, **kwargs)
+
+        if outliers_q is None:
+            outliers_q = n_quantiles // 20
+
+        self.outliers_q = outliers_q
 
         self.nouts = n_quantiles
         quantiles_loc = (np.arange(0, n_quantiles) + 0.5) / n_quantiles
@@ -113,12 +118,25 @@ class QuantileCritic(Critic):
             'd': 'self.quantile_d'
         })
 
+        self.register_method('outliers_mask', self.outliers_mask, {'quantile_td': 'self.quantile_td'})
+
         if n_quantiles % 2 == 0:
             self.register_method('median', functools.partial(self.mq, n=n_quantiles // 2 - 1), {'quantiles': 'self.quantiles'})
+        else:
+            self.register_method('median', functools.partial(self.q, n=n_quantiles // 2), {'quantiles': 'self.quantiles'})
 
         for n in range(n_quantiles):
             self.register_method(f'q{n}', functools.partial(self.q, n=n), {'quantiles': 'self.quantiles'})
-    
+            self.register_method(f'q-{n + 1}', functools.partial(self.q, n=-(n+1)), {'quantiles': 'self.quantiles'})
+            self.register_method(
+                f'value_q{n}_diff', functools.partial(self.value_q_diff, n=n),
+                {'value': 'self.value', 'quantiles': 'self.quantiles'}
+            )
+
+    @tf.function
+    def outliers_mask(self, quantile_td):
+        return tf.cast((quantile_td[...,self.outliers_q] < 0) | (quantile_td[...,-(self.outliers_q+1)] > 0), tf.float32)
+
     @tf.function(experimental_relax_shapes=True)
     def calc_quantiles(self, observations):
         return self._forward(observations)
@@ -160,6 +178,10 @@ class QuantileCritic(Critic):
     @tf.function
     def dqnqm(self, quantiles, n, m):
         return quantiles[:,:,n] - quantiles[:,:,m]
+
+    @tf.function
+    def value_q_diff(self, value, quantiles, n):
+        return quantiles[:,0,n] - value[:,0,0]
 
     @tf.function
     def loss(self, observations: np.array, d: np.array) -> tf.Tensor:

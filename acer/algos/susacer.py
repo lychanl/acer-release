@@ -17,7 +17,10 @@ def _calc_esteps(sustain):
 
 
 class SusActor:
-    def __init__(self, obs_space, action_space, *args, sustain=None, esteps=None, limit_sustain_length=None, num_parallel_envs=1, **kwargs):
+    def __init__(
+            self, obs_space, action_space, *args,
+            sustain=None, esteps=None, limit_sustain_length=None, num_parallel_envs=1, modify_std=False,
+            **kwargs):
         assert xor(sustain is None, esteps is None)
 
         self.parameters = Parameters(
@@ -30,6 +33,8 @@ class SusActor:
         self.limit_sustain_length = limit_sustain_length or np.inf
         self.ends = np.zeros(num_parallel_envs)
 
+        self.modify_std = modify_std
+
         self.previous_actions = tf.Variable(tf.zeros((num_parallel_envs, *action_space.shape)), dtype=tf.float32)
         self.action_lengths = tf.Variable(tf.zeros((num_parallel_envs,)), dtype=tf.float32)
 
@@ -40,6 +45,17 @@ class SusActor:
     @property
     def esteps(self):
         return self.parameters['esteps']
+
+    def mean_and_std(self, observation):
+        std_mult = 1
+        if self.modify_std:
+            esteps = self.parameters.get_value('esteps')
+            if esteps is None:
+                esteps = _calc_esteps(self.parameters.get_value('sustain'))
+            esteps = tf.minimum(esteps, self.limit_sustain_length)
+            std_mult = 1 / tf.stop_gradient(tf.sqrt(esteps))
+
+        return self._forward(observation), tf.exp(self.log_std) * std_mult
 
     def act(self, observations, new_actions, policies):
         sustain = self.parameters.get_value('sustain')
