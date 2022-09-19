@@ -11,9 +11,17 @@ class AutoModelComponent:
         super().__init__()
         self.methods = {}
         self.targets = []
+        self.parameterized_methods = {}
+        self.parameterized_method_calls = {}
 
     def register_method(self, name: str, method: Callable, args: Dict[str, str]):
         self.methods[name] = (method, args)
+
+    def register_parameterized_method(self, name: str, method: Callable, args: Dict[str, str], params: Iterable[str]):
+        self.parameterized_methods[name] = (method, args, params)
+
+    def register_parameterized_method_call(self, name: str, method: str, params: Dict[str, str]):
+        self.parameterized_method_calls[name] = (method, params)
 
 
 class AutoModel:
@@ -81,12 +89,34 @@ class AutoModel:
 
         if component_name not in self._components:
             raise ValueError(f"Missing component {component_name} in {method}")
-        componenet = self._components[component_name]
+        component = self._components[component_name]
 
-        if method_name not in componenet.methods:
+        if method_name in component.parameterized_method_calls:
+            return (component_name,) + self._get_parameterized_method(component, method, method_name)
+        if method_name not in component.methods:
             raise ValueError(f"Missing method {method_name} in {component_name}")
 
-        return (component_name,) + componenet.methods[method_name]
+        return (component_name,) + component.methods[method_name]
+
+    def _get_parameterized_method(self, component: AutoModelComponent, name: str, method_name: str):
+        name, params = component.parameterized_method_calls[method_name]
+        base_component_name, base_method_name = name.split('.')
+        
+        if base_component_name not in self._components:
+            raise ValueError(f"Missing component {base_component_name} in {base_method_name} (from {name})")
+        base_component = self._components[base_component_name]
+
+        if base_method_name not in base_component.parameterized_methods:
+            raise ValueError(f"Missing method {base_method_name} in {base_component_name} (from {name})")
+
+        fun, args, param_names = base_component.parameterized_methods[base_method_name]
+        if set(params.keys()) != set(param_names):
+            raise ValueError(f"Invalid args in call {method_name} (from {name}). Expected {param_names}, got {list(params.keys())}")
+        all_args = dict(args)
+        for param_name, param_value in params.items():
+            all_args[param_name] = param_value
+
+        return (fun, all_args)
 
     def call_list(self, list: Iterable[Tuple[str, Callable, Dict[str, str]]], data: Dict[str, Any], preprocessing: Dict[str, Callable]):
         data_dict = {

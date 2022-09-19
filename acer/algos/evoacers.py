@@ -1,3 +1,6 @@
+from turtle import delay
+
+import numpy as np
 from algos.varsigmaactors import VarSigmaActor
 
 import tensorflow as tf
@@ -123,6 +126,111 @@ class MedianToValueActor(VarSigmaActor):
 
         return -tf.reduce_mean(log_std * tf.reduce_sum(log_grads * weights * mask, axis=1, keepdims=True) / tf.reduce_sum(mask))
 
+
+class DelayedMedianRuleActor(VarSigmaActor):
+    def __init__(self, obs_space, *args, q=25, delay=100, each_step_delay=False, batch_size, **kwargs):
+        assert 'std_lr' in kwargs, "DelayedMedianRuleActor requires separate optimization process for std"
+        self.q = q
+        self.delay = delay
+        self.each_step_delay = each_step_delay
+
+        if each_step_delay:
+            self._stored = tf.Variable(0, trainable=False)
+            self._stored_obs = tf.Variable(np.zeros((delay, batch_size, *obs_space.shape)), dtype=obs_space.dtype, trainable=False)
+            self._stored_quantiles = tf.Variable(np.zeros((delay, batch_size)), dtype=tf.float32, trainable=False)
+        else:
+            self._stored = tf.Variable(False, trainable=False)
+            self._stored_obs = tf.Variable(np.zeros((batch_size, *obs_space.shape)), dtype=obs_space.dtype, trainable=False)
+            self._stored_quantiles = tf.Variable(np.zeros(batch_size), dtype=tf.float32, trainable=False)
+
+        VarSigmaActor.__init__(self, obs_space, *args, **kwargs, std_loss_args={
+            'time_step': 'base.time_step',
+            'stored': 'self.stored',
+            'stored_obs': 'self.stored_obs',
+            'successes': 'actor.successes',
+        })
+
+        self.register_parameterized_method_call('quantiles_old', 'critic.quantiles', {'observations': 'self.stored_obs'})
+        self.register_method('stored', self.stored, {})
+        self.register_method(
+            'stored_obs', self.stored_obs_each_step if each_step_delay else self.stored_obs,
+            {'time_step': 'base.time_step'}
+        )
+        self.register_method(
+            'stored_quantiles', self.stored_quantiles_each_step if each_step_delay else self.stored_quantiles,
+            {'time_step': 'base.time_step'}
+        )
+        self.register_method(
+            'store_values', self.store_values_each_step if each_step_delay else self.store_values, {
+                'stored_obs': 'self.stored_obs', 'obs': 'base.first_obs',
+                'stored_quantiles': 'self.stored_quantiles', 'quantiles': 'critic.quantiles',
+                'stored': 'self.stored', 'time_step': 'base.time_step'
+        })
+
+        self.register_method('successes', self.successes, {
+            'quantiles_stored': 'self.stored_quantiles', 'quantiles_old': 'self.quantiles_old'
+        })
+
+        self.targets.append('store_values')
+
+    def stored(self):
+        return tf.identity(self._stored)
+
+    def stored_obs(self, time_step):
+        return tf.identity(self._stored_obs)
+
+    def stored_obs_each_step(self, time_step):
+        return tf.identity(self._stored_obs[time_step % self.delay])
+
+    def stored_quantiles(self, time_step):
+        return tf.identity(self._stored_quantiles)
+
+    def stored_quantiles_each_step(self, time_step):
+        return tf.identity(self._stored_quantiles[time_step % self.delay])
+
+    def store_values_each_step(self, stored_obs, obs, stored_quantiles, quantiles, stored, time_step):
+        i = time_step % self.delay
+        self._stored_obs[i].assign(stored_obs * 0 + obs)
+        self._stored_quantiles[i].assign(stored_quantiles * 0 + quantiles[:,0,self.q])
+        self._stored.assign(tf.minimum(self.delay, stored + 1))
+
+    @tf.function
+    def store_values(self, stored_obs, obs, stored_quantiles, quantiles, stored, time_step):
+        if time_step % self.delay == 0 or not stored:
+            self._stored_obs.assign(stored_obs * 0 + obs)
+            self._stored_quantiles.assign(stored_quantiles * 0 + quantiles[:,0,self.q])
+            self._stored.assign(stored or True)
+
+    @tf.function
+    def successes(self, quantiles_stored, quantiles_old):
+        return tf.cast(quantiles_old > tf.expand_dims(quantiles_stored, 1), tf.float32)
+
+    @tf.function
+    def std_loss(self, stored_obs, successes, **kwargs):
+        mean, log_std = self.mean_and_log_std(stored_obs)
+        # median > value -> increase
+        # median < value -> decrease
+        log_grads = 2 * tf.reduce_mean(successes, axis=1, keepdims=True) - 1
+
+        return -tf.reduce_mean(log_std * log_grads)
+
+    @tf.function
+    def optimize_std(self, time_step, stored, **loss_kwargs):
+        if self.each_step_delay:
+            optimize = stored >= self.delay
+        else:
+            optimize = time_step % self.delay == 0 and stored
+        if optimize:
+            with tf.GradientTape() as tape:
+                loss = self.std_loss(**loss_kwargs)
+            grads = tape.gradient(loss, self.std_trainable_variables)
+            gradients = zip(grads, self.std_trainable_variables)
+
+            self.std_optimizer.apply_gradients(gradients)
+
+            return loss
+        else:
+            return 0.
 
 class MedianMinusValueActor(VarSigmaActor):
     def __init__(self, *args, **kwargs):

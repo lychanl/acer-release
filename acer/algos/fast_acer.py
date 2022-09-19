@@ -24,7 +24,7 @@ from algos.actors import (
     TD2RegStdClippedCategoricalActor, TD2RegStdClippedGaussianActor
 )
 from algos.varsigmaactors import VarSigmaActor
-from algos.evoacers import R15Actor, MedianRuleActor, MedianToValueActor, MedianMinusValueActor
+from algos.evoacers import R15Actor, MedianRuleActor, MedianToValueActor, MedianMinusValueActor, DelayedMedianRuleActor
 from algos.critics import VarianceCritic, QuantileCritic
 from replay_buffer import BufferFieldSpec, VecReplayBuffer, MultiReplayBuffer
 from prioritized_buffer import MultiPrioritizedReplayBuffer
@@ -38,6 +38,7 @@ ACTORS = {
     'varsigma': {False: VarSigmaActor},
     'r15': {False: R15Actor},
     'median_rule': {False: MedianRuleActor},
+    'delayed_median_rule': {False: DelayedMedianRuleActor},
     'median_to_value': {False: MedianToValueActor},
     'median_minus_value': {False: MedianMinusValueActor},
 }
@@ -81,11 +82,13 @@ def print_batch(batch):
 
 class FastACER(BaseACERAgent):
     DATA_FIELDS = ('lengths', 'obs', 'obs_next', 'actions', 'policies', 'rewards', 'dones', 'priorities')
+    ACT_DATA_FIELDS = ('obs', 'actions')
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
                  critic_layers: Optional[Tuple[int]], b: float = 3, no_truncate: bool = True,
-                 update_blocks=1, buffer_type='simple', log_values=(), log_memory_values=(),
-                 actor_type='simple', critic_type='simple', nan_guard=False, log_to_file_values=(),
+                 update_blocks=1, buffer_type='simple', log_values=(), log_memory_values=(), log_act_values=(),
+                 log_to_file_values=(), log_to_file_act_values=(),
+                 actor_type='simple', critic_type='simple', nan_guard=False, 
                  *args, **kwargs):
         """BaseActor-Critic with Experience Replay
 
@@ -155,10 +158,13 @@ class FastACER(BaseACERAgent):
         self._log_values = prepare_log_values(log_values)
         self._log_memory_values = prepare_log_values(log_memory_values)
         self._log_to_file_values = prepare_log_values(log_to_file_values)
+        self._log_act_values = prepare_log_values(log_act_values)
+        self._log_to_file_act_values = prepare_log_values(log_to_file_act_values)
         self._nan_guard = nan_guard
         self._nan_log_prev_mem_batch = None
         self._nan_log_prev_batch = None
 
+        self._init_log_act_automodel()
         check_log_values(self._log_values, self._call_list_data, self._call_list)
         check_log_values(self._log_to_file_values, self._call_list_data, self._call_list)
         check_log_values(self._log_memory_values, self._memory_call_list_data, self._memory_call_list, "in memory updates")
@@ -206,6 +212,13 @@ class FastACER(BaseACERAgent):
         else:
             self._memory_call_list = self._memory_call_list_data = None
 
+    def _init_log_act_automodel(self):
+        if self._log_act_values or self._log_to_file_act_values:
+            to_log = list({v for _, v, _ in self._log_act_values} | {v for _, v, _ in self._log_to_file_act_values})
+            self._log_act_call_list, self._log_act_call_list_data = self.prepare_call_list(to_log, self.ACT_DATA_FIELDS)
+        else:
+            self._log_act_call_list = self._log_act_call_list_data = None
+
     def _init_automodel_overrides(self) -> None:
         pass
 
@@ -213,7 +226,7 @@ class FastACER(BaseACERAgent):
         return ACTORS[self._actor_type][self._is_discrete](
             self._observations_space, self._actions_space, self._actor_layers,
             self._actor_beta_penalty, tf_time_step=self._tf_time_step, truncate=self._truncate, b=self._b,
-            num_parallel_envs=self._num_parallel_envs, **self._actor_args
+            batch_size=self._batch_size, num_parallel_envs=self._num_parallel_envs, **self._actor_args
         )
 
     def _init_data_loader(self, _) -> None:
@@ -307,8 +320,6 @@ class FastACER(BaseACERAgent):
                 tf.summary.scalar(name, gather(data[value]), self._tf_time_step)
         return [gather(data[value]) for _, value, gather in self._log_to_file_values]
 
-
-
     @tf.function(experimental_relax_shapes=True)
     def _calculate_td(self, values, values_next, rewards, lengths, dones, mask, n):
         dones_mask = 1 - tf.cast(
@@ -336,6 +347,28 @@ class FastACER(BaseACERAgent):
     @tf.function(experimental_relax_shapes=True)
     def _calculate_weighted_td(self, td, weights):
         return tf.stop_gradient(td * weights)
+
+    def predict_action_log(self, observations, action):
+        if self._log_act_call_list is not None:
+            data = {}
+            if 'action' in self._log_act_call_list_data:
+                data['action'] = action
+            if 'obs' in self._log_act_call_list_data:
+                data['obs'] = observations
+            data = self.call_list(self._log_act_call_list, data, {})
+            with tf.name_scope('act_log'):
+                for name, value, gather in self._log_act_values:
+                    tf.summary.scalar(name, gather(data[value]), self._tf_time_step)
+            return [gather(data[value]) for _, value, gather in self._log_to_file_act_values]
+
+
+    def predict_action(self, observations: np.array, is_deterministic: bool = False):
+        action, policy, _ = super().predict_action(observations, is_deterministic)
+        if not is_deterministic:
+            log = self.predict_action_log(observations, action)
+        else:
+            log = None
+        return action, policy, log
 
     def _fetch_offline_batch(self) -> List[Dict[str, Union[np.array, list]]]:
         return self._memory.get_vec(self._batches_per_env, self._memory.n)

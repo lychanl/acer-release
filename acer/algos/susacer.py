@@ -35,8 +35,8 @@ class SusActor:
 
         self.modify_std = modify_std
 
-        self.previous_actions = tf.Variable(tf.zeros((num_parallel_envs, *action_space.shape)), dtype=tf.float32)
-        self.action_lengths = tf.Variable(tf.zeros((num_parallel_envs,)), dtype=tf.float32)
+        self.previous_actions = tf.Variable(tf.zeros((num_parallel_envs, *action_space.shape)), dtype=tf.float32, trainable=False)
+        self.action_lengths = tf.Variable(tf.zeros((num_parallel_envs,)), dtype=tf.float32, trainable=False)
 
     @property
     def sustain(self):
@@ -86,14 +86,22 @@ class SusActor:
     def update_ends(self, ends):
         self.ends = ends[:,0]
 
-    def calculate_probs(self, dist, actions, sustain):
+    tf.function(experimental_relax_shapes=True)
+    def calculate_probs(self, dist, actions, sustain, n):
         amask = tf.reduce_prod(tf.cast(actions[:,1:] == actions[:, :-1], tf.float32), axis=-1)
         susmask = tf.concat([tf.zeros_like(amask[:,:1]), amask], axis=-1)
 
-        suslens_arr = [tf.zeros_like(susmask[:,0])]
-        for i in range(1, susmask.shape[1]): # probably won't work because of setting the values
-            suslens_arr.append(suslens_arr[-1] * susmask[:,i] + susmask[:,i])
-        suslens = tf.stack(suslens_arr, axis=-1)
+        cumprods_mask = tf.cast(
+            tf.expand_dims(tf.cumsum(tf.ones_like(susmask), -1), -1) >= tf.expand_dims(tf.cumsum(tf.ones_like(susmask), -1), -2),
+            # tf.expand_dims(tf.range(tf.shape(susmask)[1]), -1) <= tf.expand_dims(tf.range(tf.shape(susmask)[1]), -2),
+            tf.float32
+        )
+        cumprods = tf.math.cumprod(
+            tf.expand_dims(susmask, -1) * tf.ones(n) * cumprods_mask + (1 - cumprods_mask),
+            axis=-2
+        )
+        
+        suslens = tf.reduce_sum(cumprods * cumprods_mask, axis=-1)
 
         limit_mask = tf.cast(suslens + 1 >= self.limit_sustain_length, tf.float32)
         base_prob_mask = tf.concat([tf.ones_like(limit_mask[:,:1]), limit_mask[:,:-1]], axis=-1)
@@ -122,7 +130,7 @@ class GaussianSusActor(GaussianActor, SusActor):
 
         self.register_method(
             'policies', self.policy, 
-            {'observations': 'obs', 'actions': 'actions', 'sustain': 'actor_params.sustain'}
+            {'observations': 'obs', 'actions': 'actions', 'sustain': 'actor_params.sustain', 'n': 'memory_params.n'}
         )
 
     def update_ends(self, ends):
@@ -133,12 +141,12 @@ class GaussianSusActor(GaussianActor, SusActor):
         actions, policy = GaussianActor.act(self, observations, **kwargs)
         return SusActor.act(self, observations, actions, policy)
 
-    def policy(self, observations: tf.Tensor, actions: tf.Tensor, sustain: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
-        return self.prob(observations, actions, sustain)[0]
+    def policy(self, observations: tf.Tensor, actions: tf.Tensor, sustain: tf.Tensor, n) -> Tuple[tf.Tensor, tf.Tensor]:
+        return self.prob(observations, actions, sustain, n)[0]
 
-    def prob(self, observations: tf.Tensor, actions: tf.Tensor, sustain: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+    def prob(self, observations: tf.Tensor, actions: tf.Tensor, sustain: tf.Tensor, n) -> Tuple[tf.Tensor, tf.Tensor]:
         dist = GaussianActor._dist(self, observations)
-        return SusActor.calculate_probs(self, dist, actions, sustain)
+        return SusActor.calculate_probs(self, dist, actions, sustain, n)
 
 
 ACTORS['sustain'] = {True: None, False: GaussianSusActor}

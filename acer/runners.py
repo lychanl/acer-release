@@ -77,7 +77,7 @@ class Runner:
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
                  record_end: bool = True, experiment_name: str = None, asynchronous: bool = True,
                  log_tensorboard: bool = True, do_checkpoint: bool = True, record_time_steps: int = None,
-                 periodic_log: int = -1, dump=(), log_to_file_values=(), log_to_file_steps=1000):
+                 periodic_log: int = -1, dump=(), log_to_file_values=(), log_to_file_act_values=(), log_to_file_steps=1000):
         """Trains and evaluates the agent.
 
         Args:
@@ -111,6 +111,7 @@ class Runner:
         self._env_name = environment_name
 
         self._log_to_file_values = log_to_file_values
+        self._log_to_file_act_values = log_to_file_act_values
         self._log_to_file_steps = log_to_file_steps
 
         self._record_end = record_end
@@ -138,8 +139,10 @@ class Runner:
             self._log_dir / 'results.csv',
             keys=['time_step', 'eval_return_mean', 'eval_std_mean']
         )
-        if self._log_to_file_values:
-            self._values_csv_logger = CSVLogger(self._log_dir / 'values.csv', keys=['time_step'] + list(self._log_to_file_values))
+        if self._log_to_file_values or self._log_to_file_act_values:
+            self._values_csv_logger = CSVLogger(
+                self._log_dir / 'values.csv', 
+                keys=['time_step'] + list(self._log_to_file_values + [f'act/{v}' for v in self._log_to_file_act_values]))
         else:
             self._values_csv_logger = None
         if periodic_log > 0:
@@ -180,6 +183,7 @@ class Runner:
         uses policy that is being optimized, not the one used in training (i.e. randomness is turned off)
         """
         try:
+            step_logged_values = []
             logged_values = []
             while self._max_time_steps == -1 or self._time_step <= self._max_time_steps:
                 if self._is_time_to_evaluate():
@@ -190,14 +194,17 @@ class Runner:
                             self._save_checkpoint()
                 
                 if self._is_time_to_log_values():
-                    self._log_values(logged_values)
-                    logged_values = []
+                    self._log_values(logged_values, step_logged_values)
+                    logged_values.clear()
+                    step_logged_values.clear()
 
                 if self._is_time_to_record():
                     self.record_video()
 
                 start_time = time.time()
-                experience = self._step()
+                experience, step_values = self._step()
+                if step_values is not None:
+                    step_logged_values.append(step_values)
                 self._agent.save_experience(experience)
                 if self._time_step % self._n_step == 0:
                     values = self._agent.learn()
@@ -224,7 +231,7 @@ class Runner:
         self._logger.info(f"saved evaluation results in {self._log_dir}")
 
     def _step(self) -> List[Tuple[Union[int, float], np.array, float, float, bool, bool]]:
-        actions, policies = self._agent.predict_action(self._current_obs)
+        actions, policies, log_to_file = self._agent.predict_action(self._current_obs)
         steps = self._env.step(actions)
         rewards = []
         experience = []
@@ -267,7 +274,7 @@ class Runner:
                 self._done_steps_in_a_episode[i] = 0
 
         self._current_obs = np.array(self._current_obs)
-        return experience
+        return experience, log_to_file
 
     def _evaluate(self):
         self._next_evaluation_timestamp += self._evaluate_time_steps_interval
@@ -279,7 +286,7 @@ class Runner:
 
         while not all(envs_finished):
             time_step += 1
-            actions, _ = self._agent.predict_action(current_obs, is_deterministic=True)
+            actions, _, _ = self._agent.predict_action(current_obs, is_deterministic=True)
             steps = self._evaluate_env.step(actions)
             current_obs = steps[0]
             for i in range(self._num_evaluation_runs):
@@ -318,7 +325,7 @@ class Runner:
 
             while not is_end:
                 time_step += 1
-                actions, _ = self._agent.predict_action(current_obs, is_deterministic=True)
+                actions, _, _ = self._agent.predict_action(current_obs, is_deterministic=True)
                 steps = env.step(actions[0])
                 current_obs = np.array([steps[0]])
                 is_done_gym = steps[2]
@@ -349,16 +356,25 @@ class Runner:
         self._elapsed_time_measure = 0
 
     def _is_time_to_log_values(self):
-        return self._log_to_file_values and self._time_step >= self._next_log_values_timestamp
+        return (
+            self._log_to_file_values or self._log_to_file_act_values
+        ) and self._time_step >= self._next_log_values_timestamp
 
-    def _log_values(self, values):
+    def _log_values(self, values, step_values):
         self._next_log_values_timestamp += self._log_to_file_steps
 
-        if not values:
+        if not values and not step_values:
             return
 
-        means = np.mean(values, 0)
-        means_dict = {name: value for name, value in zip(self._log_to_file_values, means)}
+        means_dict = {}
+        if values:
+            means = np.mean(values, 0)
+            means_dict.update({name: value for name, value in zip(self._log_to_file_values, means)})
+        if step_values:
+            step_means = np.mean(step_values, 0)
+            means_dict.update(
+                {f'act/{name}': value for name, value in zip(self._log_to_file_act_values, step_means)}
+            )
         means_dict['time_step'] = self._time_step
 
         self._values_csv_logger.log_values(means_dict)

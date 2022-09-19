@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from argparse import ArgumentError
 from algos.common.automodel import AutoModel, AutoModelComponent
 from pathlib import Path
-from typing import Iterable, Tuple, Union, List, Optional, Dict
+from typing import Any, Iterable, Tuple, Union, List, Optional, Dict
 
 import gym
 import numpy as np
@@ -700,7 +700,7 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
             self._running_mean_rewards.update(tf.expand_dims(tf.cast(rewards, dtype=tf.float32), axis=1))
 
     def predict_action(self, observations: np.array, is_deterministic: bool = False) \
-            -> Tuple[np.array, Optional[np.array]]:
+            -> Tuple[np.array, Optional[np.array], Any]:
         """Predicts actions for given observations. Performs forward pass with BaseActor network.
 
         Args:
@@ -713,10 +713,10 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
         """
         processed_obs = tf.convert_to_tensor(self._process_observations(observations))
         if is_deterministic:
-            return self._actor.act_deterministic(processed_obs).numpy(), None
+            return self._actor.act_deterministic(processed_obs).numpy(), None, None
         else:
             actions, policies = self._actor.act(processed_obs)
-            return actions.numpy(), policies.numpy()
+            return actions.numpy(), policies.numpy(), None
 
     def _experience_replay_generator(self):
         while True:

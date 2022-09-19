@@ -133,6 +133,8 @@ class QuantileCritic(Critic):
                 {'value': 'self.value', 'quantiles': 'self.quantiles'}
             )
 
+        self.register_parameterized_method('quantiles', self.calc_quantiles, {}, ['observations'])
+
     @tf.function
     def outliers_mask(self, quantile_td):
         return tf.cast((quantile_td[...,self.outliers_q] < 0) | (quantile_td[...,-(self.outliers_q+1)] > 0), tf.float32)

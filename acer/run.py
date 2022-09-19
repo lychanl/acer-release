@@ -137,10 +137,12 @@ parser.add_argument('--actor.no_clip_td2', action='store_true', help='Disable cl
 parser.add_argument('--actor.clip_weighted', action='store_true', help='clipping is to be performed on weighted td in StdClippedActor')
 parser.add_argument('--actor.nn_std', action='store_true')
 parser.add_argument('--actor.separate_nn_std', nargs='+', type=int)
+parser.add_argument('--actor.delay', type=int)
 parser.add_argument('--actor.single_std', action='store_true')
 parser.add_argument('--actor.std_lr', type=float)
 parser.add_argument('--actor.initial_log_std', type=float)
 parser.add_argument('--actor.mask_outliers', action='store_true')
+parser.add_argument('--actor.each_step_delay', action='store_true')
 parser.add_argument('--actor.entropy_bonus', type=float)
 parser.add_argument('--reverse', action='store_true',
                     help='Reverse param for exploracer')
@@ -159,8 +161,10 @@ parser.add_argument('--log_dir', type=str, help='Logging directory', default='lo
 parser.add_argument('--no_checkpoint', help='Disable checkpoint saving', action='store_true')
 parser.add_argument('--no_tensorboard', help='Disable tensorboard logs', action='store_true')
 parser.add_argument('--log_values', help='Log values during training', type=str, nargs='*')
+parser.add_argument('--log_act_values', help='Log values during training', type=str, nargs='*')
 parser.add_argument('--log_memory_values', help='Log values during memory update', type=str, nargs='*')
 parser.add_argument('--log_to_file_values', help='Log values during training to a file every n steps, averaged over these steps', type=str, nargs='*')
+parser.add_argument('--log_to_file_act_values', help='Log values during training to a file every n steps, averaged over these steps', type=str, nargs='*')
 parser.add_argument('--log_to_file_steps', help='Log values during training to a file every n steps, averaged over these steps', type=int, default=1000)
 parser.add_argument('--experiment_name', type=str, help='Name of the current experiment', default='')
 parser.add_argument('--save_video_on_kill', action='store_true',
@@ -211,6 +215,7 @@ def main():
     synchronous = parameters.pop('synchronous')
     env_name = cmd_parameters.env_name
     log_to_file_values = cmd_parameters.log_to_file_values
+    log_to_file_act_values = cmd_parameters.log_to_file_act_values
     log_to_file_steps = parameters.pop('log_to_file_steps')
     dump = args.dump or ()
 
@@ -259,6 +264,7 @@ def main():
         dump=dump,
         periodic_log=args.force_periodic_log,
         log_to_file_values=log_to_file_values,
+        log_to_file_act_values=log_to_file_act_values,
         log_to_file_steps=log_to_file_steps,
     )
 
