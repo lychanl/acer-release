@@ -1,5 +1,3 @@
-from turtle import delay
-
 import numpy as np
 from algos.varsigmaactors import VarSigmaActor
 
