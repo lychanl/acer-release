@@ -24,7 +24,9 @@ from algos.actors import (
     TD2RegStdClippedCategoricalActor, TD2RegStdClippedGaussianActor
 )
 from algos.varsigmaactors import VarSigmaActor
-from algos.evoacers import R15Actor, MedianRuleActor, MedianToValueActor, MedianMinusValueActor, DelayedMedianRuleActor
+from algos.evoacers import (
+    R15Actor, MedianRuleActor, MedianToValueActor, MedianMinusValueActor, DelayedMedianRuleActor, LeewayDelayedMedianRuleActor
+)
 from algos.critics import VarianceCritic, QuantileCritic
 from replay_buffer import BufferFieldSpec, VecReplayBuffer, MultiReplayBuffer
 from prioritized_buffer import MultiPrioritizedReplayBuffer
@@ -39,6 +41,7 @@ ACTORS = {
     'r15': {False: R15Actor},
     'median_rule': {False: MedianRuleActor},
     'delayed_median_rule': {False: DelayedMedianRuleActor},
+    'leeway_delayed_median_rule': {False: LeewayDelayedMedianRuleActor},
     'median_to_value': {False: MedianToValueActor},
     'median_minus_value': {False: MedianMinusValueActor},
 }

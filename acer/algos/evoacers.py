@@ -230,6 +230,55 @@ class DelayedMedianRuleActor(VarSigmaActor):
         else:
             return 0.
 
+
+class LeewayDelayedMedianRuleActor(DelayedMedianRuleActor):
+    def __init__(self, *args, leeway=None, outliers=None, batch_size, delay=100, each_step_delay=False, **kwargs):
+        super().__init__(*args, **kwargs, batch_size=batch_size, each_step_delay=each_step_delay)
+        self.leeway = leeway
+        self.outliers = outliers
+        self._stored_quantiles = tf.Variable(
+            np.zeros((delay, batch_size, 5) if each_step_delay else (batch_size, 5,)), dtype=tf.float32, trainable=False
+        )
+        self.ll = self.q - (leeway or 0)
+        self.lh = self.q + (leeway or 0)
+        self.ol = outliers or 0
+        self.oh = -1 - (outliers or 0)
+
+    @tf.function
+    def quantiles_to_store(self, quantiles):
+        return tf.stack([
+            quantiles[:,0,self.q],
+            quantiles[:,0,self.ll],
+            quantiles[:,0,self.lh],
+            quantiles[:,0,self.ol],
+            quantiles[:,0,self.oh],
+        ], axis=-1)
+
+    def store_values_each_step(self, stored_obs, obs, stored_quantiles, quantiles, stored, time_step):
+        i = time_step % self.delay
+        self._stored_obs[i].assign(stored_obs * 0 + obs)
+        self._stored_quantiles[i].assign(stored_quantiles * 0 + self.quantiles_to_store(quantiles))
+        self._stored.assign(tf.minimum(self.delay, stored + 1))
+
+    @tf.function
+    def store_values(self, stored_obs, obs, stored_quantiles, quantiles, stored, time_step):
+        if time_step % self.delay == 0 or not stored:
+            self._stored_obs.assign(stored_obs * 0 + obs)
+            self._stored_quantiles.assign(stored_quantiles * 0 + self.quantiles_to_store(quantiles))
+            self._stored.assign(stored or True)
+
+    def successes(self, quantiles_stored, quantiles_old):
+        outliers = (
+            quantiles_old < tf.expand_dims(quantiles_stored[:,3], -1)
+        ) | (
+            quantiles_old > tf.expand_dims(quantiles_stored[:,4], -1)
+        ) & (self.outliers is not None)
+        decreases = (quantiles_old < tf.expand_dims(quantiles_stored[:,1], -1)) & ~outliers
+        improvements = (quantiles_old > tf.expand_dims(quantiles_stored[:,2], -1)) & ~outliers
+        others = ~decreases & ~improvements
+        return tf.cast(improvements, tf.float32) + tf.cast(others, tf.float32) * 0.5
+
+
 class MedianMinusValueActor(VarSigmaActor):
     def __init__(self, *args, **kwargs):
         VarSigmaActor.__init__(self, *args, **kwargs, std_loss_args={
