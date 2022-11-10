@@ -2,6 +2,7 @@ import numpy as np
 from algos.varsigmaactors import VarSigmaActor
 
 import tensorflow as tf
+import tensorflow_probability as tfp
 
 
 class R15Actor(VarSigmaActor):
@@ -306,3 +307,34 @@ class MedianMinusValueActor(VarSigmaActor):
         # median < value -> decrease
 
         return -tf.reduce_mean(log_std * tf.expand_dims(median_value_diff_weighted, 1))
+
+
+class FitBetterActor(VarSigmaActor):
+    def __init__(self, *args, threshold='median', **kwargs) -> None:
+        THRESHOLDS = {
+            'median': 'critic.median',
+            'mean': 'critic.value'
+        }
+        super().__init__(*args, **kwargs, std_loss_args={
+            'observations': 'base.first_obs',
+            'actions': 'base.first_actions',
+            'weights': 'self.sample_weights',
+            'td': 'base.td',
+            'threshold': THRESHOLDS[threshold],
+        })
+        assert threshold in 'median', 'mean'
+
+    @tf.function
+    def std_loss(self, observations, actions, weights, td, threshold, **kwargs):
+        mean, std = self.mean_and_std(observations)
+        mask = tf.cast(td >= threshold[..., :1], tf.float32)
+
+        dist = tfp.distributions.MultivariateNormalDiag(
+            loc=mean,
+            scale_diag=std
+        )
+
+        entropy_bonus = self.entropy_bonus * tf.reduce_mean(dist.entropy())
+        
+        return -tf.reduce_mean(tf.expand_dims(dist.log_prob(actions), -1) * mask * weights) - entropy_bonus
+        

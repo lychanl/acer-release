@@ -25,7 +25,8 @@ from algos.actors import (
 )
 from algos.varsigmaactors import VarSigmaActor
 from algos.evoacers import (
-    R15Actor, MedianRuleActor, MedianToValueActor, MedianMinusValueActor, DelayedMedianRuleActor, LeewayDelayedMedianRuleActor
+    R15Actor, MedianRuleActor, MedianToValueActor, MedianMinusValueActor, DelayedMedianRuleActor,
+    LeewayDelayedMedianRuleActor, FitBetterActor
 )
 from algos.critics import VarianceCritic, QuantileCritic
 from replay_buffer import BufferFieldSpec, VecReplayBuffer, MultiReplayBuffer
@@ -44,6 +45,7 @@ ACTORS = {
     'leeway_delayed_median_rule': {False: LeewayDelayedMedianRuleActor},
     'median_to_value': {False: MedianToValueActor},
     'median_minus_value': {False: MedianMinusValueActor},
+    'fit_better': {False: FitBetterActor}
 }
 
 

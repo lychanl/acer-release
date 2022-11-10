@@ -12,19 +12,19 @@ import numpy as np
 import tensorflow as tf
 from gym import wrappers
 
-from algos.acer import ACER
 from algos.fast_acer import FastACER
 from algos.susacer import SusACER
 from algos.acerax import ACERAX
 from algos.std_clipped_acer import StdClippedACER
-from algos.acerac import ACERAC
 from algos.base import BaseACERAgent
-from algos.quantile_acer import QACER
-from algos.qacerac import QACERAC
-from algos.exploracer import DistExplorACER, StdExplorACER, SingleSigmaExplorACER, MultiSigmaExplorACER
 from logger import CSVLogger, DefaultConsoleLogger, PeriodicConsoleLogger
 from utils import is_atari, getPossiblyDTChangedEnvBuilder
 
+from algos.legacy.acer import ACER
+from algos.legacy.acerac import ACERAC
+from algos.legacy.quantile_acer import QACER
+from algos.legacy.qacerac import QACERAC
+from algos.legacy.exploracer import DistExplorACER, StdExplorACER, SingleSigmaExplorACER, MultiSigmaExplorACER
 
 ALGOS = {
     'acer': ACER,

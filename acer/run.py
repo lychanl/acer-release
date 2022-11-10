@@ -15,8 +15,8 @@ if '--debug' in argv:
 from runners import Runner, ALGOS
 from utils import calculate_gamma, getDTChangedEnvName
 
-from algos.acerac import AUTOCORRELATED_ACTORS
-from algos.exploracer import DIFF_FUNCTIONS
+from algos.legacy.acerac import AUTOCORRELATED_ACTORS
+from algos.legacy.exploracer import DIFF_FUNCTIONS
 from algos.fast_acer import BUFFERS, ACTORS, CRITICS
 from algos.critics import VARIANCE_FUNS
 
@@ -244,6 +244,10 @@ def main():
         print(f'Auto-adapted evaluate_time_steps_interval to {evaluate_time_steps_interval}')
         n_step = n_step * timesteps_increase
         print(f'Auto-adapted n_step to {n_step}')
+
+    if experiment_name:
+        for param, value in parameters.items():
+            experiment_name = experiment_name.replace(f'{{{param}}}', str(value))
 
     if use_cpu:
         tf.config.set_visible_devices([], 'GPU')

@@ -9,8 +9,8 @@ import numpy as np
 
 import tf_utils
 from algos.base import BaseActor, Critic, BaseACERAgent, GaussianActor
-from algos.acerac import NoiseGaussianActor, ACERAC
-from algos.quantile_acer import QuantileCritic, QACER
+from algos.legacy.acerac import NoiseGaussianActor, ACERAC
+from algos.legacy.quantile_acer import QuantileCritic, QACER
 from replay_buffer import BufferFieldSpec, PrevReplayBuffer, MultiReplayBuffer
 
 class QACERAC(ACERAC, QACER):
