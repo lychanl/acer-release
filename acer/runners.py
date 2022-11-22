@@ -41,6 +41,11 @@ ALGOS = {
     'multisigma': MultiSigmaExplorACER
 }
 
+LEGACY_ALGOS = {
+    ACER, ACERAC, QACER, QACERAC,
+    DistExplorACER, StdExplorACER, SingleSigmaExplorACER, MultiSigmaExplorACER
+}
+
 
 def _get_agent(algorithm: str, parameters: Optional[dict], observations_space: gym.Space,
                actions_space: gym.Space) -> BaseACERAgent:

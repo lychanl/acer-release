@@ -19,7 +19,7 @@ def _calc_esteps(sustain):
 class SusActor:
     def __init__(
             self, obs_space, action_space, *args,
-            sustain=None, esteps=None, limit_sustain_length=None, num_parallel_envs=1, modify_std=False,
+            sustain=None, esteps=None, limit_sustain_length=None, num_parallel_envs=1, modify_std=False, single_step_mask=False,
             **kwargs):
         assert xor(sustain is None, esteps is None)
 
@@ -34,9 +34,19 @@ class SusActor:
         self.ends = np.zeros(num_parallel_envs)
 
         self.modify_std = modify_std
+        self.single_step_mask = single_step_mask
 
         self.previous_actions = tf.Variable(tf.zeros((num_parallel_envs, *action_space.shape)), dtype=tf.float32, trainable=False)
         self.action_lengths = tf.Variable(tf.zeros((num_parallel_envs,)), dtype=tf.float32, trainable=False)
+
+        if self.single_step_mask:
+            self.register_method(
+                'sample_weights', self._calculate_truncated_single_step_weights, {
+                    'density': 'actor.density',
+                    'priorities': 'priorities',
+                    'actions': 'actions',
+                }
+            )
 
     @property
     def sustain(self):
@@ -110,17 +120,22 @@ class SusActor:
         base_prob_log = dist.log_prob(actions)
 
         return (
-            (
-                base_prob_mask * base_prob 
-                + (1 - susmask - base_prob_mask) * (1 - sustain) * base_prob 
-                + susmask * sustain
-            ),
-            (
-                base_prob_mask * base_prob_log
-                + (1 - susmask - base_prob_mask) * (base_prob_log + tf.math.log(1 - sustain))
-                + susmask * tf.math.log(sustain)
-            )
+            base_prob_mask * base_prob 
+            + (1 - susmask - base_prob_mask) * (1 - sustain) * base_prob 
+            + susmask * sustain,
+            
+            base_prob_mask * base_prob_log
+            + (1 - susmask - base_prob_mask) * (base_prob_log + tf.math.log(1 - sustain))
+            + susmask * tf.math.log(sustain)
         )
+    
+    @tf.function
+    def _calculate_truncated_single_step_weights(self, actions, *args, **kwargs):
+        weights = self._calculate_truncated_weights(*args, **kwargs)
+        mask = tf.math.cumprod(tf.cast(tf.reduce_all(actions[:,1:] == actions[:,:-1], axis=-1), tf.float32), axis=1)
+        mask = tf.concat([tf.ones_like(mask[:,:1]), mask], axis=1)
+
+        return weights * mask
 
 
 class GaussianSusActor(GaussianActor, SusActor):

@@ -9,7 +9,7 @@ from typing import Union, Dict
 class PrioritizedReplayBuffer(VecReplayBuffer):
     def __init__(
             self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec,
-            block: int, levels: int = 2, probability_as_actor_out: bool = False, *args, **kwargs):
+            block: int = 256, levels: int = 2, probability_as_actor_out: bool = False, *args, **kwargs):
         super().__init__(max_size, action_spec, obs_spec, policy_spec=policy_spec, *args, **kwargs)
         self._udpate_pointer = 0
 
@@ -149,7 +149,7 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
     def __init__(
             self, max_size: int, num_buffers: int,
             action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec,
-            priority: str, block: int, clip: float = -1, alpha: float = 1, beta: float = 0, eps=1e-4, *args, updatable=True, **kwargs):
+            priority: str = 'IS', block: int = 256, clip: float = -1, alpha: float = 1, beta: float = 0, eps=1e-4, *args, updatable=True, **kwargs):
         self._clip = clip
         self._alpha = alpha
         self._beta = beta
