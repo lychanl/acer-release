@@ -6,6 +6,7 @@ from algos.fast_acer import ACTORS, FastACER
 from replay_buffer import BufferFieldSpec
 import numpy as np
 import tensorflow as tf
+import tensorflow_probability as tfp
 
 
 def _calc_sustain(esteps):
@@ -31,7 +32,7 @@ class SusActor:
             sustain=sustain, esteps=esteps, **get_adapts_from_kwargs(kwargs, ['sustain', 'esteps']))
 
         self.limit_sustain_length = limit_sustain_length or np.inf
-        self.ends = np.zeros(num_parallel_envs)
+        self.ends = np.ones(num_parallel_envs)
 
         self.modify_std = modify_std
         self.single_step_mask = single_step_mask
@@ -67,6 +68,15 @@ class SusActor:
 
         return self._forward(observation), tf.exp(self.log_std) * std_mult
 
+    def get_sustained_actions_and_probs(self, sustain, new_actions, new_actions_policies, obs):
+        """
+        returns:
+            action if sustained
+            sustained action prob
+            not-sustained action prob
+        """
+        return self.previous_actions, sustain, (1 - sustain) * new_actions_policies, 
+
     def act(self, observations, new_actions, policies):
         sustain = self.parameters.get_value('sustain')
         if sustain is None:
@@ -84,13 +94,20 @@ class SusActor:
 
         self.action_lengths.assign(self.action_lengths * mask + 1)
 
-        actions = self.previous_actions * mask + new_actions * (1 - mask)
-        sustain_policies = (
-            sustain * mask 
-            + policies * (1 - sustain) * (1 - (mask - first_mask * limit_mask)) 
-            + policies * (1 - first_mask * limit_mask)
+        sustained_actions, sustained_prob, non_sustained_prob = self.get_sustained_actions_and_probs(
+            sustain, new_actions, policies, observations
         )
+
+        actions = sustained_actions * mask + new_actions * (1 - mask)
+
+        sustain_policies = (
+            sustained_prob * mask  # sustain prob
+            + non_sustained_prob * (1 - mask) * first_mask * limit_mask   # non-sustained prob if sustain possible
+            + policies * (1 - first_mask * limit_mask)  # base prob if first or at limit
+        )
+
         self.previous_actions.assign(actions)
+        # prob, policy, base policy (last one for initial actions in trajectories)
         return actions, tf.stack([1 - mask, sustain_policies, policies], axis=1)
 
     def update_ends(self, ends):
@@ -120,10 +137,12 @@ class SusActor:
         base_prob_log = dist.log_prob(actions)
 
         return (
+            # prob
             base_prob_mask * base_prob 
             + (1 - susmask - base_prob_mask) * (1 - sustain) * base_prob 
             + susmask * sustain,
             
+            # logprob
             base_prob_mask * base_prob_log
             + (1 - susmask - base_prob_mask) * (base_prob_log + tf.math.log(1 - sustain))
             + susmask * tf.math.log(sustain)
@@ -136,7 +155,6 @@ class SusActor:
         mask = tf.concat([tf.ones_like(mask[:,:1]), mask], axis=1)
 
         return weights * mask
-
 
 class GaussianSusActor(GaussianActor, SusActor):
     def __init__(self, *args, **kwargs):
@@ -161,22 +179,75 @@ class GaussianSusActor(GaussianActor, SusActor):
 
     def prob(self, observations: tf.Tensor, actions: tf.Tensor, sustain: tf.Tensor, n) -> Tuple[tf.Tensor, tf.Tensor]:
         dist = GaussianActor._dist(self, observations)
-        return SusActor.calculate_probs(self, dist, actions, sustain, n)
+        return self.calculate_probs(dist, actions, sustain, n)
+
+
+class ApproxSusActor(GaussianSusActor):
+    def __init__(self, *args, sustain_approx=0.1, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sustain_approx = sustain_approx
+        assert self.limit_sustain_length is np.inf, 'ApproxSusActor does not support limited sustain length'
+        assert not self.single_step_mask, 'ApproxSusActor does not support single step mask'
+
+    def get_sustained_actions_and_probs(self, sustain, new_actions, new_actions_policies, observations):
+        """
+        returns:
+            action if sustained
+            sustained action prob
+            not-sustained action prob
+        """
+        base_distr = self._dist(observations)
+        sus_distr = tfp.distributions.MultivariateNormalDiag(
+            loc=self.previous_actions,
+            scale_diag=self.sustain_approx * base_distr.scale.diag
+        )
+
+        sustained_actions = sus_distr.sample()
+
+        new_actions_policies = sustain * sus_distr.prob(new_actions) + (1 - sustain) * new_actions_policies
+        sustained_policies = sustain * sus_distr.prob(sustained_actions) + (1 - sustain) * base_distr.prob(sustained_actions)
+
+        return sustained_actions, sustained_policies, new_actions_policies
+        
+    def calculate_probs(self, dist, actions, sustain, n):
+        base_prob = dist.prob(actions)
+        base_log_prob = dist.log_prob(actions)
+        diffs = actions[:,1:] - actions[:,:-1]
+        sus_dist = tfp.distributions.MultivariateNormalDiag(
+            loc=tf.zeros_like(actions[:,1:]),
+            scale_diag=self.sustain_approx * dist.scale.diag
+        )
+        sus_prob = sus_dist.prob(diffs)
+        sus_log_prob = sus_dist.prob(diffs)
+
+        base_prob_first = base_prob[:,:1]
+        base_prob_other = base_prob[:,1:]
+        base_log_prob_first = base_log_prob[:,:1]
+        base_log_prob_other = base_log_prob[:,1:]
+
+        return tf.concat([
+            base_prob_first,
+            sustain * sus_prob + (1 - sustain) * base_prob_other
+        ], axis=1), tf.concat([
+            base_log_prob_first,
+            sustain * sus_log_prob + (1 - sustain) * base_log_prob_other
+        ], axis=1)
 
 
 ACTORS['sustain'] = {True: None, False: GaussianSusActor}
+ACTORS['approx_sustain'] = {False: ApproxSusActor}
 
 
 class SusACER(FastACER):
-    def __init__(self, *args, **kwargs) -> None:
-        kwargs['actor_type'] = 'sustain'
+    def __init__(self, *args, actor_type='sustain', **kwargs) -> None:
+        assert actor_type in ('sustain', 'approx_sustain')
         kwargs['buffer_type'] = 'prioritized'
         kwargs['buffer.updatable'] = False
         kwargs['buffer.probability_as_actor_out'] = True
 
         policy_spec = BufferFieldSpec(shape=(2,), dtype=np.float32)
 
-        super().__init__(*args, policy_spec = policy_spec, **kwargs)
+        super().__init__(*args, policy_spec = policy_spec, **kwargs, actor_type=actor_type)
 
     def _init_automodel_overrides(self) -> None:
         self.register_component('actor_params', self._actor.parameters)
