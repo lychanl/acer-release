@@ -83,6 +83,7 @@ class Run:
 
         self.last_eval_outs = []
         self.last_eval_out_means = [None for _ in range(log_outs)]
+        self.all_eval_out_means = []
         self.timesteps = 0
 
     def _start(self, verbose):
@@ -130,9 +131,11 @@ class Run:
         elif parts[0] == 'Evaluations':
             for eval_ in parts[1].split(';'):
                 self.last_eval_outs = list(map(float, eval_.strip().split()))
+                eval_mean = sum(self.last_eval_outs) / len(self.last_eval_outs)
                 self.last_eval_out_means = [
-                    sum(self.last_eval_outs) / len(self.last_eval_outs)
+                    eval_mean
                 ] + self.last_eval_out_means[:-1]
+                self.all_eval_out_means.append(eval_mean)
         elif parts[0] == 'Error type':
             self.last_err = ':'.join(parts[1:]).strip()
         elif parts[0] == 'Error function':
@@ -176,10 +179,17 @@ class Run:
         # name = f"{self.name}:" if show_name else " " * (len(self.name) + 1)
         # print(f"{name}\t{descr}\t{status}{error}")
 
+        # area under curve
+        if self.all_eval_out_means:
+            auc = sum(self.all_eval_out_means[1:] + self.all_eval_out_means[:-1]) / (2 * len(self.all_eval_out_means))
+        else:
+            auc = 0
+
         return [
             *[param if show_name else "" for param in self.name_params],
             self.timesteps,
             *[f'{out:.2f}' if out is not None else "-" for out in self.last_eval_out_means],
+            f'{auc:.2f}',
             self.resource,
             status,
             time_str(self.started_t) if self.started_t else "-",
@@ -296,7 +306,7 @@ def get_next_resource(resources, running):
 
 
 def run(base_params, splitted_sets, repeats, resources, max_procs, remote, param_names, verbose):
-    columns = param_names + ["Timesteps", "Out (-1)", "Out (-2)", "Out (-3)", "Resource", "Status", "Start", "Finish", "Duration", "Error"]
+    columns = param_names + ["Timesteps", "Out (-1)", "Out (-2)", "Out (-3)", "AUC", "Resource", "Status", "Start", "Finish", "Duration", "Error"]
 
     processes_groups = [make_procs(base_params, set, repeats, remote, param_names) for set in splitted_sets]
     processes = [p for g in processes_groups for p in g.processes]
