@@ -82,11 +82,11 @@ class SusActor:
         if sustain is None:
             sustain = _calc_sustain(self.parameters.get_value('esteps'))
 
-        first_mask = 1 - tf.cast(self.ends, tf.float32)
+        first_mask = 1 - tf.cast(self.ends, tf.float32)  # 1 if not first action in episode, 0 if first action in episode
         limit_mask = tf.cast(
             self.action_lengths < self.limit_sustain_length,
             tf.float32
-        )
+        )  # 1 if not at sustain limit, 0 if at sustain limit
         mask = first_mask * limit_mask * tf.cast(
             tf.random.uniform(shape=(observations.shape[0],)) < sustain,
             tf.float32
@@ -113,7 +113,7 @@ class SusActor:
     def update_ends(self, ends):
         self.ends = ends[:,0]
 
-    tf.function(experimental_relax_shapes=True)
+    @tf.function(experimental_relax_shapes=True)
     def calculate_probs(self, dist, actions, sustain, n):
         amask = tf.reduce_prod(tf.cast(actions[:,1:] == actions[:, :-1], tf.float32), axis=-1)
         susmask = tf.concat([tf.zeros_like(amask[:,:1]), amask], axis=-1)
@@ -174,9 +174,11 @@ class GaussianSusActor(GaussianActor, SusActor):
         actions, policy = GaussianActor.act(self, observations, **kwargs)
         return SusActor.act(self, observations, actions, policy)
 
+    @tf.function
     def policy(self, observations: tf.Tensor, actions: tf.Tensor, sustain: tf.Tensor, n) -> Tuple[tf.Tensor, tf.Tensor]:
         return self.prob(observations, actions, sustain, n)[0]
 
+    @tf.function
     def prob(self, observations: tf.Tensor, actions: tf.Tensor, sustain: tf.Tensor, n) -> Tuple[tf.Tensor, tf.Tensor]:
         dist = GaussianActor._dist(self, observations)
         return self.calculate_probs(dist, actions, sustain, n)

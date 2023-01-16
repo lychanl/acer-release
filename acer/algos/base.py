@@ -107,6 +107,7 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
     def _extras_arr_forward(self, input) -> tf.Tensor:
         tuple([tf.gather_nd(extra_arr, tf.expand_dims(input, -1)) for extra_arr in self._extra_array])
 
+    @tf.function
     def optimize(self, **loss_kwargs):
         with tf.GradientTape() as tape:
             loss = self.loss(**loss_kwargs)
@@ -244,12 +245,14 @@ class BaseActor(BaseModel):
 
         return policies_ratio_prod
 
+    @tf.function
     def _calculate_truncated_density(self, density):
         if self._truncate:
             density = tf.tanh(density / self._b) * self._b
 
         return density
 
+    @tf.function
     def _calculate_truncated_weights(self, density, priorities):
         weights = density / tf.reshape(priorities, (-1, 1))
 
@@ -295,6 +298,7 @@ class BaseCritic(BaseModel):
     def call(self, inputs, training=None, mask=None, additional_input=None):
         return self.value(inputs, additional_input=additional_input)
 
+    @tf.function
     def value(self, observations: tf.Tensor, additional_input: tf.Tensor=None, **kwargs) -> tf.Tensor:
         """Calculates value function given observations batch
 
@@ -317,6 +321,7 @@ class Critic(BaseCritic):
         """Basic Critic that outputs single value"""
         super().__init__(observations_space, layers, tf_time_step, *args, use_additional_input=use_additional_input, nouts=nouts, **kwargs)
 
+    @tf.function
     def loss(self, observations: np.array, d: np.array, additional_input=None) -> tf.Tensor:
         """Computes Critic's loss.
 
@@ -349,6 +354,7 @@ class CategoricalActor(BaseActor):
     def action_dtype_np(self):
         return np.int32
 
+    @tf.function
     def loss(self, observations: tf.Tensor, actions: tf.Tensor, d: tf.Tensor) -> tf.Tensor:
         probs, log_probs, action_probs, action_log_probs = self._prob(observations, actions)
 
@@ -360,10 +366,12 @@ class CategoricalActor(BaseActor):
 
         return total_loss - entropy * self._entropy_coeff
 
+    @tf.function
     def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         _, _, action_probs, action_log_probs = self._prob(observations, actions)
         return action_probs, action_log_probs
 
+    @tf.function
     def _prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         logits = self._forward(observations)  # tf.divide(self._forward(observations) , 10)
 
@@ -451,9 +459,9 @@ class GaussianActor(BaseActor):
                 name="actor_std",
             )
 
+    @tf.function
     def mean_and_std(self, observation):
         return self._forward(observation), tf.exp(self.log_std)
-
 
     @property
     def action_dtype(self):
@@ -463,6 +471,7 @@ class GaussianActor(BaseActor):
     def action_dtype_np(self):
         return np.float32
 
+    @tf.function
     def loss(self, observations: np.array, actions: np.array, d: np.array) -> tf.Tensor:
         mean, std = self.mean_and_std(observations)
         dist = tfp.distributions.MultivariateNormalDiag(
@@ -472,6 +481,7 @@ class GaussianActor(BaseActor):
 
         return self._loss(mean, dist, actions, d)
 
+    @tf.function
     def _loss(self, mean: tf.Tensor, dist: tf.Tensor, actions: np.array, d: np.array) -> tf.Tensor:
         action_log_probs = tf.expand_dims(dist.log_prob(actions), axis=1)
 
@@ -496,6 +506,7 @@ class GaussianActor(BaseActor):
         )
         return dist
 
+    @tf.function
     def prob(self, observations: tf.Tensor, actions: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         dist = self._dist(observations)
         return self._prob(dist, actions)
@@ -616,9 +627,11 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
         else:
             self._running_mean_rewards = None
 
+    @tf.function
     def _first_obs(self, obs):
         return obs[:, 0]
 
+    @tf.function
     def _first_actions(self, actions):
         return actions[:, 0]
 

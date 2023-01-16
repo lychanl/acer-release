@@ -9,7 +9,7 @@ from typing import Union, Dict
 class PrioritizedReplayBuffer(VecReplayBuffer):
     def __init__(
             self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec,
-            block: int = 256, levels: int = 2, probability_as_actor_out: bool = False, *args, **kwargs):
+            block: int = 1024, levels: int = 1, probability_as_actor_out: bool = False, *args, **kwargs):
         super().__init__(max_size, action_spec, obs_spec, policy_spec=policy_spec, *args, **kwargs)
         self._udpate_pointer = 0
 

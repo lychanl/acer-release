@@ -304,6 +304,22 @@ class FastACER(BaseACERAgent):
                         print('Last batch:')
                         print_batch(self._nan_log_prev_batch)
                     self._nan_log_prev_batch = data
+
+            # if self._time_step % 100 == 0:
+            #     import gc, sys
+            #     ob = gc.get_objects()
+            #     obt = {}
+            #     mbt = {}
+            #     for o in ob:
+            #         obt[type(o)] = obt.get(type(o), 0) + 1
+            #         mbt[type(o)] = mbt.get(type(o), 0) + sys.getsizeof(o)
+            #     print(
+            #         obt[tf.python.eager.def_function.Function], '/',  len(ob),
+            #         mbt[max(mbt, key=mbt.get)], ':', max(mbt, key=mbt.get),
+            #         'tf:', sum(v for k, v in mbt.items() if 'tensorflow' in str(k)),
+            #         'np:', sum(v for k, v in mbt.items() if 'numpy' in str(k))
+            #     )
+
             return np.mean(outs, 0)
     
     @tf.function(experimental_relax_shapes=True)
