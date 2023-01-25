@@ -18,6 +18,8 @@ class TestBuffer(unittest.TestCase):
         buffer._dones = np.zeros(10)
         buffer._ends = np.zeros(10)
 
+        buffer._max_prev_lens = np.repeat(2, 10)
+
         return buffer
 
     def test_vector(self):
@@ -27,7 +29,7 @@ class TestBuffer(unittest.TestCase):
         buffer._sample_random_index = lambda n: np.array([2, 3, 4, 5], dtype=np.int32)
 
         batch, l, pl = buffer.get_vec(4, 3)
-
+        print(pl)
         self.assertTrue((l == [3, 3, 3, 3]).all())
         self.assertTrue((pl == [2, 2, 2, 2]).all())
 
@@ -147,6 +149,8 @@ class TestBuffer(unittest.TestCase):
         buffer._current_size = 7
         buffer._sample_random_index = lambda n: np.array([0, 1], dtype=np.int32)
 
+        buffer._max_prev_lens = np.array([0, 1] + [2] * 8)
+
         batch, l, pl = buffer.get_vec(2, 3)
 
         self.assertTrue((l == [3, 3]).all())
@@ -233,7 +237,7 @@ class TestPrioritizedBuffer(unittest.TestCase):
     def test_inital_values_not_full(self):
         buffer = PrioritizedReplayBuffer(
             20, BufferFieldSpec((1,), np.float32), BufferFieldSpec((1,), np.float32), BufferFieldSpec((1,), np.float32),
-            4, 2
+            block=4
         )
 
         buffer.put(0, 1, 2, 0, 0, False, False)
@@ -245,69 +249,74 @@ class TestPrioritizedBuffer(unittest.TestCase):
         self.assertEqual(buffer._total_priorities, 5)
 
         self.assertTrue((buffer._priorities[0] == [1] * 5 + [0] * 15).all())
-        self.assertTrue((buffer._priorities[1] == [4, 1, 0, 0, 0]).all())
-        self.assertTrue((buffer._priorities[2] == [5, 0]).all())
-
-        self.assertTrue((buffer._priorities_cumsums[0] == list(range(1, 5)) + [1] * 4 + [0] * 12).all())
-        self.assertTrue((buffer._priorities_cumsums[1] == [4, 5, 5, 0, 0]).all())
-        self.assertTrue((buffer._priorities_cumsums[2] == [5, 5]).all())
+        self.assertTrue((buffer._priorities[1] == [2, 2, 1] + [0] * 7).all())
+        self.assertTrue((buffer._priorities[2] == [4, 1, 0, 0, 0]).all())
+        self.assertTrue((buffer._priorities[3] == [5, 0, 0]).all())
+        self.assertTrue((buffer._priorities[4] == [5, 0]).all())
+        self.assertTrue((buffer._priorities[5] == [5]).all())
 
     def test_update_priorities(self):
         buffer = PrioritizedReplayBuffer(
             20, BufferFieldSpec((1,), np.float32), BufferFieldSpec((1,), np.float32), BufferFieldSpec((1,), np.float32),
-            4, 2
+            block=4
         )
 
-        for i in range(1, 10):
+        for i in range(0, 10):
             buffer.put(0, i, i + 1, 0, 0, False, False)
-            if i < 4:
+            if i < 3:
                 self.assertFalse(buffer.should_update_block())
             else:
                 self.assertTrue(buffer.should_update_block())
 
-
-        self.assertTrue((buffer._priorities[0] == [1] * 9 + [0] * 11).all())
-        self.assertTrue((buffer._priorities[1] == [4, 4, 1, 0, 0]).all())
-        self.assertTrue((buffer._priorities[2] == [9, 0]).all())
-
-        self.assertTrue((buffer._priorities_cumsums[0] == list(range(1, 5)) + list(range(1, 5)) + [1] * 4 + [0] * 8).all())
-        self.assertTrue((buffer._priorities_cumsums[1] == [4, 8, 9, 0, 0]).all())
-        self.assertTrue((buffer._priorities_cumsums[2] == [9, 9]).all())
+        self.assertTrue((buffer._priorities[0] == [1] * 10 + [0] * 10).all())
+        self.assertTrue((buffer._priorities[1] == [2] * 5 + [0] * 5).all())
+        self.assertTrue((buffer._priorities[2] == [4, 4, 2, 0, 0]).all())
+        self.assertTrue((buffer._priorities[3] == [8, 2, 0]).all())
+        self.assertTrue((buffer._priorities[4] == [10, 0]).all())
+        self.assertTrue((buffer._priorities[5] == [10]).all())
 
         buffer.update_block([0.5, 2, 2, 1])
 
-        self.assertTrue((buffer._priorities[0] == [0.5, 2, 2, 1] + [1] * 5 + [0] * 11).all())
-        self.assertTrue((buffer._priorities[1] == [5.5, 4, 1, 0, 0]).all())
-        self.assertTrue((buffer._priorities[2] == [10.5, 0]).all())
-
-        self.assertTrue((buffer._priorities_cumsums[0] == [0.5, 2.5, 4.5, 5.5] + list(range(1, 5)) + [1] * 4 + [0] * 8).all())
-        self.assertTrue((buffer._priorities_cumsums[1] == [5.5, 9.5, 10.5, 0, 0]).all())
-        self.assertTrue((buffer._priorities_cumsums[2] == [10.5, 10.5]).all())
+        self.assertTrue((buffer._priorities[0] == [0.5, 2, 2, 1] + [1] * 6 + [0] * 10).all())
+        self.assertTrue((buffer._priorities[1] == [2.5, 3, 2, 2, 2] + [0] * 5).all())
+        self.assertTrue((buffer._priorities[2] == [5.5, 4, 2, 0, 0]).all())
+        self.assertTrue((buffer._priorities[3] == [9.5, 2, 0]).all())
+        self.assertTrue((buffer._priorities[4] == [11.5, 0]).all())
+        self.assertTrue((buffer._priorities[5] == [11.5]).all())
 
         buffer.update_block([1.5, 1, 0.5, 2])
 
-        self.assertTrue((buffer._priorities[0] == [0.5, 2, 2, 1, 1.5, 1, 0.5, 2, 1] + [0] * 11).all())
-        self.assertTrue((buffer._priorities[1] == [5.5, 5, 1, 0, 0]).all())
-        self.assertTrue((buffer._priorities[2] == [11.5, 0]).all())
-
-        self.assertTrue((buffer._priorities_cumsums[0] == [0.5, 2.5, 4.5, 5.5, 1.5, 2.5, 3, 5] + [1] * 4 + [0] * 8).all())
-        self.assertTrue((buffer._priorities_cumsums[1] == [5.5, 10.5, 11.5, 0, 0]).all())
-        self.assertTrue((buffer._priorities_cumsums[2] == [11.5, 11.5]).all())
+        self.assertTrue((buffer._priorities[0] == [0.5, 2, 2, 1, 1.5, 1, 0.5, 2, 1, 1] + [0] * 10).all())
+        self.assertTrue((buffer._priorities[1] == [2.5, 3, 2.5, 2.5, 2] + [0] * 5).all())
+        self.assertTrue((buffer._priorities[2] == [5.5, 5, 2, 0, 0]).all())
+        self.assertTrue((buffer._priorities[3] == [10.5, 2, 0]).all())
+        self.assertTrue((buffer._priorities[4] == [12.5, 0]).all())
+        self.assertTrue((buffer._priorities[5] == [12.5]).all())
 
         buffer.update_block([1, 0.5, 1, 0.5])
+        # last 2 should be ignored due to the current size
 
-        self.assertTrue((buffer._priorities[0] == [1, 0.5, 1, 0.5, 1.5, 1, 0.5, 2, 1] + [0] * 11).all())
-        self.assertTrue((buffer._priorities[1] == [3, 5, 1, 0, 0]).all())
-        self.assertTrue((buffer._priorities[2] == [9, 0]).all())
+        self.assertTrue((buffer._priorities[0] == [0.5, 2, 2, 1, 1.5, 1, 0.5, 2, 1, 0.5] + [0] * 10).all())
+        self.assertTrue((buffer._priorities[1] == [2.5, 3, 2.5, 2.5, 1.5] + [0] * 5).all())
+        self.assertTrue((buffer._priorities[2] == [5.5, 5, 1.5, 0, 0]).all())
+        self.assertTrue((buffer._priorities[3] == [10.5, 1.5, 0]).all())
+        self.assertTrue((buffer._priorities[4] == [12, 0]).all())
+        self.assertTrue((buffer._priorities[5] == [12]).all())
 
-        self.assertTrue((buffer._priorities_cumsums[0] == [1, 1.5, 2.5, 3, 1.5, 2.5, 3, 5] + [1] * 4 + [0] * 8).all())
-        self.assertTrue((buffer._priorities_cumsums[1] == [3, 8, 9, 0, 0]).all())
-        self.assertTrue((buffer._priorities_cumsums[2] == [9, 9]).all())
+        buffer.update_block([1, 2, 3, 4])
+        # should start updating from start
+
+        self.assertTrue((buffer._priorities[0] == [1, 2, 3, 4, 1.5, 1, 0.5, 2, 1, 0.5] + [0] * 10).all())
+        self.assertTrue((buffer._priorities[1] == [3, 7, 2.5, 2.5, 1.5] + [0] * 5).all())
+        self.assertTrue((buffer._priorities[2] == [10, 5, 1.5, 0, 0]).all())
+        self.assertTrue((buffer._priorities[3] == [15, 1.5, 0]).all())
+        self.assertTrue((buffer._priorities[4] == [16.5, 0]).all())
+        self.assertTrue((buffer._priorities[5] == [16.5]).all())
 
     def test_draw_samples(self):
         buffer = PrioritizedReplayBuffer(
             20, BufferFieldSpec((1,), np.float32), BufferFieldSpec((1,), np.float32), BufferFieldSpec((1,), np.float32),
-            4, 2
+            block=4
         )
 
         for i in range(1, 10):

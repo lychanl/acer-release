@@ -335,8 +335,10 @@ class MultiReplayBuffer(AutoModelComponent):
 
         # assert issubclass(buffer_class, ReplayBuffer), "Buffer class should derive from ReplayBuffer"
 
+        buffer_n = n if 'n' not in self.parameters.adaptations else None
+
         self._buffers = [
-            buffer_class(int(max_size / num_buffers), action_spec, obs_spec, policy_spec, *args, **kwargs) for _ in range(num_buffers)
+            buffer_class(int(max_size / num_buffers), action_spec, obs_spec, policy_spec, n=buffer_n, *args, **kwargs) for _ in range(num_buffers)
         ]
 
     @property
@@ -441,7 +443,7 @@ class VecReplayBuffer(ReplayBuffer):
 
     def __init__(
         self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec,
-        policy_spec: BufferFieldSpec = None, prev_n: int = None, *args, **kwargs):
+        policy_spec: BufferFieldSpec = None, prev_n: int = None, n: int = None, *args, **kwargs):
         """Extends ReplayBuffer to fetch a number of experience tuples before selected index.
         If selected index indicates first time step in a episode, no additional tuples are attached.
 
@@ -456,6 +458,9 @@ class VecReplayBuffer(ReplayBuffer):
         """
         super().__init__(max_size, action_spec, obs_spec, policy_spec)
         self._prev_n = prev_n
+        self._n = n
+        self._max_lens = np.zeros(max_size, dtype=np.int)
+        self._max_prev_lens = np.zeros(max_size, dtype=np.int)
 
     def _zero(self):
         return ({
@@ -469,6 +474,31 @@ class VecReplayBuffer(ReplayBuffer):
             "ends": np.array([]),
             "time": np.array([]),
         }, -1)
+
+    def put(self, *args, **kwargs):
+        pointer = self._pointer
+        super().put(*args, **kwargs)
+
+        self._max_lens[pointer] = 1
+        self._max_prev_lens[pointer] = 0
+        if self._prev_n:
+            for i in range(1, self._prev_n + 1):
+                p = (pointer - i % self._max_size)
+                if self._ends[p]:
+                    break
+                if i > pointer and self._current_size < self._max_size:
+                    break
+                self._max_prev_lens[pointer] += 1
+        if self._n:
+            for i in range(1, self._n):
+                p = (pointer - i) % self._current_size
+                if self._ends[p]:
+                    break
+                if i > pointer and self._current_size < self._max_size:
+                    break
+                self._max_lens[p] += 1
+
+
 
     def get(self, trajectory_len: Optional[int] = None) -> Tuple[Dict[str, np.array], int]:
         if self._current_size == 0:
@@ -525,31 +555,38 @@ class VecReplayBuffer(ReplayBuffer):
         return self._get_sampled_vec(length, trajectory_len, sample_indices)
 
     def _get_sampled_vec(self, length, trajectory_len, sample_indices):
-        prev_lens = np.repeat(self._prev_n, length)
+
 
         if self._prev_n is not None:
-            prev_pointer_ind = np.logical_and(sample_indices - prev_lens < self._pointer, self._pointer <= sample_indices)
-            prev_lens[prev_pointer_ind] = sample_indices[prev_pointer_ind] - self._pointer
-
-            if self._current_size < self._max_size:
-                prev_current_size_ind = sample_indices - prev_lens < 0
-                prev_lens[prev_current_size_ind] = sample_indices[prev_current_size_ind]
-
-            prev_pointer_ovf_ind = np.logical_and(sample_indices - prev_lens < 0, self._pointer > sample_indices - prev_lens + self._max_size)
-            prev_lens[prev_pointer_ovf_ind] = (self._max_size - self._pointer) + sample_indices[prev_pointer_ovf_ind]
-
-
-        lens = np.repeat(trajectory_len, length)
-
-        pointer_ind = np.logical_and(sample_indices < self._pointer, self._pointer < sample_indices + lens)
-        lens[pointer_ind] = self._pointer - sample_indices[pointer_ind]
+            prev_lens = np.minimum(self._max_prev_lens[sample_indices], (sample_indices - self._pointer) % self._max_size)
+        """
+        prev_lens = np.repeat(self._prev_n, length)
+        prev_pointer_ind = np.logical_and(sample_indices - prev_lens < self._pointer, self._pointer <= sample_indices)
+        prev_lens[prev_pointer_ind] = sample_indices[prev_pointer_ind] - self._pointer
 
         if self._current_size < self._max_size:
-            current_size_ind = np.logical_and(sample_indices + lens > self._current_size, self._current_size < self._max_size)
-            lens[current_size_ind] = self._current_size - sample_indices[current_size_ind]
+            prev_current_size_ind = sample_indices - prev_lens < 0
+            prev_lens[prev_current_size_ind] = sample_indices[prev_current_size_ind]
 
-        pointer_ovf_ind = np.logical_and(sample_indices + lens > self._max_size, self._pointer < sample_indices + lens - self._max_size)
-        lens[pointer_ovf_ind] = (self._pointer + self._max_size) - sample_indices[pointer_ovf_ind]
+        prev_pointer_ovf_ind = np.logical_and(sample_indices - prev_lens < 0, self._pointer > sample_indices - prev_lens + self._max_size)
+        prev_lens[prev_pointer_ovf_ind] = (self._max_size - self._pointer) + sample_indices[prev_pointer_ovf_ind]
+
+        """
+        
+        if self._n and  trajectory_len <= self._n:
+            lens = np.minimum(self._max_lens[sample_indices], trajectory_len)
+        else:
+            lens = np.repeat(trajectory_len, length)
+
+            pointer_ind = np.logical_and(sample_indices < self._pointer, self._pointer < sample_indices + lens)
+            lens[pointer_ind] = self._pointer - sample_indices[pointer_ind]
+
+            if self._current_size < self._max_size:
+                current_size_ind = np.logical_and(sample_indices + lens > self._current_size, self._current_size < self._max_size)
+                lens[current_size_ind] = self._current_size - sample_indices[current_size_ind]
+
+            pointer_ovf_ind = np.logical_and(sample_indices + lens > self._max_size, self._pointer < sample_indices + lens - self._max_size)
+            lens[pointer_ovf_ind] = (self._pointer + self._max_size) - sample_indices[pointer_ovf_ind]
 
         prev_n = self._prev_n or 0
         selection = (np.repeat(np.expand_dims(sample_indices, 1), prev_n + trajectory_len, axis=1) + np.arange(-prev_n, trajectory_len))

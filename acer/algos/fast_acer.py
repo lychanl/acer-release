@@ -11,6 +11,7 @@ Neural Networks : the Official Journal of the International Neural Network Socie
 Wawrzyński, Paweł. "Real-time reinforcement learning by sequential actor–critics
 and experience replay." Neural Networks 22.10 (2009): 1484-1497.
 """
+from datetime import datetime
 from tabnanny import check
 from typing import Optional, List, Union, Dict, Tuple
 import gym
@@ -213,7 +214,7 @@ class FastACER(BaseACERAgent):
 
             replay_gen, dtypes = self._get_experience_replay_generator(seq=True, fields=self._memory_call_list_data)
             self._buffer_update_loader = tf.data.Dataset.from_generator(
-                replay_gen, dtypes).prefetch(1)
+                replay_gen, dtypes)
         else:
             self._memory_call_list = self._memory_call_list_data = None
 
@@ -265,6 +266,11 @@ class FastACER(BaseACERAgent):
         # else:
         return CRITICS[self._critic_type](self._observations_space, self._critic_layers, self._tf_time_step, **self._critic_args)
 
+    t = None
+    __data = []
+    __learn = []
+    __run = []
+
     def learn(self):
         """
         Performs experience replay learning. Experience trajectory is sampled from every replay buffer once, thus
@@ -291,10 +297,23 @@ class FastACER(BaseACERAgent):
 
             experience_replay_iterations = min([round(self._c0 * self._time_step), self._c])
             
+            # if self.t is not None:
+            #     self.__run.append((datetime.now() - self.t).total_seconds())
+
+            # self.t = datetime.now()
+
             outs = []
             for batch in self._data_loader.take(experience_replay_iterations):
                 data = {f: d for f, d in zip(self._call_list_data, batch)}
+                
+                # self.__data.append((datetime.now() - self.t).total_seconds())
+                # self.t = datetime.now()
+
                 out = self._learn_from_experience_batch(data)
+
+                # self.__learn.append((datetime.now() - self.t).total_seconds())
+                # self.t = datetime.now()
+
                 outs.append(out)
                 if self._nan_guard:
                     if not np.isfinite(self._actor.act_deterministic(data['obs']).numpy()).all():
@@ -305,6 +324,17 @@ class FastACER(BaseACERAgent):
                         print_batch(self._nan_log_prev_batch)
                     self._nan_log_prev_batch = data
 
+            # if len(self.__run) == 1000:
+            #     print('RUN', np.mean(self.__run))
+            #     self.__run = []
+
+            # if len(self.__data) == 1000:
+            #     print('DATA', np.mean(self.__data))
+            #     self.__data = []
+
+            # if len(self.__learn) == 1000:
+            #     print('LEARN', np.mean(self.__learn))
+            #     self.__learn = []
             # if self._time_step % 100 == 0:
             #     import gc, sys
             #     ob = gc.get_objects()
@@ -319,7 +349,6 @@ class FastACER(BaseACERAgent):
             #         'tf:', sum(v for k, v in mbt.items() if 'tensorflow' in str(k)),
             #         'np:', sum(v for k, v in mbt.items() if 'numpy' in str(k))
             #     )
-
             return np.mean(outs, 0)
     
     @tf.function(experimental_relax_shapes=True)
@@ -397,16 +426,16 @@ class FastACER(BaseACERAgent):
     def _prepare_generator_fields(self, size):
         batch_size_ids = np.arange(size)
 
-        specs = {
-            'lengths': ('lengths', lambda x, lens: x),
-            'obs': ('observations', lambda x, lens: x),
+        specs = {  # replacing identity functions with none and not calling gives a slight speed increase
+            'lengths': ('lengths', None),  # lambda x, lens: x),
+            'obs': ('observations', None),  # lambda x, lens: x),
             'obs_next': ('next_observations', lambda x, lens: x[batch_size_ids, lens - 1]),
-            'actions': ('actions', lambda x, lens: x),
-            'policies': ('policies', lambda x, lens: x),
-            'rewards': ('rewards', lambda x, lens: x),
+            'actions': ('actions', None),  # lambda x, lens: x),
+            'policies': ('policies', None),  # lambda x, lens: x),
+            'rewards': ('rewards', None),  # lambda x, lens: x),
             'dones': ('dones', lambda x, lens: x[batch_size_ids, lens - 1]),
             'priorities': ('priors', lambda x, lens: x[:, 0]),
-            'time': ('time', lambda x, lens: x),
+            'time': ('time', None),  # lambda x, lens: x),
         }
 
         dtypes = {
@@ -437,7 +466,7 @@ class FastACER(BaseACERAgent):
             while True:
                 batch, lens = self._memory.get_next_block_to_update() if seq else self._fetch_offline_batch()
                 batch["lengths"] = lens
-                data = tuple(preproc(batch[field], lens) for field, preproc in field_specs)
+                data = tuple(preproc(batch[field], lens) if preproc else batch[field] for field, preproc in field_specs)
                 yield data
 
         return experience_replay_generator, field_dtypes

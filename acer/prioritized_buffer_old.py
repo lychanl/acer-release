@@ -7,40 +7,52 @@ from typing import Union, Dict
 
 
 class PrioritizedReplayBuffer(VecReplayBuffer):
-    """
-    Binary tree is used for managing priorities to improve performance for both putting and retrieving samples
-    """
-    def __init__(self, *args, block=256, probability_as_actor_out=False, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._levels = 0
-        self._priorities = []
-        self._block = block
-        self._prob_as_actor_out = probability_as_actor_out
-        self._update_pointer = 0
-        size = self._max_size
-        while size > 1:
-            self._priorities.append(np.zeros(size))
-            self._levels += 1
-            size = int(np.ceil(size / 2))
-        self._levels += 1
-        self._priorities.append(np.zeros(1))
+    def __init__(
+            self, max_size: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec,
+            block: int = 1024, levels: int = 1, probability_as_actor_out: bool = False, *args, **kwargs):
+        super().__init__(max_size, action_spec, obs_spec, policy_spec=policy_spec, *args, **kwargs)
+        self._udpate_pointer = 0
 
+        self._block = block
+        self._levels = levels
+        self._prob_as_actor_out = probability_as_actor_out
+
+        self._rands = None
+
+        self._priorities = []
+        self._priorities_cumsums = []
+        self._block_starts = []
+        self._block_ends = []
+        self._total_priorities = 0
         self._total_abs_reward = 0
         self._total_reward = 0
         self._total_2_reward = 0
 
-    def put(
-        self, action: Union[int, float, list], observation: np.array, next_observation: np.array,
-        reward: float, policy: float, is_done: bool, end: bool
-    ):
+        self._level_block_size = int((max_size // block) ** (1 / levels))
+        if self._level_block_size ** levels * block < max_size:
+            self._level_block_size += 1
+        level_blocks = max_size
+        for level in range(levels + 1):
+
+            self._priorities.append(np.zeros(level_blocks, dtype=np.float32))
+            self._priorities_cumsums.append(np.zeros(level_blocks, dtype=np.float32))
+
+            prev_level_block = level_blocks
+            block_size = self._level_block_size if level > 0 else block
+            level_blocks = level_blocks // block_size + (level_blocks % block_size != 0)
+
+            self._block_starts.append(np.arange(level_blocks) * block_size)
+            self._block_ends.append(np.minimum((np.arange(level_blocks) + 1) * block_size, prev_level_block))
+
+    def put(self, action: Union[int, float, list], observation: np.array, next_observation: np.array, reward: float, policy: float, is_done: bool, end: bool):
         if self._prob_as_actor_out:
             self._priorities[0][self._pointer] = policy[0]    
             policy = policy[1:]
         else:
             self._priorities[0][self._pointer] = 1
 
-        self._update_priorities(self._pointer, self._pointer)
-        
+        self._update_block_priorities(self._pointer // self._block)
+
         if self._current_size == self._max_size:
             self._total_abs_reward -= abs(self._rewards[self._pointer])
             self._total_reward -= self._rewards[self._pointer]
@@ -50,51 +62,41 @@ class PrioritizedReplayBuffer(VecReplayBuffer):
         self._total_2_reward += reward ** 2
 
         return super().put(action, observation, next_observation, reward, policy, is_done, end)
-    
-    def _update_priorities(self, start, end):
-        for level in range(1, self._levels):
-            start = start // 2
-            end = end // 2
-            for i in range(start, end + 1):
-                if 2 * i + 1 == len(self._priorities[level - 1]):
-                    self._priorities[level][i] = self._priorities[level - 1][2 * i]
-                else:
-                    self._priorities[level][i] = self._priorities[level - 1][2 * i] + self._priorities[level - 1][2 * i + 1]
-        self._total_priorities = self._priorities[-1][0]
+
+    def _update_block_priorities(self, block):
+        for level in range(self._levels + 1):
+            block_start = self._block_starts[level][block]
+            block_end = self._block_ends[level][block]
+            
+            self._priorities_cumsums[level][block_start:block_end] = np.cumsum(self._priorities[level][block_start:block_end])
+            
+            if level < self._levels:
+                self._priorities[level + 1][block] = np.sum(self._priorities[level][block_start:block_end])
+            else:
+                self._total_priorities = self._priorities[-1].sum()
+
+            block = block // self._level_block_size
+
+    def _sample_random_index(self, size=None) -> int:
+
+        rands = np.random.random(size=size) * self._total_priorities
+        self._rands = rands
+        return self._sample_indices_from_rands(rands)
 
     def _sample_indices_from_rands(self, rands):
         ids = np.zeros_like(rands, dtype=int)
 
-        for level in reversed(range(1, self._levels)):
-            next_ids = ids * 2
-            just_next_block_ids = ids * 2 == len(self._priorities[level - 1]) - 1
-            # block = next_block
-
-            midpoints = self._priorities[level - 1][next_ids]
-            right_block_ids = (rands > midpoints) & ~just_next_block_ids
-            left_block_ids = ~right_block_ids
-            
-            rands = rands - midpoints * right_block_ids
-            ids = right_block_ids * (next_ids + 1) + left_block_ids * next_ids
+        for i, r in enumerate(rands):
+            block = 0
+            for level in reversed(range(self._levels + 1)):
+                start = self._block_starts[level][block]
+                end = self._block_ends[level][block]
+                block = min(np.searchsorted(self._priorities_cumsums[level][start:end], r) + start, end - 1)
+                if block > start:
+                    r = r - self._priorities_cumsums[level][block - 1]
+            ids[i] = min(block, self._current_size - 1)
 
         return ids
-    
-    def should_update_block(self):
-        return self._current_size >= self._block
-
-    def get_next_block_to_update(self, n):
-        return self._get_sampled_vec(
-            self._block, n,
-            np.minimum(np.arange(self._update_pointer, self._update_pointer + self._block), self._current_size - 1)
-        )
-
-    def update_block(self, priorities):
-        length = min(self._current_size - self._update_pointer, self._block)
-        self._priorities[0][self._update_pointer:(self._update_pointer + length)] = priorities[:length]
-        self._update_priorities(self._update_pointer, self._update_pointer + length)
-        self._update_pointer = self._update_pointer + self._block
-        if self._update_pointer >= self._current_size:
-            self._update_pointer = 0
 
     def _fetch_slice(self, buffer_slice) -> Dict[str, np.array]:
         batch = super()._fetch_slice(buffer_slice)
@@ -128,6 +130,20 @@ class PrioritizedReplayBuffer(VecReplayBuffer):
             "time": np.zeros(length)
         }, np.repeat(-1, length))
 
+    def should_update_block(self):
+        return self._current_size >= self._block
+
+    def get_next_block_to_update(self, n):
+        return self._get_sampled_vec(
+            self._block, n,
+            np.arange(self._block_starts[0][self._udpate_pointer], self._block_ends[0][self._udpate_pointer])
+        )
+
+    def update_block(self, priorities):
+        self._priorities[0][(self._udpate_pointer * self._block):((self._udpate_pointer + 1) * self._block)] = priorities
+        self._update_block_priorities(self._udpate_pointer)
+        self._udpate_pointer = (self._udpate_pointer + 1) % (self._current_size // self._block)
+
 
 class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
     def __init__(
@@ -144,47 +160,44 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
         self._mean_abs_reward = tf.Variable(0, dtype=tf.float32)
         self._std_reward = tf.Variable(0, dtype=tf.float32)
 
-        if updatable:
-            PRIORITIES = {
-                "IS": (self._calculate_IS_priorities, {'density': 'actor.density'}),
-                "IS1": (self._calculate_IS1_priorities, {'density': 'actor.density'}),
-                "prob": (self._calculate_prob_priorities, {'policies': 'actor.policies', 'mask': 'mask'}),
-                "TD": (self._calculate_TD_priorities, {'td': 'base.td',}),
-                "oTD": (self._calculate_oTD_priorities, {'td': 'base.td',}),
-                # "piTD": (self._calculate_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
-                # "soft_piTD": (self._calculate_soft_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
-                # "softsign_piTD": (self._calculate_softsign_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
-                # "nd_piTD": (self._calculate_nd_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
-                # "soft_nd_piTD": (self._calculate_soft_nd_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
-                "weightedTD": (self._calculate_weighted_TD_priorities, {'td': 'base.td', 'weights': 'actor.density'}),
-            }
+        PRIORITIES = {
+            "IS": (self._calculate_IS_priorities, {'density': 'actor.density'}),
+            "IS1": (self._calculate_IS1_priorities, {'density': 'actor.density'}),
+            "prob": (self._calculate_prob_priorities, {'policies': 'actor.policies', 'mask': 'mask'}),
+            "TD": (self._calculate_TD_priorities, {'td': 'base.td',}),
+            "oTD": (self._calculate_oTD_priorities, {'td': 'base.td',}),
+            # "piTD": (self._calculate_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
+            # "soft_piTD": (self._calculate_soft_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
+            # "softsign_piTD": (self._calculate_softsign_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
+            # "nd_piTD": (self._calculate_nd_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
+            # "soft_nd_piTD": (self._calculate_soft_nd_piTD_priorities, {'td': 'base.td', 'policies': 'actor.policies', 'e_probs': 'actor.expected_probs'}),
+            "weightedTD": (self._calculate_weighted_TD_priorities, {'td': 'base.td', 'weights': 'actor.density'}),
+        }
 
-            TDS = {
-                "": 'base.td',
-                "trIS": 'base.density_weighted_td',
-            }
+        TDS = {
+            "": 'base.td',
+            "trIS": 'base.density_weighted_td',
+        }
+    
+        for pre in ("", "nd", "first", "last"):
+            for post in ("", "soft", "softsign", "sign"):
+                for scale in ("", "abs", "std"):
+                    for td in ("", "trIS"):
+                        name = "_".join(filter(lambda x: x, [post, pre, td, "piTD", scale]))
+
+    
+                        PRIORITIES[name] = (
+                            functools.partial(self._calculate_piTD_priorities, pre=pre, post=post, scale=scale),
+                            {
+                                'td': TDS[td],
+                                'policies': 'actor.policies', 'e_probs': 'actor.expected_probs',
+                                'mean_abs_rewards': 'memory.mean_abs_rewards', 'std_rewards': 'memory.std_rewards'
+                            }
+                        )
         
-            for pre in ("", "nd", "first", "last"):
-                for post in ("", "soft", "softsign", "sign"):
-                    for scale in ("", "abs", "std"):
-                        for td in ("", "trIS"):
-                            name = "_".join(filter(lambda x: x, [post, pre, td, "piTD", scale]))
+        assert priority in PRIORITIES, f"priority {priority} not in {', '.join(PRIORITIES.keys())}"
 
-        
-                            PRIORITIES[name] = (
-                                functools.partial(self._calculate_piTD_priorities, pre=pre, post=post, scale=scale),
-                                {
-                                    'td': TDS[td],
-                                    'policies': 'actor.policies', 'e_probs': 'actor.expected_probs',
-                                    'mean_abs_rewards': 'memory.mean_abs_rewards', 'std_rewards': 'memory.std_rewards'
-                                }
-                            )
-            
-            assert priority in PRIORITIES, f"priority {priority} not in {', '.join(PRIORITIES.keys())}"
-
-            priority = PRIORITIES[priority]
-        else:
-            priority = None
+        priority = PRIORITIES[priority]
 
         super().__init__(
             max_size, num_buffers, action_spec, obs_spec,
