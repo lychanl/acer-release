@@ -14,6 +14,8 @@ class AutoModelComponent:
         self.parameterized_methods = {}
         self.parameterized_method_calls = {}
 
+        self.automodel = None
+
     def register_method(self, name: str, method: Callable, args: Dict[str, str]):
         self.methods[name] = (method, args)
 
@@ -23,6 +25,9 @@ class AutoModelComponent:
     def register_parameterized_method_call(self, name: str, method: str, params: Dict[str, str]):
         self.parameterized_method_calls[name] = (method, params)
 
+    def call(self, name: str, args: Dict[str, Any]):
+        return self.automodel.call_now(name, args)
+
 
 class AutoModel:
     def __init__(self, *args, **kwargs):
@@ -31,6 +36,7 @@ class AutoModel:
 
     def register_component(self, name: str, component: AutoModelComponent):
         self._components[name] = component
+        component.automodel = self
 
     def prepare_default_call_list(
         self, data: Collection[str], additional: Iterable[str] = ()
@@ -130,3 +136,8 @@ class AutoModel:
             data_dict[name] = result
 
         return data_dict
+
+    def call_now(self, name: str, args: Dict[str, Any]):
+        _, method, method_args = self._get_method(name)
+        args = {method_args[arg]: value for arg, value in args.items()}
+        return method(**args)

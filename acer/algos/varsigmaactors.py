@@ -9,7 +9,8 @@ class VarSigmaActor(GaussianActor):
             self, obs_space, action_space,
             *args, entropy_bonus=0, dist_std_gradient=True,
             single_std=False, nn_std=False, separate_nn_std=None,
-            std_lr=None, initial_log_std=0, std_loss_args=None, **kwargs):
+            std_lr=None, initial_log_std=0, std_loss_args=None, custom_optimization=False,
+            **kwargs):
 
         self.entropy_bonus = entropy_bonus
         self.dist_std_gradient = dist_std_gradient
@@ -44,25 +45,26 @@ class VarSigmaActor(GaussianActor):
 
         GaussianActor.__init__(self, obs_space, action_space, *args, **kwargs, additional_outputs=additional_outputs, extra_models=extra_models)
 
-        if std_loss_args is None:
-            std_loss_args = {
-                'observations': 'base.first_obs',
-                'actions': 'base.first_actions',
-                'd': 'base.weighted_td'
-            }
+        if not custom_optimization:
+            if std_loss_args is None:
+                std_loss_args = {
+                    'observations': 'base.first_obs',
+                    'actions': 'base.first_actions',
+                    'd': 'base.weighted_td'
+                }
 
-        self.register_method('std', self.std, {'observations': 'obs'})
-        if self.std_lr:
-            self.register_method('optimize_std', self.optimize_std, std_loss_args)
-            self.register_method('optimize', self.optimize_mean, {
-                'observations': 'base.first_obs',
-                'actions': 'base.first_actions',
-                'd': 'base.weighted_td'
-            })
-            self.targets.append('optimize_std')
-        else:
-            for k, v in std_loss_args.items():
-                self.methods['optimize'][1][k] = v
+            self.register_method('std', self.std, {'observations': 'obs'})
+            if self.std_lr:
+                self.register_method('optimize_std', self.optimize_std, std_loss_args)
+                self.register_method('optimize', self.optimize_mean, {
+                    'observations': 'base.first_obs',
+                    'actions': 'base.first_actions',
+                    'd': 'base.weighted_td'
+                })
+                self.targets.append('optimize_std')
+            else:
+                for k, v in std_loss_args.items():
+                    self.methods['optimize'][1][k] = v
 
     @property
     def mean_trainable_variables(self):

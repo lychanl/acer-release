@@ -32,7 +32,7 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
 
         self.extra_models = extra_models
 
-        if type(observation_space) != gym.spaces.Discrete:
+        if not isinstance(observation_space, gym.spaces.Discrete):
             self._hidden_layers = self._build_layers(len(observation_space.shape), layers, output_dim)
             self._extra_hidden_layers = [
                 self._build_layers(len(observation_space.shape), elayers, outs) for *elayers, outs in extra_models
@@ -122,6 +122,7 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
         self.optimizer = tf.keras.optimizers.Adam(*args, **kwargs)
         return self.optimizer
 
+
 class BaseActor(BaseModel):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
@@ -182,6 +183,7 @@ class BaseActor(BaseModel):
         })
         self.targets = ['optimize']
 
+    @tf.function
     def policy(self, observations, actions):
         return self.prob(observations, actions)[0]
 

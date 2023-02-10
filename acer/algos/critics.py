@@ -1,5 +1,8 @@
 import functools
-from algos.base import Critic
+from typing import Optional, Tuple
+
+import gym
+from algos.base import BaseModel, Critic
 from algos.common.automodel import AutoModelComponent
 
 import numpy as np
@@ -14,6 +17,9 @@ VARIANCE_FUNS = {
 }
 
 
+"""
+TODO Check if properly handles dones while calculating d2
+"""
 class VarianceCritic(AutoModelComponent):
     def __init__(self, *args, variance_fun='identity', **kwargs) -> None:
         super().__init__(*args, **kwargs)

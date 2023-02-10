@@ -17,7 +17,6 @@ from utils import calculate_gamma, getDTChangedEnvName
 
 from algos.legacy.acerac import AUTOCORRELATED_ACTORS
 from algos.legacy.exploracer import DIFF_FUNCTIONS
-from algos.fast_acer import BUFFERS, ACTORS, CRITICS
 from algos.critics import VARIANCE_FUNS
 
 parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
@@ -98,8 +97,7 @@ parser.add_argument('--use_v', action='store_true',
 parser.add_argument('--alpha', type=float, help='Alpha parameter.')
 parser.add_argument('--eps', type=float)
 parser.add_argument('--scale_td', action='store_true', help='If TD is to be scaled in StdClippedACER')
-parser.add_argument('--no_truncate', action='store_true', help='Experimental (FastACER only)')
-parser.add_argument('--buffer_type', type=str, choices=BUFFERS.keys(), default='simple')
+parser.add_argument('--buffer_type', type=str, default='simple')
 parser.add_argument('--buffer.levels', type=int, help='Buffer tree levels (prioritized replay)')
 parser.add_argument('--buffer.block', type=int, help='Block size (prioritized replay)')
 parser.add_argument('--buffer.clip', type=float, help='Buffer priority clipping param')
@@ -108,15 +106,20 @@ parser.add_argument('--buffer.alpha', type=float, help='Buffer priority smoothin
 parser.add_argument('--buffer.beta', type=float, help='Generic buffer priority parameter')
 parser.add_argument('--buffer.n', type=int, help='N parameter for fast acerac', default=8)
 parser.add_argument('--buffer.n.adapt', type=str, help='N parameter adaptation')
-parser.add_argument('--critic_type', type=str, choices=CRITICS.keys())
+parser.add_argument('--critic_type', type=str)
 # parser.add_argument('--critic.variance_diff', action='store_true', help='If the variance or just E[R^2] is to be estimated')
 parser.add_argument('--critic.variance_fun', type=str, choices=VARIANCE_FUNS.keys(), help='Function to postprocess the variance')
 parser.add_argument('--critic.n_quantiles', type=int)
 parser.add_argument('--critic.outliers_q', type=int)
-parser.add_argument('--actor_type', type=str, choices=ACTORS.keys())
+parser.add_argument('--critic.update_delay', type=int)
+parser.add_argument('--critic.tau', type=float)
+parser.add_argument('--actor_type', type=str)
 parser.add_argument('--actor.entropy_coeff', type=float, help='entropy bonus coefficient')
 parser.add_argument('--actor.std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
                                               '0.4 * actions_bound is set.', required=False, default=None)
+parser.add_argument('--actor.b', type=float, default=3)
+parser.add_argument('--actor.target_entropy', type=float)
+parser.add_argument('--actor.truncate', type=bool)
 parser.add_argument('--actor.ratio', type=float)
 parser.add_argument('--actor.schema', type=str)
 parser.add_argument('--actor.coeff', type=float)
@@ -191,7 +194,8 @@ def main():
     if args.algo not in ('acer', 'acerac', 'qacer', 'exploracer', 'qacerac', 'quantile_acer'):
         for old, new in [
             ('--n', '--buffer.n'),
-            ('--std', '--actor.std')
+            ('--std', '--actor.std'),
+            ('--b', '--actor.b')
         ]:
             if old in argv:
                 raise ArgumentError(f"Use {new} instead of {old}!")
@@ -220,6 +224,7 @@ def main():
     log_to_file_values = cmd_parameters.log_to_file_values
     log_to_file_act_values = cmd_parameters.log_to_file_act_values
     log_to_file_steps = parameters.pop('log_to_file_steps')
+    debug = parameters.pop('debug')
     dump = args.dump or ()
 
     timesteps_increase = parameters.pop('timesteps_increase', None)
@@ -273,6 +278,7 @@ def main():
         log_to_file_values=log_to_file_values,
         log_to_file_act_values=log_to_file_act_values,
         log_to_file_steps=log_to_file_steps,
+        debug=debug
     )
 
     def handle_sigint(sig, frame):

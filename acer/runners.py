@@ -17,6 +17,7 @@ from algos.susacer import SusACER
 from algos.acerax import ACERAX
 from algos.std_clipped_acer import StdClippedACER
 from algos.base import BaseACERAgent
+from algos.sac import SAC
 from logger import CSVLogger, DefaultConsoleLogger, PeriodicConsoleLogger
 from utils import is_atari, getPossiblyDTChangedEnvBuilder
 
@@ -38,7 +39,9 @@ ALGOS = {
     'exploracer': DistExplorACER,
     'stdexploracer': StdExplorACER,
     'singlesigma': SingleSigmaExplorACER,
-    'multisigma': MultiSigmaExplorACER
+    'multisigma': MultiSigmaExplorACER,
+
+    'sac': SAC,
 }
 
 LEGACY_ALGOS = {
@@ -82,7 +85,8 @@ class Runner:
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
                  record_end: bool = True, experiment_name: str = None, asynchronous: bool = True,
                  log_tensorboard: bool = True, do_checkpoint: bool = True, record_time_steps: int = None,
-                 periodic_log: int = -1, dump=(), log_to_file_values=(), log_to_file_act_values=(), log_to_file_steps=1000):
+                 periodic_log: int = -1, dump=(), log_to_file_values=(), log_to_file_act_values=(), log_to_file_steps=1000,
+                 debug=False):
         """Trains and evaluates the agent.
 
         Args:
@@ -118,6 +122,8 @@ class Runner:
         self._log_to_file_values = log_to_file_values
         self._log_to_file_act_values = log_to_file_act_values
         self._log_to_file_steps = log_to_file_steps
+
+        self._debug = debug
 
         self._record_end = record_end
         self._record_time_steps = record_time_steps
@@ -229,7 +235,10 @@ class Runner:
                 self.record_video()
         except:
             self._logger.error()
-            exit(1)
+            if self._debug:
+                raise
+            else:
+                exit(1)
 
     def _save_results(self):
         self._csv_logger.dump()
