@@ -432,7 +432,7 @@ class CategoricalActor(BaseActor):
 class GaussianActor(BaseActor):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 beta_penalty: float, actions_bound: float = None, std: float = None, *args, **kwargs):
+                 beta_penalty: float, actions_bound: float = None, clip_mean: float = None, std: float = None, *args, **kwargs):
         """BaseActor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
 
         TODO: introduce [a, b] intervals as allowed actions bounds
@@ -447,6 +447,7 @@ class GaussianActor(BaseActor):
         super().__init__(observations_space, actions_space, layers, beta_penalty, *args, **kwargs)
 
         self._actions_bound = actions_space.high
+        self._clip_mean = clip_mean
         self._k = actions_space.shape[0]
 
         if std:
@@ -463,7 +464,10 @@ class GaussianActor(BaseActor):
 
     @tf.function
     def mean_and_std(self, observation):
-        return self._forward(observation), tf.exp(self.log_std)
+        mean, std = self._forward(observation), tf.exp(self.log_std)
+        if self._clip_mean is not None:
+            mean = tf.clip_by_value(mean, -self._clip_mean, self._clip_mean)
+        return mean, std
 
     @property
     def action_dtype(self):
