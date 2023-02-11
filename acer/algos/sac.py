@@ -150,7 +150,7 @@ class GaussianSoftActor(VarSigmaActor):
     def __init__(self, action_space, *args, target_entropy=None, nn_std=True, clip_mean=2, **kwargs):
         super().__init__(action_space, *args, custom_optimization=True, nn_std=nn_std, clip_mean=clip_mean, **kwargs)
         if target_entropy is None:
-            target_entropy = np.prod(action_space.shape)
+            target_entropy = -np.prod(action_space.shape)
         self._target_entropy = target_entropy
         self._log_entropy_coef = tf.Variable(0., dtype=tf.float32)
 
