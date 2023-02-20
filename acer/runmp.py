@@ -20,7 +20,12 @@ def dt_str(dt):
     return str(dt).split('.')[0]
 
 def print_row(row, widths):
-    print('|'.join(str(cell).ljust(width) for cell, width in zip(row, widths)))
+    print(
+        '|'.join(
+            str(cell).ljust(width) if col != len(row) - 1 else str(cell).rstrip()
+            for col, (cell, width) in enumerate(zip(row, widths))
+        )
+    )
 
 def show_table(table, colnames):
     widths = [len(name) for name in colnames]

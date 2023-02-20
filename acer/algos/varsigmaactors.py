@@ -45,6 +45,8 @@ class VarSigmaActor(GaussianActor):
 
         GaussianActor.__init__(self, obs_space, action_space, *args, **kwargs, additional_outputs=additional_outputs, extra_models=extra_models)
 
+        self.register_method('std', self.std, {'observations': 'obs'})
+
         if not custom_optimization:
             if std_loss_args is None:
                 std_loss_args = {
@@ -53,7 +55,6 @@ class VarSigmaActor(GaussianActor):
                     'd': 'base.weighted_td'
                 }
 
-            self.register_method('std', self.std, {'observations': 'obs'})
             if self.std_lr:
                 self.register_method('optimize_std', self.optimize_std, std_loss_args)
                 self.register_method('optimize', self.optimize_mean, {
