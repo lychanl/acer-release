@@ -152,7 +152,7 @@ class GaussianSoftActor(VarSigmaActor):
         if target_entropy is None:
             target_entropy = -np.prod(action_space.shape)
         self._target_entropy = target_entropy
-        self._log_entropy_coef = tf.Variable(0., dtype=tf.float32)
+        self._log_entropy_coef = tf.Variable(1., dtype=tf.float32)
 
         self.register_method('entropy_coef', self.entropy_coef, {})
 
@@ -191,18 +191,16 @@ class GaussianSoftActor(VarSigmaActor):
             scale_diag=std
         )
 
-        actions_entropy = dist.sample()
-        actions_actor = dist.sample()
+        actions = dist.sample()
 
-        log_probs_entropy = dist.log_prob(actions_entropy)
-        log_probs_actors = dist.log_prob(actions_actor)
+        log_probs = dist.log_prob(actions)
         entropy_coef = tf.exp(self._log_entropy_coef)
 
-        qs = self.call('critic.qs', {'obs': obs, 'actions': actions_actor})
+        qs = self.call('critic.qs', {'obs': obs, 'actions': actions})
         min_q = tf.reduce_min(qs, axis=-1)
 
-        entropy_loss = -tf.reduce_mean(entropy_coef * tf.stop_gradient(self._target_entropy + log_probs_entropy))
-        actor_loss = tf.reduce_mean(tf.stop_gradient(entropy_coef) * log_probs_actors - min_q)
+        entropy_loss = -tf.reduce_mean(self._log_entropy_coef * tf.stop_gradient(self._target_entropy + log_probs))
+        actor_loss = tf.reduce_mean(tf.stop_gradient(entropy_coef) * log_probs - min_q)
 
         return entropy_loss + actor_loss
 
