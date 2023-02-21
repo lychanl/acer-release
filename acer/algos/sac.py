@@ -47,6 +47,13 @@ class TwinQDelayedCritic(AutoModelComponent):
         self._target_q1 = BaseModel(q_input_space, layers, q_outs, *args, **kwargs)
         self._target_q2 = BaseModel(q_input_space, layers, q_outs, *args, **kwargs)
 
+        if not isinstance(observations_space, gym.spaces.Discrete):
+            input_shape = (None, *q_input_space.shape)
+            self._q1.build(input_shape)
+            self._q2.build(input_shape)
+            self._target_q1.build(input_shape)
+            self._target_q2.build(input_shape)
+
         self._target_q1.set_weights(self._q1.get_weights())
         self._target_q2.set_weights(self._q2.get_weights())
 
@@ -75,7 +82,6 @@ class TwinQDelayedCritic(AutoModelComponent):
             'timestep': 'base.time_step'
         })
         self.targets = ['optimize']
-
 
     @tf.function
     def qs(self, obs, actions):
@@ -137,7 +143,7 @@ class TwinQDelayedCritic(AutoModelComponent):
 
             assign_mask = tf.cast(timestep % self._update_delay == 0, tf.float32)
             for w1, w2 in zip(q.trainable_variables, target_q.trainable_variables):
-                w2.assign((w2 * (1 - self._tau) + w1 * self._tau) * (1 - assign_mask) + w2 * assign_mask)
+                w2.assign((w2 * (1 - self._tau) + w1 * self._tau) * assign_mask + w2 * (1 - assign_mask))
 
     def init_optimizer(self, *args, **kwargs):
         self._q1.init_optimizer(*args, **kwargs)
@@ -196,7 +202,7 @@ class GaussianSoftActor(VarSigmaActor):
         log_probs = dist.log_prob(actions)
         entropy_coef = tf.exp(self._log_entropy_coef)
 
-        qs = self.call('critic.qs', {'obs': obs, 'actions': actions})
+        qs = self.call_now('critic.qs', {'obs': obs, 'actions': actions})
         min_q = tf.reduce_min(qs, axis=-1)
 
         entropy_loss = -tf.reduce_mean(self._log_entropy_coef * tf.stop_gradient(self._target_entropy + log_probs))

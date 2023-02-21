@@ -108,6 +108,10 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
         tuple([tf.gather_nd(extra_arr, tf.expand_dims(input, -1)) for extra_arr in self._extra_array])
 
     @tf.function
+    def call(self, input):
+        return self._forward(input)
+
+    @tf.function
     def optimize(self, **loss_kwargs):
         with tf.GradientTape() as tape:
             loss = self.loss(**loss_kwargs)

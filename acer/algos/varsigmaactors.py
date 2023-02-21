@@ -94,6 +94,9 @@ class VarSigmaActor(GaussianActor):
         if self.single_std:
             log_std = tf.repeat(log_std, self._k, axis=-1)
         
+        if self._clip_mean is not None:
+            mean = tf.clip_by_value(mean, -self._clip_mean, self._clip_mean)
+
         return mean, log_std
 
     @tf.function(experimental_relax_shapes=True)
