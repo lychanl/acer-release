@@ -199,7 +199,7 @@ class ApproxSusActor(GaussianSusActor):
             not-sustained action prob
         """
         base_distr = self._dist(observations)
-        sus_distr = tfp.distributions.MultivariateNormalDiag(
+        sus_distr = self.distribution(
             loc=self.previous_actions,
             scale_diag=self.sustain_approx * base_distr.scale.diag
         )
@@ -212,6 +212,7 @@ class ApproxSusActor(GaussianSusActor):
         return sustained_actions, sustained_policies, new_actions_policies
         
     def calculate_probs(self, dist, actions, sustain, n):
+        # it may not be okay for non-multivatiate normal diag distr
         base_prob = dist.prob(actions)
         base_log_prob = dist.log_prob(actions)
         diffs = actions[:,1:] - actions[:,:-1]

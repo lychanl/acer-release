@@ -122,7 +122,7 @@ class TwinQDelayedCritic(AutoModelComponent):
     @tf.function
     def qd(self, qs, next_min_target_qs, dones, rewards, discount, entropy_coef, next_log_prob):
         target = rewards + tf.expand_dims(
-            discount * (next_min_target_qs * (1 - tf.cast(dones, tf.float32)) - entropy_coef * next_log_prob),
+            discount * (next_min_target_qs - entropy_coef * next_log_prob) * (1 - tf.cast(dones, tf.float32)),
             -1
         )
         return qs - tf.expand_dims(target, -1)
@@ -153,12 +153,12 @@ class TwinQDelayedCritic(AutoModelComponent):
 
 
 class GaussianSoftActor(VarSigmaActor):
-    def __init__(self, action_space, *args, target_entropy=None, nn_std=True, clip_mean=2, **kwargs):
-        super().__init__(action_space, *args, custom_optimization=True, nn_std=nn_std, clip_mean=clip_mean, **kwargs)
+    def __init__(self, obs_space, action_space, *args, target_entropy=None, nn_std=True, clip_mean=2, **kwargs):
+        super().__init__(obs_space, action_space, *args, custom_optimization=True, nn_std=nn_std, clip_mean=clip_mean, **kwargs)
         if target_entropy is None:
             target_entropy = -np.prod(action_space.shape)
         self._target_entropy = target_entropy
-        self._log_entropy_coef = tf.Variable(1., dtype=tf.float32)
+        self._log_entropy_coef = tf.Variable(0., dtype=tf.float32)
 
         self.register_method('entropy_coef', self.entropy_coef, {})
 
@@ -189,10 +189,15 @@ class GaussianSoftActor(VarSigmaActor):
     def entropy_coef(self):
         return tf.exp(self._log_entropy_coef)
 
+    # @tf.function
+    # def mean_and_std(self, observations):
+    #     mean, std = super().mean_and_std(observations)
+    #     return mean, tf.ones_like(std) * 0.25
+
     @tf.function
     def loss(self, obs):
         mean, std = self.mean_and_std(obs)
-        dist = tfp.distributions.MultivariateNormalDiag(
+        dist = self.distribution(
             loc=mean,
             scale_diag=std
         )

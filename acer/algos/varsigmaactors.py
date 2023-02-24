@@ -10,6 +10,7 @@ class VarSigmaActor(GaussianActor):
             *args, entropy_bonus=0, dist_std_gradient=True,
             single_std=False, nn_std=False, separate_nn_std=None,
             std_lr=None, initial_log_std=0, std_loss_args=None, custom_optimization=False,
+            clip_log_std=None,
             **kwargs):
 
         self.entropy_bonus = entropy_bonus
@@ -19,6 +20,7 @@ class VarSigmaActor(GaussianActor):
         self.nn_std = nn_std
         self.std_lr = std_lr
         self.initial_log_std = initial_log_std
+        self.clip_log_std = clip_log_std
 
         if std_lr:
             assert separate_nn_std is not None or not nn_std
@@ -96,6 +98,8 @@ class VarSigmaActor(GaussianActor):
         
         if self._clip_mean is not None:
             mean = tf.clip_by_value(mean, -self._clip_mean, self._clip_mean)
+        if self.clip_log_std is not None:
+            log_std = tf.clip_by_value(log_std, self.clip_log_std[0], self.clip_log_std[1])
 
         return mean, log_std
 
@@ -120,25 +124,25 @@ class VarSigmaActor(GaussianActor):
         mean, std = self.mean_and_std(observations)
         std = tf.stop_gradient(std)
 
-        dist = tfp.distributions.MultivariateNormalDiag(
+        dist = self.distribution(
             loc=mean,
             scale_diag=std
         )
 
-        return self._loss(mean, dist, actions, d)
+        return self._loss(dist, actions, d)
 
     def std_loss(self, observations: np.array, actions: np.array, d: np.array, **kwargs):
         mean, std = self.mean_and_std(observations)
         mean = tf.stop_gradient(mean)
 
-        dist = tfp.distributions.MultivariateNormalDiag(
+        dist = self.distribution(
             loc=mean,
             scale_diag=std
         )
 
         entropy_bonus = self.entropy_bonus * tf.reduce_mean(dist.entropy())
 
-        return self._loss(mean, dist, actions, d) - entropy_bonus
+        return self._loss(dist, actions, d) - entropy_bonus
         
     def init_optimizer(self, lr, *args, **kwargs):
         self.optimizer = tf.keras.optimizers.Adam(lr=lr, *args, **kwargs)

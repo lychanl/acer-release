@@ -148,7 +148,7 @@ class DistVarSigmaGaussianActor(VarSigmaGaussianActor):
         )
 
         std_loss = self._std_loss(old_mean, tf.stop_gradient(mean), std, expected_entropy)
-        loss = self._loss(mean, dist, actions, d)
+        loss = self._loss(dist, actions, d)
 
         with tf.name_scope('actor'):
             tf.summary.scalar('std', tf.reduce_mean(std), self._tf_time_step)
@@ -201,7 +201,7 @@ class StdVarSigmaGaussianActor(VarSigmaGaussianActor):
             scale_diag=std
         )
 
-        loss = self._loss(mean, dist, actions, d)
+        loss = self._loss(dist, actions, d)
 
         with tf.name_scope('actor'):
             tf.summary.scalar('std', tf.reduce_mean(std), self._tf_time_step)
@@ -371,7 +371,7 @@ class SingleSigmaActor(GaussianActor):
 
         std_loss = tf.reduce_sum(tf.square(std - tf.stop_gradient(target_std)))
 
-        loss = self._loss(mean, dist, actions, d) + std_loss
+        loss = self._loss(dist, actions, d) + std_loss
 
         with tf.name_scope('actor'):
             tf.summary.scalar('std', tf.reduce_mean(std), self._tf_time_step)
@@ -452,12 +452,12 @@ class MultiSigmaActor(VarSigmaGaussianActor):
         eta = self._std_forward(observations)
         std = tf.exp(eta)
 
-        dist = tfp.distributions.MultivariateNormalDiag(
+        dist = self.distribution(
             loc=mean,
             scale_diag=tf.stop_gradient(std) * tf.ones_like(mean)
         )
 
-        return self._loss(mean, dist, actions, d)
+        return self._loss(dist, actions, d)
 
     @tf.function
     def std_loss(

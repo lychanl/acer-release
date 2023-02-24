@@ -8,6 +8,7 @@ from numpy import float32
 # os.environ["CUDA_VISIBLE_DEVICES"]="-1"
 
 import tensorflow as tf
+from distributions import DISTRIBUTIONS
 
 if '--debug' in argv:
     tf.function = lambda x=None, *args, **kwargs: x if x else tf.function
@@ -118,6 +119,7 @@ parser.add_argument('--actor.entropy_coeff', type=float, help='entropy bonus coe
 parser.add_argument('--actor.std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
                                               '0.4 * actions_bound is set.', required=False, default=None)
 parser.add_argument('--actor.b', type=float, default=3)
+parser.add_argument('--actor.distribution', type=str, choices=DISTRIBUTIONS.keys())
 parser.add_argument('--actor.target_entropy', type=float)
 parser.add_argument('--actor.truncate', type=bool)
 parser.add_argument('--actor.ratio', type=float)
@@ -150,6 +152,7 @@ parser.add_argument('--actor.initial_log_std', type=float)
 parser.add_argument('--actor.mask_outliers', action='store_true')
 parser.add_argument('--actor.each_step_delay', action='store_true')
 parser.add_argument('--actor.entropy_bonus', type=float)
+parser.add_argument('--actor.clip_log_std', nargs=2, type=float)
 parser.add_argument('--reverse', action='store_true',
                     help='Reverse param for exploracer')
 parser.add_argument('--time_coeff', type=str, help='type of time-based coefficient for sigma learning', choices=("none", "linear", "exp", "power"))

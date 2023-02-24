@@ -8,6 +8,7 @@ import gym
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
+from distributions import DISTRIBUTIONS
 
 import tf_utils
 import utils
@@ -436,7 +437,8 @@ class CategoricalActor(BaseActor):
 class GaussianActor(BaseActor):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 beta_penalty: float, actions_bound: float = None, clip_mean: float = None, std: float = None, *args, **kwargs):
+                 beta_penalty: float, actions_bound: float = None, distribution: str = 'normal',
+                 clip_mean: float = None, std: float = None, *args, **kwargs):
         """BaseActor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
 
         TODO: introduce [a, b] intervals as allowed actions bounds
@@ -453,6 +455,8 @@ class GaussianActor(BaseActor):
         self._actions_bound = actions_space.high
         self._clip_mean = clip_mean
         self._k = actions_space.shape[0]
+
+        self.distribution = DISTRIBUTIONS[distribution]
 
         if std:
             # change constant to Variable to make std a learned parameter
@@ -484,16 +488,17 @@ class GaussianActor(BaseActor):
     @tf.function
     def loss(self, observations: np.array, actions: np.array, d: np.array) -> tf.Tensor:
         mean, std = self.mean_and_std(observations)
-        dist = tfp.distributions.MultivariateNormalDiag(
+        dist = self.distribution(
             loc=mean,
             scale_diag=std
         )
 
-        return self._loss(mean, dist, actions, d)
+        return self._loss(dist, actions, d)
 
     @tf.function
-    def _loss(self, mean: tf.Tensor, dist: tf.Tensor, actions: np.array, d: np.array) -> tf.Tensor:
+    def _loss(self, dist: tf.Tensor, actions: np.array, d: np.array) -> tf.Tensor:
         action_log_probs = tf.expand_dims(dist.log_prob(actions), axis=1)
+        mean = dist.mode()
 
         bounds_penalty = tf.reduce_sum(
             tf.scalar_mul(
@@ -510,7 +515,7 @@ class GaussianActor(BaseActor):
 
     def _dist(self, observations: tf.Tensor) -> tf.Tensor:
         mean, std = self.mean_and_std(observations)
-        dist = tfp.distributions.MultivariateNormalDiag(
+        dist = self.distribution(
             loc=mean,
             scale_diag=std
         )
@@ -531,7 +536,7 @@ class GaussianActor(BaseActor):
 
     @tf.function
     def _act(self, dist: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
-        actions = dist.sample(dtype=self.dtype)
+        actions = dist.sample()
         actions_probs = dist.prob(actions)
 
         return actions, actions_probs
@@ -539,11 +544,12 @@ class GaussianActor(BaseActor):
     @tf.function
     def act_deterministic(self, observations: tf.Tensor, **kwargs) -> tf.Tensor:
         """Returns mean of the Gaussian"""
-        mean, _ = self.mean_and_std(observations)
-        return mean
+        dist = self._dist(observations)
+        return dist.mode()
 
     @tf.function(experimental_relax_shapes=True)
     def expected_probs(self, observations: tf.Tensor) -> tf.Tensor:
+        # TODO move to dist if needed, now works for base diag gaussian only
         _, std = self.mean_and_std(observations)
         det = tf.exp(2 * tf.reduce_sum(tf.math.log(std)))
         mult = (4 * np.pi) ** tf.cast(self._k, tf.float32)

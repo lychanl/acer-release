@@ -329,7 +329,7 @@ class FitBetterActor(VarSigmaActor):
         mean, std = self.mean_and_std(observations)
         mask = tf.cast(td >= threshold[..., :1], tf.float32)
 
-        dist = tfp.distributions.MultivariateNormalDiag(
+        dist = self.distribution(
             loc=mean,
             scale_diag=std
         )
