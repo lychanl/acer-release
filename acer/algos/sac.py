@@ -66,8 +66,7 @@ class TwinQDelayedCritic(AutoModelComponent):
                 self.register_method(f'{prefix}q{ob}', self.min_q, {
                     'qs': f'self.{prefix}qs{ob}',
                 })
-        self.register_method('qd', self.qd, {
-            'qs': 'self.qs',
+        self.register_method('td_q_est', self.td_q_est, {
             'next_min_target_qs': 'self.target_q_next',
             'dones': 'dones',
             'rewards': 'rewards',
@@ -78,7 +77,7 @@ class TwinQDelayedCritic(AutoModelComponent):
         self.register_method('optimize', self.optimize, {
             'obs': 'base.first_obs',
             'actions': 'base.first_actions',
-            'qd': 'self.qd',
+            'td_q_est': 'self.td_q_est',
             'timestep': 'base.time_step'
         })
         self.targets = ['optimize']
@@ -120,18 +119,19 @@ class TwinQDelayedCritic(AutoModelComponent):
         return tf.reduce_min(qs, axis=-1)
 
     @tf.function
-    def qd(self, qs, next_min_target_qs, dones, rewards, discount, entropy_coef, next_log_prob):
+    def td_q_est(self, next_min_target_qs, dones, rewards, discount, entropy_coef, next_log_prob):
         target = rewards + tf.expand_dims(
             discount * (next_min_target_qs - entropy_coef * next_log_prob) * (1 - tf.cast(dones, tf.float32)),
             -1
         )
-        return qs - tf.expand_dims(target, -1)
+        return target
 
     @tf.function
-    def optimize(self, obs, actions, qd, timestep):
-        qd = tf.stop_gradient(qd)
+    def optimize(self, obs, actions, td_q_est, timestep):
+        td_q_est = tf.stop_gradient(td_q_est)
         with tf.GradientTape(persistent=True) as tape:
-            loss_qs = self.qs(obs, actions) * qd
+            qs = self.qs(obs, actions)
+            loss_qs = tf.reduce_mean((qs - td_q_est) ** 2)
 
         for q, target_q in (
             (self._q1, self._target_q1),
@@ -144,6 +144,8 @@ class TwinQDelayedCritic(AutoModelComponent):
             assign_mask = tf.cast(timestep % self._update_delay == 0, tf.float32)
             for w1, w2 in zip(q.trainable_variables, target_q.trainable_variables):
                 w2.assign((w2 * (1 - self._tau) + w1 * self._tau) * assign_mask + w2 * (1 - assign_mask))
+
+        return loss_qs
 
     def init_optimizer(self, *args, **kwargs):
         self._q1.init_optimizer(*args, **kwargs)
@@ -202,7 +204,7 @@ class GaussianSoftActor(VarSigmaActor):
             scale_diag=std
         )
 
-        actions = dist.sample()
+        actions, log_probs = dist.sample_with_log_prob()
 
         log_probs = dist.log_prob(actions)
         entropy_coef = tf.exp(self._log_entropy_coef)

@@ -21,6 +21,11 @@ class Distribution:
     def entropy(self):
         pass
 
+    @tf.function
+    def sample_with_log_prob(self):
+        sample = self.sample()
+        return sample, self.log_prob(sample)
+
 
 class MultivariateNormalDiag(Distribution):
     def __init__(self, loc, scale_diag) -> None:
@@ -68,6 +73,13 @@ class SquashedMultivariateNormalDiag(MultivariateNormalDiag):
     @tf.function
     def mode(self):
         return tf.tanh(self._loc)
+
+    @tf.function
+    def sample_with_log_prob(self):
+        gaussian = self._distr.sample()
+        sample = tf.tanh(gaussian)
+        log_prob = super().log_prob(gaussian) - tf.reduce_sum(tf.math.log(1 - sample ** 2 + self.epsilon), axis=-1)
+        return sample, log_prob
 
 
 DISTRIBUTIONS = {
