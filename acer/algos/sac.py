@@ -205,8 +205,6 @@ class GaussianSoftActor(VarSigmaActor):
         )
 
         actions, log_probs = dist.sample_with_log_prob()
-
-        log_probs = dist.log_prob(actions)
         entropy_coef = tf.exp(self._log_entropy_coef)
 
         qs = self.call_now('critic.qs', {'obs': obs, 'actions': actions})
