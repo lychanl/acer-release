@@ -437,8 +437,8 @@ class CategoricalActor(BaseActor):
 class GaussianActor(BaseActor):
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 beta_penalty: float, actions_bound: float = None, distribution: str = 'normal',
-                 clip_mean: float = None, std: float = None, *args, **kwargs):
+                 beta_penalty: float, actions_bound: float = None, std: float = None, *args, 
+                 distribution: str = 'normal', clip_mean: float = None, **kwargs):
         """BaseActor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
 
         TODO: introduce [a, b] intervals as allowed actions bounds

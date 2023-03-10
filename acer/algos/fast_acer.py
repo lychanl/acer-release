@@ -20,6 +20,7 @@ from algos.actors import (
     TD2RegularizedCategoricalActor, TD2RegularizedGaussianActor,
     TD2RegStdClippedCategoricalActor, TD2RegStdClippedGaussianActor
 )
+from algos.buffers import ISAdaptiveSizeBuffer
 from algos.varsigmaactors import VarSigmaActor
 from algos.evoacers import (
     R15Actor, MedianRuleActor, MedianToValueActor, MedianMinusValueActor, DelayedMedianRuleActor,
@@ -54,7 +55,8 @@ CRITICS = {
 
 BUFFERS = {
     'simple': (MultiReplayBuffer, {'buffer_class': VecReplayBuffer}),
-    'prioritized': (MultiPrioritizedReplayBuffer, {})
+    'prioritized': (MultiPrioritizedReplayBuffer, {}),
+    'is_variance_limiting': (ISAdaptiveSizeBuffer, {}),
 }
 
 

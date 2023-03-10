@@ -330,12 +330,13 @@ class MultiReplayBuffer(AutoModelComponent):
         self._n_buffers = num_buffers
         self._max_size = max_size
         self.priority = priority_spec
+        buffer_n = None
         if n:
             self.parameters = Parameters("memory_params", n=n, **get_adapts_from_kwargs(kwargs, ['n']))
+            buffer_n = n if 'n' not in self.parameters.adaptations else None
 
         # assert issubclass(buffer_class, ReplayBuffer), "Buffer class should derive from ReplayBuffer"
 
-        buffer_n = n if 'n' not in self.parameters.adaptations else None
 
         self._buffers = [
             buffer_class(int(max_size / num_buffers), action_spec, obs_spec, policy_spec, n=buffer_n, *args, **kwargs) for _ in range(num_buffers)
