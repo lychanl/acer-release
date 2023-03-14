@@ -258,7 +258,10 @@ class BaseNextGenACERAgent(BaseACERAgent):
 
                 outs.append(out)
                 if self._nan_guard:
-                    if not np.isfinite(self._actor.act_deterministic(data['obs']).numpy()).all():
+                    if (
+                        not np.isfinite(self._actor.act_deterministic(data['obs']).numpy()).all()
+                        or not all([np.isfinite(o.numpy()) for o in out])
+                    ):
                         print('NaN on learn step')
                         print('Last mem batch:')
                         print_batch(self._nan_log_prev_mem_batch)

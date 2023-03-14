@@ -151,6 +151,10 @@ class Runner:
             keys=['time_step', 'eval_return_mean', 'eval_std_mean']
         )
         if self._log_to_file_values or self._log_to_file_act_values:
+            if self._log_to_file_act_values is None:
+                self._log_to_file_act_values = []
+            if self._log_to_file_values is None:
+                self._log_to_file_values = []
             self._values_csv_logger = CSVLogger(
                 self._log_dir / 'values.csv', 
                 keys=['time_step'] + list(self._log_to_file_values + [f'act/{v}' for v in self._log_to_file_act_values]))

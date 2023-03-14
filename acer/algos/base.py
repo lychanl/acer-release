@@ -28,15 +28,15 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
 
     def __init__(
             self, observation_space: gym.spaces.Space, layers: Optional[Tuple[int]], output_dim: int, extra_models: Tuple[Iterable[int]] = (),
-            *args, **kwargs) -> None:
+            activation=None, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         self.extra_models = extra_models
 
         if not isinstance(observation_space, gym.spaces.Discrete):
-            self._hidden_layers = self._build_layers(len(observation_space.shape), layers, output_dim)
+            self._hidden_layers = self._build_layers(len(observation_space.shape), layers, output_dim, activation)
             self._extra_hidden_layers = [
-                self._build_layers(len(observation_space.shape), elayers, outs) for *elayers, outs in extra_models
+                self._build_layers(len(observation_space.shape), elayers, outs, activation) for *elayers, outs in extra_models
             ]
             self._input_shape_len = len(observation_space.shape)
             self._forward = self._nn_forward
@@ -54,16 +54,16 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
         self.optimizer = None
 
     def _build_layers(
-        self, input_shape_len: int, layers: Optional[Tuple[int]], output_dim: int
+        self, input_shape_len: int, layers: Optional[Tuple[int]], output_dim: int, activation=None,
     ) -> List[tf.keras.Model]:
         hidden_layers = []
 
         if input_shape_len > 1:
             hidden_layers.extend(build_cnn_network())
         
-        hidden_layers.extend(build_mlp_network(layers_sizes=layers))
+        layers_sizes = list(layers) + [output_dim]
 
-        hidden_layers.append(tf.keras.layers.Dense(output_dim, kernel_initializer=utils.normc_initializer()))        
+        hidden_layers.extend(build_mlp_network(layers_sizes=layers_sizes, activation=activation))
 
         return hidden_layers
 

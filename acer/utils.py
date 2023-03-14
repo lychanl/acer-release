@@ -20,6 +20,14 @@ def normc_initializer():
         return tf.constant(out, dtype=dtype)
     return _initializer
 
+def kaiming_initializer():
+    """Normalized column initializer from the OpenAI baselines"""
+    def _initializer(shape, dtype=None, partition_info=None):
+        limit = 1 / np.sqrt(shape[0])
+        out = np.random.uniform(low=-limit, high=limit, size=shape)
+        return tf.constant(out, dtype=dtype)
+    return _initializer
+
 
 def flatten_experience(buffers_batches: List[Tuple[Dict[str, Union[np.array, list]], int]])\
         -> Tuple[np.array, np.array, np.array, np.array, np.array, np.array]:

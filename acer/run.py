@@ -114,6 +114,8 @@ parser.add_argument('--critic.n_quantiles', type=int)
 parser.add_argument('--critic.outliers_q', type=int)
 parser.add_argument('--critic.update_delay', type=int)
 parser.add_argument('--critic.tau', type=float)
+parser.add_argument('--critic.activation', type=str)
+parser.add_argument('--actor.activation', type=str)
 parser.add_argument('--actor_type', type=str)
 parser.add_argument('--actor.entropy_coeff', type=float, help='entropy bonus coefficient')
 parser.add_argument('--actor.std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
