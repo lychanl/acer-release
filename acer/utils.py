@@ -20,6 +20,7 @@ def normc_initializer():
         return tf.constant(out, dtype=dtype)
     return _initializer
 
+
 def kaiming_initializer():
     """Normalized column initializer from the OpenAI baselines"""
     def _initializer(shape, dtype=None, partition_info=None):

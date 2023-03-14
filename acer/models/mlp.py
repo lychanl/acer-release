@@ -23,7 +23,7 @@ def build_mlp_network(layers_sizes: Tuple[int] = (256, 256), activation: str = '
     if initializer is None:
         if activation.lower() == 'relu':
             initializer = kaiming_initializer()
-            bias_initializer = kaiming_initializer()
+            bias_initializer = 'zeros'
         else:
             initializer = normc_initializer()
             bias_initializer = 'zeros'

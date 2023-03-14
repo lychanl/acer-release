@@ -155,7 +155,7 @@ class TwinQDelayedCritic(AutoModelComponent):
 
 
 class GaussianSoftActor(VarSigmaActor):
-    def __init__(self, obs_space, action_space, *args, target_entropy=None, nn_std=True, clip_mean=None, **kwargs):
+    def __init__(self, obs_space, action_space, *args, target_entropy=None, nn_std=True, clip_mean=2, **kwargs):
         super().__init__(obs_space, action_space, *args, custom_optimization=True, nn_std=nn_std, clip_mean=clip_mean, **kwargs)
         if target_entropy is None:
             target_entropy = -np.prod(action_space.shape)
@@ -168,24 +168,32 @@ class GaussianSoftActor(VarSigmaActor):
             'obs': 'base.first_obs',
         })
 
-        self.register_method('next_actions', self.sample_inplace, {
+        self.register_method('next_actions_with_log_prob', self.sample_inplace_with_log_prob, {
             'obs': 'obs_next'
         })
 
+        self.register_method('next_actions', self.sample_inplace, {
+            'act_with_log_prob': 'self.next_actions_with_log_prob'
+        })
+
         self.register_method('next_log_prob', self.expected_action_log_prob, {
-            'obs': 'obs_next',
-            'act': 'self.next_actions'
+            'act_with_log_prob': 'self.next_actions_with_log_prob'
         })
 
     @tf.function
-    def sample_inplace(self, obs):
+    def sample_inplace_with_log_prob(self, obs):
         dist = self._dist(obs)
-        return dist.sample()
+        return dist.sample_with_log_prob()
+
+    @tf.function
+    def sample_inplace(self, act_with_log_prob):
+        act, _ = act_with_log_prob
+        return act
     
     @tf.function
-    def expected_action_log_prob(self, obs, act):
-        dist = self._dist(obs)
-        return dist.log_prob(act)
+    def expected_action_log_prob(self, act_with_log_prob):
+        _, lp = act_with_log_prob
+        return lp
 
     @tf.function
     def entropy_coef(self):
