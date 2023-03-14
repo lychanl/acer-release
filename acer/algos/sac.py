@@ -155,7 +155,7 @@ class TwinQDelayedCritic(AutoModelComponent):
 
 
 class GaussianSoftActor(VarSigmaActor):
-    def __init__(self, obs_space, action_space, *args, target_entropy=None, nn_std=True, clip_mean=2, **kwargs):
+    def __init__(self, obs_space, action_space, *args, target_entropy=None, nn_std=True, clip_mean=None, **kwargs):
         super().__init__(obs_space, action_space, *args, custom_optimization=True, nn_std=nn_std, clip_mean=clip_mean, **kwargs)
         if target_entropy is None:
             target_entropy = -np.prod(action_space.shape)
