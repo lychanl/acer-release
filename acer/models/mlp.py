@@ -30,10 +30,10 @@ def build_mlp_network(layers_sizes: Tuple[int] = (256, 256), activation: str = '
     layers = [
         tf.keras.layers.Dense(
             layer_size,
-            activation=activation,
+            activation=activation if i < len(layers_sizes) - 1 else None,
             kernel_initializer=initializer,
             bias_initializer = bias_initializer
-        ) for layer_size in layers_sizes
+        ) for i, layer_size in enumerate(layers_sizes)
     ]
 
     return layers

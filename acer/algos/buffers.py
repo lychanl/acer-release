@@ -64,7 +64,7 @@ class ISAdaptiveSizeBuffer(MultiReplayBuffer):
 
     @tf.function
     def is_variance(self, weights, is_mean):
-        return tf.reduce_mean((tf.math.log(weights[:, 0]) - is_mean) ** 2)
+        return (tf.math.log(weights[:, 0]) - is_mean) ** 2
 
     @tf.function
     def update_size_limit(self, is_variance):

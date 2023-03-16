@@ -8,7 +8,6 @@ from numpy import float32
 # os.environ["CUDA_VISIBLE_DEVICES"]="-1"
 
 import tensorflow as tf
-from distributions import DISTRIBUTIONS
 
 if '--debug' in argv:
     tf.function = lambda x=None, *args, **kwargs: x if x else tf.function
@@ -16,6 +15,7 @@ if '--debug' in argv:
 from runners import Runner, ALGOS, LEGACY_ALGOS
 from utils import calculate_gamma, getDTChangedEnvName
 
+from distributions import DISTRIBUTIONS
 from algos.legacy.acerac import AUTOCORRELATED_ACTORS
 from algos.legacy.exploracer import DIFF_FUNCTIONS
 from algos.critics import VARIANCE_FUNS
