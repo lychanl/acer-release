@@ -56,7 +56,7 @@ CRITICS = {
 BUFFERS = {
     'simple': (MultiReplayBuffer, {'buffer_class': VecReplayBuffer}),
     'prioritized': (MultiPrioritizedReplayBuffer, {}),
-    'is_variance_limiting': (ISAdaptiveSizeBuffer, {}),
+    'is_dispersion_limiting': (ISAdaptiveSizeBuffer, {}),
 }
 
 

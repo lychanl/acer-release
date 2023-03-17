@@ -19,26 +19,31 @@ class AdaptiveSizeBuffer(VecReplayBuffer):
         return np.random.randint(low=self._pointer - limit, high=self._pointer, size=size) % self._max_size
 
 class ISAdaptiveSizeBuffer(MultiReplayBuffer):
-    def __init__(self, *args, is_decay=0.999, initial_limit=1000000, target_is_variance=1, update_speed=5, **kwargs):
+    def __init__(self, *args, is_ref_decay=0.999, initial_limit=100000, ref_type='mean', target_is_dispersion=10, update_speed=5, **kwargs):
         super().__init__(*args, **kwargs, buffer_class=AdaptiveSizeBuffer)
-        self.target_is_variance = target_is_variance
+        self.target_is_dispersion = target_is_dispersion
         self.size_limit = tf.Variable(float(initial_limit))
+        self.ref_type = ref_type
 
-        self.is_mean = tf.Variable(0.)
-        self.is_decay = is_decay
+        self.is_ref = tf.Variable(0.)
+        self.is_ref_decay = is_ref_decay
         self.update_speed = update_speed
 
-        self.register_method("update_is_mean", self.update_is_mean, {"weights": "actor.density"})
+        self.register_method("log_weights", self.log_weights, {"weights": "actor.density"})
+        self.register_method("update_is_ref", self.update_is_ref, {"log_weights": "self.log_weights"})
         self.register_method(
-            "is_variance", self.is_variance, {
-                "weights": "actor.density",
-                "is_mean": "self.update_is_mean"
+            "is_dispersion", self.is_dispersion, {
+                "log_weights": "self.log_weights",
+                "is_ref": "self.update_is_ref"
         })
         self.register_method(
             "update_size_limit", self.update_size_limit, {
-                "is_variance": "self.is_variance"
+                "is_dispersion": "self.is_dispersion"
         })
 
+        self.targets = ['update_is_ref', 'update_size_limit']
+
+    # overrides
     def get(self, *args, **kwargs):
         assert False, "get() shouldn't be used except by legacy algos"
 
@@ -58,17 +63,25 @@ class ISAdaptiveSizeBuffer(MultiReplayBuffer):
         else:
             return batch, lens, np.concatenate([vec[2] for vec in vecs])
 
+    # is-based adaptation
     @tf.function
-    def update_is_mean(self, weights):
-        return self.is_mean.assign(
-            self.is_mean * self.is_decay
-            + tf.reduce_mean(tf.math.log(tf.maximum(weights[:, 0], 1e-8))) * (1 - self.is_decay)
-        )
+    def log_weights(self, weights):
+        return tf.math.log(tf.maximum(weights[:, 0], 1e-8))
 
     @tf.function
-    def is_variance(self, weights, is_mean):
-        return (tf.math.log(tf.maximum(weights[:, 0], 1e-8)) - is_mean) ** 2
+    def update_is_ref(self, log_weights):
+        if self.ref_type == 'mean':
+            return self.is_ref.assign(
+                self.is_ref * self.is_ref_decay
+                + tf.reduce_mean(log_weights) * (1 - self.is_ref_decay)
+            )
+        else:
+            return 0
 
     @tf.function
-    def update_size_limit(self, is_variance):
-        return self.size_limit.assign_add(tf.sign(self.target_is_variance - is_variance) * self.update_speeds)
+    def is_dispersion(self, log_weights, is_ref):
+        return (log_weights - is_ref) ** 2
+
+    @tf.function
+    def update_size_limit(self, is_dispersion):
+        return self.size_limit.assign_add(tf.reduce_mean(tf.sign(self.target_is_dispersion - is_dispersion)) * self.update_speed)
