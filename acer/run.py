@@ -109,7 +109,7 @@ parser.add_argument('--buffer.n', type=int, help='N parameter for fast acerac', 
 parser.add_argument('--buffer.n.adapt', type=str, help='N parameter adaptation')
 parser.add_argument('--buffer.target_is_dispersion', type=float)
 parser.add_argument('--buffer.update_speed', type=float)
-parser.add_argument('--buffer.initial_limit', type=float)
+parser.add_argument('--buffer.initial_limit', type=int)
 parser.add_argument('--critic_type', type=str)
 # parser.add_argument('--critic.variance_diff', action='store_true', help='If the variance or just E[R^2] is to be estimated')
 parser.add_argument('--critic.variance_fun', type=str, choices=VARIANCE_FUNS.keys(), help='Function to postprocess the variance')

@@ -19,7 +19,7 @@ class AdaptiveSizeBuffer(VecReplayBuffer):
         return np.random.randint(low=self._pointer - limit, high=self._pointer, size=size) % self._max_size
 
 class ISAdaptiveSizeBuffer(MultiReplayBuffer):
-    def __init__(self, *args, is_ref_decay=0.999, initial_limit=100000, ref_type='mean', target_is_dispersion=10, update_speed=5, **kwargs):
+    def __init__(self, *args, is_ref_decay=0.999, initial_limit=100000, min_size_limit=1000, ref_type='mean', target_is_dispersion=10, update_speed=5, **kwargs):
         super().__init__(*args, **kwargs, buffer_class=AdaptiveSizeBuffer)
         self.target_is_dispersion = target_is_dispersion
         self.size_limit = tf.Variable(float(initial_limit))
@@ -28,6 +28,7 @@ class ISAdaptiveSizeBuffer(MultiReplayBuffer):
         self.is_ref = tf.Variable(0.)
         self.is_ref_decay = is_ref_decay
         self.update_speed = update_speed
+        self.min_size_limit = min_size_limit
 
         self.register_method("log_weights", self.log_weights, {"weights": "actor.density"})
         self.register_method("update_is_ref", self.update_is_ref, {"log_weights": "self.log_weights"})
@@ -84,4 +85,10 @@ class ISAdaptiveSizeBuffer(MultiReplayBuffer):
 
     @tf.function
     def update_size_limit(self, is_dispersion):
-        return self.size_limit.assign_add(tf.reduce_mean(tf.sign(self.target_is_dispersion - is_dispersion)) * self.update_speed)
+        return self.size_limit.assign(
+            tf.clip_by_value(
+                self.size_limit 
+                + tf.reduce_mean(tf.sign(self.target_is_dispersion - is_dispersion)) * self.update_speed,
+                self.min_size_limit, self._max_size
+            )
+        )
