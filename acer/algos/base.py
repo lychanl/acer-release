@@ -25,6 +25,11 @@ session = InteractiveSession(config=config)
 
 
 class BaseModel(AutoModelComponent, tf.keras.Model):
+    @staticmethod
+    def get_args():
+        return {
+            'layers': (int, [256, 256], {'nargs': '*'})
+        }
 
     def __init__(
             self, observation_space: gym.spaces.Space, layers: Optional[Tuple[int]], output_dim: int, extra_models: Tuple[Iterable[int]] = (),
@@ -129,6 +134,11 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
 
 
 class BaseActor(BaseModel):
+    @staticmethod
+    def get_args():
+        args = BaseModel.get_args()
+        args['b'] = (float, 2)
+        return args
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  beta_penalty: float, tf_time_step: tf.Variable, *args, truncate: bool = True, b: float = 2, additional_outputs=0,
@@ -272,6 +282,9 @@ class BaseActor(BaseModel):
         pass
 
 class BaseCritic(BaseModel):
+    @staticmethod
+    def get_args():
+        return BaseModel.get_args()
 
     def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]],
                  tf_time_step: tf.Variable, use_additional_input: bool = False, *args, nouts: int = 1, **kwargs):
@@ -322,6 +335,9 @@ class BaseCritic(BaseModel):
 
 
 class Critic(BaseCritic):
+    @staticmethod
+    def get_args():
+        return BaseCritic.get_args()
 
     def __init__(self, observations_space: gym.Space, layers: Optional[Tuple[int]], tf_time_step: tf.Variable,
                  use_additional_input: bool = False, *args, nouts=1, **kwargs):
@@ -345,6 +361,12 @@ class Critic(BaseCritic):
 
 
 class CategoricalActor(BaseActor):
+    @staticmethod
+    def get_args():
+        args = BaseActor.get_args()
+        args['entropy_coeff'] = (float, 0.)
+
+        return args
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  *args, entropy_coeff=0., **kwargs):
@@ -435,6 +457,15 @@ class CategoricalActor(BaseActor):
         return eprobs
 
 class GaussianActor(BaseActor):
+    @staticmethod
+    def get_args():
+        args = BaseActor.get_args()
+        args['entropy_coeff'] = (float, 0.)
+        args['beta_penalty'] = (float, 0.1)
+        args['clip_mean'] = (float, None)
+        args['distribution'] = (str, 'normal', {'choices': DISTRIBUTIONS.keys()})
+
+        return args
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
                  beta_penalty: float, actions_bound: float = None, std: float = None, *args, 
@@ -558,9 +589,27 @@ class GaussianActor(BaseActor):
 
 
 class BaseACERAgent(AutoModelComponent, AutoModel):
+    @staticmethod
+    def get_args():
+        return {
+            'gamma': (float, 0.99),
+            'actor_lr': (float, 3e-5),
+            'actor_adam_epsilon': (float, None),
+            'actor_adam_beta1': (float, 0.9),
+            'actor_adam_beta2': (float, 0.999),
+            'critic_lr': (float, 1e-4),
+            'critic_adam_epsilon': (float, None),
+            'critic_adam_beta1': (float, 0.9),
+            'critic_adam_beta2': (float, 0.999),
+            'c': (int, 1),
+            'c0': (float, 1),
+            'batches_per_env': (int, 256),
+            'learning_starts': (int, 10000)
+        }
+
     """Base ACER abstract class"""
-    def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
-                 critic_layers: Tuple[int], gamma: int = 0.99, actor_beta_penalty: float = 0.001,
+    def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]] = (),
+                 critic_layers: Tuple[int] = (), gamma: int = 0.99, actor_beta_penalty: float = 0.001,
                  std: Optional[float] = None, memory_size: int = 1e6, num_parallel_envs: int = 10,
                  batches_per_env: int = 5, c: int = 10, c0: float = 0.3, actor_lr: float = 0.001,
                  actor_adam_beta1: float = 0.9, actor_adam_beta2: float = 0.999, actor_adam_epsilon: float = 1e-7,
@@ -577,22 +626,22 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
         )
         self._observations_space = observations_space
         self._actions_space = actions_space
-        self._std = std
-        self._actor_beta_penalty = actor_beta_penalty
+        self._std = std  # legacy
+        self._actor_beta_penalty = actor_beta_penalty  # legacy
         self._c = c
         self._c0 = c0
         self._learning_starts = learning_starts
-        self._actor_layers = tuple(actor_layers)
-        self._critic_layers = tuple(critic_layers)
+        self._actor_layers = tuple(actor_layers)  # legacy
+        self._critic_layers = tuple(critic_layers)  # legacy
         self._gamma = gamma
         self._batches_per_env = batches_per_env
         self._time_step = 0
         self._num_parallel_envs = num_parallel_envs
-        self._limit_reward_tanh = limit_reward_tanh
-        self._gradient_norm = gradient_norm
-        self._gradient_norm_median_threshold = gradient_norm_median_threshold
+        self._limit_reward_tanh = limit_reward_tanh  # legacy
+        self._gradient_norm = gradient_norm  # legacy
+        self._gradient_norm_median_threshold = gradient_norm_median_threshold  # legacy
         self._batch_size = self._num_parallel_envs * self._batches_per_env
-        self._memory_size = memory_size
+        self._memory_size = memory_size  # legacy
 
         self._actor_gradient_norm_median = tf.Variable(initial_value=1.0, trainable=False)
         self._critic_gradient_norm_median = tf.Variable(initial_value=1.0, trainable=False)

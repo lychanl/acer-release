@@ -45,6 +45,11 @@ def print_batch(batch):
 
 
 class BaseNextGenACERAgent(BaseACERAgent):
+    @staticmethod
+    def get_args():
+        args = BaseACERAgent.get_args()
+        args['']
+
     DATA_FIELDS = ('lengths', 'obs', 'obs_next', 'actions', 'policies', 'rewards', 'dones', 'priorities')
     ACT_DATA_FIELDS = ('obs', 'actions')
 
