@@ -169,7 +169,7 @@ class PeriodicConsoleLogger(ConsoleLogger):
         if self._evaluations:
             print(f'Evaluations: {"; ".join(" ".join([str(r) for r in rewards[1]]) for rewards in self._evaluations)}')
         if self._values_logged:
-            print(f'Values logged: {";".join(self._values_logged)}')
+            print(f'Values logged: {";".join(f"{k}:{v}" for k, v in self._values_logged.items())}')
         sys.stdout.flush()
 
         self._infos = []
