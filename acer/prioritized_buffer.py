@@ -130,6 +130,18 @@ class PrioritizedReplayBuffer(VecReplayBuffer):
 
 
 class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
+    @staticmethod
+    def get_args():
+        args = MultiReplayBuffer.get_args()
+        args['priority'] = (str, 'IS')
+        args['block'] = (int, 256)
+        args['clip'] = (float, -1)
+        args['alpha'] = (float, 1)
+        args['beta'] = (float, 0)
+        args['eps'] = (float, 1e-4)
+        
+        return args
+
     def __init__(
             self, max_size: int, num_buffers: int,
             action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec, policy_spec: BufferFieldSpec,

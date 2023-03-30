@@ -9,7 +9,7 @@ def get_adapts_from_kwargs(kwargs, params):
     return {
         f'{param}.adapt': kwargs[f'{param}.adapt']
         for param in params
-        if f'{param}.adapt' in kwargs
+        if f'{param}.adapt' in kwargs and kwargs[f'{param}.adapt'] is not None
     }
 
 

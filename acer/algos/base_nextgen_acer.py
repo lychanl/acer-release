@@ -45,16 +45,44 @@ def print_batch(batch):
 
 
 class BaseNextGenACERAgent(BaseACERAgent):
-    @staticmethod
-    def get_args():
+    @classmethod
+    def prepare_parser(cls, parser, sample_env, unparsed_args):
         args = BaseACERAgent.get_args()
-        args['']
+        args['actor_type'] = (str, 'simple', {'choices': cls.ACTORS.keys()})
+        args['critic_type'] = (str, 'simple', {'choices': cls.CRITICS.keys()})
+        args['buffer_type'] = (str, 'simple', {'choices': cls.BUFFERS.keys()})
+
+        args.update(cls.get_component_args('actor'), cls.ACTORS, unparsed_args)
+        args.update(cls.get_component_args('critic'), cls.CRITICS, unparsed_args)
+        args.update(cls.get_component_args('buffer'), cls.BUFFERS, unparsed_args)
+
+        for name, arg in args.items():
+            if len(arg) == 2:
+                type, default = arg
+                kwargs = {}
+            else:
+                type, default, kwargs = arg
+            parser.add_argument(f'--{name}', type=type, default=default, **kwargs)
+
+    @classmethod
+    def get_component_args(cls, component, available, args):
+        if f'--{component}_type' in args:
+            component_type = args[args.index(f'--{component}_type') + 1]
+        else:
+            component_type = 'simple'
+        component_cls = available[component_type]
+        component_args = component_cls.get_args()
+        return {f'{component}.{name}': arg for name, arg in component_args.items()}
+
+    ACTORS = {}
+    BUFFERS = {}
+    CRITICS = {}
 
     DATA_FIELDS = ('lengths', 'obs', 'obs_next', 'actions', 'policies', 'rewards', 'dones', 'priorities')
     ACT_DATA_FIELDS = ('obs', 'actions')
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
-                 critic_layers: Optional[Tuple[int]], buffers={}, actors={}, critics={},
+                 critic_layers: Optional[Tuple[int]],
                  update_blocks=1, buffer_type='simple', log_values=(), log_memory_values=(), log_act_values=(),
                  log_to_file_values=(), log_to_file_act_values=(),
                  actor_type='simple', critic_type='simple', nan_guard=False, 
@@ -65,10 +93,6 @@ class BaseNextGenACERAgent(BaseACERAgent):
         """
         self._actor_type = actor_type
         self._critic_type = critic_type
-
-        self.BUFFERS = buffers
-        self.ACTORS = actors
-        self.CRITICS = critics
 
         self._buffer_args = {}
         for key, value in kwargs.items():

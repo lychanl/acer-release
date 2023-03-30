@@ -225,17 +225,17 @@ class GaussianSoftActor(VarSigmaActor):
 
 
 class SAC(BaseNextGenACERAgent):
+    ACTORS = {'simple': {False: GaussianSoftActor}}
+    CRITICS = {'simple': TwinQDelayedCritic}
+    BUFFERS = {'simple': (MultiReplayBuffer, {'buffer_class': VecReplayBuffer})}
+
     def __init__(self, *args, **kwargs):
         if 'buffer.n' in kwargs:
             assert kwargs['buffer.n'] == 1
         else:
             kwargs['buffer.n'] = 1
 
-        actors = {'simple': {False: GaussianSoftActor}}
-        critics = {'simple': TwinQDelayedCritic}
-        buffers = {'simple': (MultiReplayBuffer, {'buffer_class': VecReplayBuffer})}
-
-        super().__init__(*args, actors=actors, critics=critics, buffers=buffers, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def _init_automodel(self, skip=()):
 

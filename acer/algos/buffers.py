@@ -19,6 +19,17 @@ class AdaptiveSizeBuffer(VecReplayBuffer):
         return np.random.randint(low=self._pointer - limit, high=self._pointer, size=size) % self._max_size
 
 class ISAdaptiveSizeBuffer(MultiReplayBuffer):
+    @staticmethod
+    def get_args():
+        args = MultiReplayBuffer.get_args()
+        args['is_ref_decay'] = (float, 0.999)
+        args['initial_limit'] = (float, 100000)
+        args['min_size_limit'] = (int, 1000)
+        args['ref_type'] = (str, 'mean')
+        args['target_is_dispersion'] = (float, 10)
+        args['update_speed'] = (float, 5)
+        return args
+
     def __init__(self, *args, is_ref_decay=0.999, initial_limit=100000, min_size_limit=1000, ref_type='mean', target_is_dispersion=10, update_speed=5, **kwargs):
         super().__init__(*args, **kwargs, buffer_class=AdaptiveSizeBuffer)
         self.target_is_dispersion = target_is_dispersion
