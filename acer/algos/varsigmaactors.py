@@ -5,6 +5,18 @@ import tensorflow_probability as tfp
 
 
 class VarSigmaActor(GaussianActor):
+    @staticmethod
+    def get_args():
+        args = GaussianActor.get_args()
+        args['entropy_bonus'] = (float, 0)
+        args['single_std'] = (bool, False, {'action': 'store_true'})
+        args['nn_std'] = (bool, False, {'action': 'store_true'})
+        args['separate_nn_std'] = (int, None, {'nargs': '*'})
+        args['std_lr'] = (float, None)
+        args['initial_log_std'] = (float, 0)
+        args['clip_log_std'] = (float, None, {'nargs': 2})
+        return args
+
     def __init__(
             self, obs_space, action_space,
             *args, entropy_bonus=0, dist_std_gradient=True,

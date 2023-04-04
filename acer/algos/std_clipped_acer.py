@@ -5,6 +5,14 @@ import tensorflow as tf
 
 
 class StdClippedACER(FastACER):
+    @staticmethod
+    def get_args():
+        args = FastACER.get_args()
+        args['alpha'] = (float, 1.)
+        args['eps'] = (float, 0.)
+        args['scale_td'] = (bool, False, {'action': 'store_true'})
+        return args
+
     def __init__(self, *args, alpha=1, eps=0., scale_td=False, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._alpha = alpha

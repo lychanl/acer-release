@@ -18,6 +18,17 @@ def _calc_esteps(sustain):
 
 
 class SusActor:
+    @staticmethod
+    def get_args():
+        args = {}
+        args['sustain'] = (float, None)
+        args['esteps'] = (float, None)
+        args['sustain.adapt'] = (float, None)
+        args['esteps.adapt'] = (float, None)
+        args['single_step_mask'] = (bool, False, {'action': 'store_true'})
+        args['modify_std'] = (bool, False, {'action': 'store_true'})
+        return args
+
     def __init__(
             self, obs_space, action_space, *args,
             sustain=None, esteps=None, limit_sustain_length=None, num_parallel_envs=1, modify_std=False, single_step_mask=False,
@@ -157,6 +168,12 @@ class SusActor:
         return weights * mask
 
 class GaussianSusActor(GaussianActor, SusActor):
+    @staticmethod
+    def get_args():
+        args = GaussianActor.get_args()
+        args.update(SusActor.get_args())
+        return args
+
     def __init__(self, *args, **kwargs):
         GaussianActor.__init__(self, *args, **kwargs)
         SusActor.__init__(self, *args, **kwargs)
@@ -185,6 +202,12 @@ class GaussianSusActor(GaussianActor, SusActor):
 
 
 class ApproxSusActor(GaussianSusActor):
+    @staticmethod
+    def get_args():
+        args = GaussianSusActor.get_args()
+        args['sustain_approx'] = (float, 0.1)
+        return args
+
     def __init__(self, *args, sustain_approx=0.1, **kwargs):
         super().__init__(*args, **kwargs)
         self.sustain_approx = sustain_approx
@@ -242,6 +265,12 @@ ACTORS['approx_sustain'] = {False: ApproxSusActor}
 
 
 class SusACER(FastACER):
+    ACTORS = {
+        'simple': {False: GaussianSusActor},
+        'sustain': {False: GaussianSusActor},
+        'approx_sustain': {False: ApproxSusActor}
+    }
+
     def __init__(self, *args, actor_type='sustain', **kwargs) -> None:
         assert actor_type in ('sustain', 'approx_sustain')
         kwargs['buffer_type'] = 'prioritized'

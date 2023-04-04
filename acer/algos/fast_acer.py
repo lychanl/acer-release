@@ -61,13 +61,17 @@ BUFFERS = {
 
 
 class FastACER(BaseNextGenACERAgent):
+    BUFFERS = BUFFERS
+    ACTORS = ACTORS
+    CRITICS = CRITICS
+
     def __init__(self, *args, **kwargs):
         """BaseActor-Critic with Experience Replay
 
         TODO: finish docstrings
         """
 
-        super().__init__(*args, buffers=BUFFERS, actors=ACTORS, critics=CRITICS, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def _init_automodel(self, skip=()):
         self.register_method('td', self._calculate_td, {

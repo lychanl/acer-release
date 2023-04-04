@@ -20,7 +20,13 @@ VARIANCE_FUNS = {
 """
 TODO Check if properly handles dones while calculating d2
 """
-class VarianceCritic(AutoModelComponent):
+class VarianceCritic(AutoModelComponent, tf.keras.Model):
+    @staticmethod
+    def get_args():
+        args = Critic.get_args()
+        args['variance_fun'] = (str, 'identity')
+        return args
+
     def __init__(self, *args, variance_fun='identity', **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._value_critic = Critic(*args, **kwargs)
@@ -46,7 +52,6 @@ class VarianceCritic(AutoModelComponent):
             "td2": "self.td2",
             "weights": "actor.sample_weights",
         })
-
 
         self.register_method('optimize', self.optimize, {
             'obs': 'base.first_obs',
@@ -95,6 +100,14 @@ class VarianceCritic(AutoModelComponent):
 
 
 class QuantileCritic(Critic):
+    @staticmethod
+    def get_args():
+        args = Critic.get_args()
+        args['n_quantiles'] = (int, 50)
+        args['kappa'] = (float, 0)
+        args['outliers_q'] = (int, None)
+        return args
+
     def __init__(self, *args, n_quantiles=50, kappa=0, outliers_q=None, **kwargs) -> None:
         super().__init__(*args, nouts=n_quantiles, **kwargs)
 

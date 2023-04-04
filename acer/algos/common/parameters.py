@@ -9,7 +9,7 @@ def get_adapts_from_kwargs(kwargs, params):
     return {
         f'{param}.adapt': kwargs[f'{param}.adapt']
         for param in params
-        if f'{param}.adapt' in kwargs
+        if f'{param}.adapt' in kwargs and kwargs[f'{param}.adapt'] is not None
     }
 
 
@@ -100,3 +100,12 @@ class Parameters(AutoModelComponent):
 
     def __getitem__(self, param):
         return self.params[param].numpy()
+
+    def __getstate__(self):
+        state = super().__getstate__()
+        del state['adaptations']
+        del state['FUNCTIONS']
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)

@@ -6,6 +6,15 @@ import tensorflow_probability as tfp
 
 
 class R15Actor(VarSigmaActor):
+    @staticmethod
+    def get_args():
+        args = VarSigmaActor.get_args()
+        args['ratio'] = (float, 0.2)
+        args['coeff'] = (float, 0.9)
+        args['schema'] = (str, 'simple')
+        args['mask_outliers'] = (bool, False, {'action': 'store_true'})
+        return args
+
     # Actor implementing 1/5th rule
     def __init__(self, *args, ratio=0.2, coeff=0.9, schema='simple', mask_outliers=False, **kwargs):
         assert schema in ('simple', 'stoch')
@@ -66,6 +75,12 @@ class R15Actor(VarSigmaActor):
 
 
 class MedianRuleActor(VarSigmaActor):
+    @staticmethod
+    def get_args():
+        args = VarSigmaActor.get_args()
+        args['q'] = (int, 25)
+        return args
+
     def __init__(self, *args, q=25, **kwargs):
         self.q = q
 
@@ -127,6 +142,14 @@ class MedianToValueActor(VarSigmaActor):
 
 
 class DelayedMedianRuleActor(VarSigmaActor):
+    @staticmethod
+    def get_args():
+        args = VarSigmaActor.get_args()
+        args['q'] = (int, 25)
+        args['delay'] = (int, 100)
+        args['each_step_delay'] = (bool, False, {'action': 'store_true'})
+        return args
+
     def __init__(self, obs_space, *args, q=25, delay=100, each_step_delay=False, batch_size, **kwargs):
         assert 'std_lr' in kwargs, "DelayedMedianRuleActor requires separate optimization process for std"
         self.q = q
@@ -233,6 +256,13 @@ class DelayedMedianRuleActor(VarSigmaActor):
 
 
 class LeewayDelayedMedianRuleActor(DelayedMedianRuleActor):
+    @staticmethod
+    def get_args():
+        args = DelayedMedianRuleActor.get_args()
+        args['outliers'] = (int, None)
+        args['leeway'] = (int, None)
+        return args
+
     def __init__(self, *args, leeway=None, outliers=None, batch_size, delay=100, each_step_delay=False, **kwargs):
         super().__init__(*args, **kwargs, batch_size=batch_size, each_step_delay=each_step_delay)
         self.leeway = leeway
@@ -310,6 +340,12 @@ class MedianMinusValueActor(VarSigmaActor):
 
 
 class FitBetterActor(VarSigmaActor):
+    @staticmethod
+    def get_args():
+        args = VarSigmaActor.get_args()
+        args['threshold'] = (str, 'median')
+        return args
+
     def __init__(self, *args, threshold='median', **kwargs) -> None:
         THRESHOLDS = {
             'median': 'critic.median',

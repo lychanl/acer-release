@@ -12,9 +12,16 @@ from algos.base_nextgen_acer import BaseNextGenACERAgent
 
 
 
-class TwinQDelayedCritic(AutoModelComponent):
+class TwinQDelayedCritic(AutoModelComponent, tf.keras.Model):
+    @staticmethod
+    def get_args():
+        args = BaseModel.get_args()
+        args['update_delay'] = (int, 1)
+        args['tau'] = (float, 0.005)
+        return args
+
     def __init__(
-            self, observations_space: gym.Space, action_space: gym.Space, layers, _,
+            self, observations_space: gym.Space, action_space: gym.Space, layers,
             *args, update_delay=1, tau=0.005, **kwargs) -> None:
 
         super().__init__(*args, **kwargs)
@@ -155,6 +162,14 @@ class TwinQDelayedCritic(AutoModelComponent):
 
 
 class GaussianSoftActor(VarSigmaActor):
+    @staticmethod
+    def get_args():
+        args = VarSigmaActor.get_args()
+        args['nn_std'] = (bool, True)
+        args['target_entropy'] = (float, None)
+        args['clip_mean'] = (float, 2)
+        return args
+
     def __init__(self, obs_space, action_space, *args, target_entropy=None, nn_std=True, clip_mean=2, **kwargs):
         super().__init__(obs_space, action_space, *args, custom_optimization=True, nn_std=nn_std, clip_mean=clip_mean, **kwargs)
         if target_entropy is None:
@@ -225,17 +240,17 @@ class GaussianSoftActor(VarSigmaActor):
 
 
 class SAC(BaseNextGenACERAgent):
+    ACTORS = {'simple': {False: GaussianSoftActor}}
+    CRITICS = {'simple': TwinQDelayedCritic}
+    BUFFERS = {'simple': (MultiReplayBuffer, {'buffer_class': VecReplayBuffer})}
+
     def __init__(self, *args, **kwargs):
         if 'buffer.n' in kwargs:
             assert kwargs['buffer.n'] == 1
         else:
             kwargs['buffer.n'] = 1
 
-        actors = {'simple': {False: GaussianSoftActor}}
-        critics = {'simple': TwinQDelayedCritic}
-        buffers = {'simple': (MultiReplayBuffer, {'buffer_class': VecReplayBuffer})}
-
-        super().__init__(*args, actors=actors, critics=critics, buffers=buffers, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def _init_automodel(self, skip=()):
 
@@ -247,6 +262,6 @@ class SAC(BaseNextGenACERAgent):
         # else:
         return self.CRITICS[self._critic_type](
             self._observations_space, self._actions_space,
-            self._critic_layers, self._tf_time_step, **self._critic_args
+            tf_time_step=self._tf_time_step, **self._critic_args
         )
 

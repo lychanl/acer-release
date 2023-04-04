@@ -4,6 +4,7 @@ import signal
 
 import os
 from sys import argv
+import gym
 from numpy import float32
 # os.environ["CUDA_VISIBLE_DEVICES"]="-1"
 
@@ -20,183 +21,133 @@ from algos.legacy.acerac import AUTOCORRELATED_ACTORS
 from algos.legacy.exploracer import DIFF_FUNCTIONS
 from algos.critics import VARIANCE_FUNS
 
-parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
-parser.add_argument('--algo', type=str, help='Algorithm to be used', default="fastacer", choices=ALGOS)
-parser.add_argument('--env_name', type=str, help='OpenAI Gym environment name', default="HalfCheetahBulletEnv-v0")
-parser.add_argument('--gamma', type=float, help='discount factor', required=False, default=0.99)
-parser.add_argument('--lam', type=float, help='lambda parameter', required=False, default=0.9)
-parser.add_argument('--b', type=float, help='probability density truncation coefficient',
-                    required=False, default=3)
-parser.add_argument('--actor_adam_epsilon', type=float, help='ADAM optimizer epsilon parameter (BaseActor)',
-                    required=False, default=None)
-parser.add_argument('--actor_adam_beta1', type=float, help='ADAM optimizer beta1 (BaseActor)',
-                    required=False, default=0.9)
-parser.add_argument('--actor_adam_beta2', type=float, help='ADAM optimizer beta2 (BaseActor)',
-                    required=False, default=0.999)
-parser.add_argument('--critic_adam_epsilon', type=float, help='ADAM optimizer epsilon (Critic)',
-                    required=False, default=None)
-parser.add_argument('--critic_adam_beta1', type=float, help='ADAM optimizer beta1 (Critic)',
-                    required=False, default=0.9)
-parser.add_argument('--critic_adam_beta2', type=float, help='ADAM optimizer beta2 (Critic)',
-                    required=False, default=0.999)
-parser.add_argument('--actor_lr', type=float, help='BaseActor learning rate', required=False, default=3e-5)
-parser.add_argument('--critic_lr', type=float, help='Critic learning rate', required=False, default=1e-4)
-parser.add_argument('--explorer_lr', type=float, help='Explorer (eacer) learning rate', required=False)
-parser.add_argument('--actor_beta_penalty', type=float, help='BaseActor penalty coefficient', default=0.1)
-parser.add_argument('--n_step', type=int, help='experience replay frequency', required=False, default=1)
-parser.add_argument('--c', type=int, help='experience replay intensity', required=False, default=1)
-parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=1)
-parser.add_argument('--kappa', type=float, help='kappa parameter for qacer and time scaling')
-parser.add_argument('--atoms', type=int, help='number of atoms for qacer')
-parser.add_argument('--rho', type=float, help='Rho parameter.')
-parser.add_argument('--std_loss_mult', type=float, help='std loss to actor loss ration')
-parser.add_argument('--std_diff_fun', type=str, help='Distribution difference function.',
-                    default='KL', choices=list(DIFF_FUNCTIONS))
-parser.add_argument('--std_loss_delay', type=float, help='Delay of std optimization.')
-parser.add_argument('--diff_b', type=float, help='diff ratio truncation coefficient',
-                    required=False, default=None)
-parser.add_argument('--diff_h', type=float, help='H scale for log std loss',
-                    required=False, default=None)
-parser.add_argument('--entropy_coeff', type=float, help='Entropy coefficient for ExplorACER')
-parser.add_argument('--tau', type=int, help='Tau parameter for acerac')
-parser.add_argument('--n', type=int, help='N parameter for fast acerac')
-parser.add_argument('--keep_n', action='store_true', help='Do not autoadapt n', default=False)
-parser.add_argument('--noise_type', type=str, help='Type of noise for ACERAC',
-                    choices=list(AUTOCORRELATED_ACTORS))
-parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
-                                              '0.4 * actions_bound is set.',
-                    required=False, default=None)
-parser.add_argument('--learning_starts', type=int, help='experience replay warm start coefficient', default=10000)
-parser.add_argument('--memory_size', type=int, help='memory buffer size (sum of all of the buffers from every env',
-                    required=False, default=1e6)
-parser.add_argument('--actor_layers', nargs='+', type=int, help='List of BaseActor\'s neural network hidden layers sizes',
-                    required=False, default=(256, 256))
-parser.add_argument('--critic_layers', nargs='+', type=int, help='List of Critic\'s neural network hidden layers sizes',
-                    required=False, default=(256, 256))
-parser.add_argument('--num_parallel_envs', type=int, help='Number of environments to be run in a parallel', default=1)
-parser.add_argument('--batches_per_env', type=int, help='Number of batches sampled from one environment buffer in one'
-                                                        'backward pass',
-                    default=5)
-parser.add_argument('--standardize_obs', help='True, if observations should be standarized online'
-                                              ' (and clipped between -5, 5)',
-                    action='store_true')
-parser.add_argument('--rescale_rewards', help='-1 to turn rescaling off, 0 to rescale automatically based on'
-                                              'running variance; value greater than 0 rescales the rewards by'
-                                              'dividing them by the value',
-                    type=float, default=-1)
-parser.add_argument('--limit_reward_tanh', help='limits reward to [-value, value] using tanh function'
-                                                '0 to disable',
-                    type=float, default=None)
-parser.add_argument('--td_clip', help='Temporal difference clipping threshold (ACERAC only)',
-                    type=float, default=None)
-parser.add_argument('--gradient_norm', help='Global gradient clip norm, 0 to use learned median of the gradient',
-                    type=float, default=None)
-parser.add_argument('--gradient_norm_median_threshold', help='Number of medians used to clip gradients by their norm',
-                    type=float, default=4)
-parser.add_argument('--use_v', action='store_true',
-                    help='If true then value instead of noise-value will be used (ACERAC only)')
-parser.add_argument('--alpha', type=float, help='Alpha parameter.')
-parser.add_argument('--eps', type=float)
-parser.add_argument('--scale_td', action='store_true', help='If TD is to be scaled in StdClippedACER')
-parser.add_argument('--buffer_type', type=str, default='simple')
-parser.add_argument('--buffer.levels', type=int, help='Buffer tree levels (prioritized replay)')
-parser.add_argument('--buffer.block', type=int, help='Block size (prioritized replay)')
-parser.add_argument('--buffer.clip', type=float, help='Buffer priority clipping param')
-parser.add_argument('--buffer.priority', type=str, help='Buffer priority')
-parser.add_argument('--buffer.alpha', type=float, help='Buffer priority smoothing')
-parser.add_argument('--buffer.beta', type=float, help='Generic buffer priority parameter')
-parser.add_argument('--buffer.n', type=int, help='N parameter for fast acerac', default=8)
-parser.add_argument('--buffer.n.adapt', type=str, help='N parameter adaptation')
-parser.add_argument('--buffer.target_is_dispersion', type=float)
-parser.add_argument('--buffer.update_speed', type=float)
-parser.add_argument('--buffer.initial_limit', type=int)
-parser.add_argument('--critic_type', type=str)
-# parser.add_argument('--critic.variance_diff', action='store_true', help='If the variance or just E[R^2] is to be estimated')
-parser.add_argument('--critic.variance_fun', type=str, choices=VARIANCE_FUNS.keys(), help='Function to postprocess the variance')
-parser.add_argument('--critic.n_quantiles', type=int)
-parser.add_argument('--critic.outliers_q', type=int)
-parser.add_argument('--critic.update_delay', type=int)
-parser.add_argument('--critic.tau', type=float)
-parser.add_argument('--critic.activation', type=str)
-parser.add_argument('--actor.activation', type=str)
-parser.add_argument('--actor_type', type=str)
-parser.add_argument('--actor.entropy_coeff', type=float, help='entropy bonus coefficient')
-parser.add_argument('--actor.std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
-                                              '0.4 * actions_bound is set.', required=False, default=None)
-parser.add_argument('--actor.b', type=float, default=3)
-parser.add_argument('--actor.distribution', type=str, choices=DISTRIBUTIONS.keys())
-parser.add_argument('--actor.target_entropy', type=float)
-parser.add_argument('--actor.truncate', type=bool)
-parser.add_argument('--actor.ratio', type=float)
-parser.add_argument('--actor.schema', type=str)
-parser.add_argument('--actor.coeff', type=float)
-parser.add_argument('--actor.q', type=int)
-parser.add_argument('--actor.alpha', type=float)
-parser.add_argument('--actor.eps', type=float)
-parser.add_argument('--actor.eta', type=float)
-parser.add_argument('--actor.kappa', type=float)
-parser.add_argument('--actor.outliers', type=int)
-parser.add_argument('--actor.leeway', type=int)
-parser.add_argument('--actor.limit_sustain_length', type=float)
-parser.add_argument('--actor.sustain', type=float)
-parser.add_argument('--actor.sustain.adapt', type=str, help='sustain parameter adaptation')
-parser.add_argument('--actor.modify_std', action='store_true')
-parser.add_argument('--actor.single_step_mask', action='store_true')
-parser.add_argument('--actor.esteps', type=float)
-parser.add_argument('--actor.esteps.adapt', type=str, help='esteps parameter adaptation')
-parser.add_argument('--actor.scale_td', action='store_true', help='If TD is to be scaled in StdClippedActor')
-parser.add_argument('--actor.scale2_td2', action='store_true', help='If reg is to be scaled by std2 in TD2RegStdClippedActor')
-parser.add_argument('--actor.no_clip_td2', action='store_true', help='Disable clipping of reg component in TD2RegStdClippedActor')
-parser.add_argument('--actor.clip_weighted', action='store_true', help='clipping is to be performed on weighted td in StdClippedActor')
-parser.add_argument('--actor.nn_std', action='store_true')
-parser.add_argument('--actor.separate_nn_std', nargs='+', type=int)
-parser.add_argument('--actor.delay', type=int)
-parser.add_argument('--actor.single_std', action='store_true')
-parser.add_argument('--actor.std_lr', type=float)
-parser.add_argument('--actor.initial_log_std', type=float)
-parser.add_argument('--actor.mask_outliers', action='store_true')
-parser.add_argument('--actor.each_step_delay', action='store_true')
-parser.add_argument('--actor.entropy_bonus', type=float)
-parser.add_argument('--actor.clip_log_std', nargs=2, type=float)
-parser.add_argument('--reverse', action='store_true',
-                    help='Reverse param for exploracer')
-parser.add_argument('--time_coeff', type=str, help='type of time-based coefficient for sigma learning', choices=("none", "linear", "exp", "power"))
-parser.add_argument('--no_window_adapt', help='don\'t adapt window size of time-based coefficient for sigma learning', action='store_true')
-parser.add_argument('--above_expected', help='adapt std to samples with positive adv only', action='store_true')
-parser.add_argument('--evaluate_time_steps_interval', type=int, help='Number of time steps between evaluations. '
-                                                                     '-1 to turn evaluation off',
-                    default=10000)
-parser.add_argument('--num_evaluation_runs', type=int, help='Number of evaluation runs in a single evaluation',
-                    default=10)
-parser.add_argument('--max_time_steps', type=int, help='Maximum number of time steps of agent learning. -1 means no '
-                                                       'time steps limit',
-                    default=-1)
-parser.add_argument('--log_dir', type=str, help='Logging directory', default='logs/')
-parser.add_argument('--no_checkpoint', help='Disable checkpoint saving', action='store_true')
-parser.add_argument('--no_tensorboard', help='Disable tensorboard logs', action='store_true')
-parser.add_argument('--log_values', help='Log values during training', type=str, nargs='*')
-parser.add_argument('--log_act_values', help='Log values during training', type=str, nargs='*')
-parser.add_argument('--log_memory_values', help='Log values during memory update', type=str, nargs='*')
-parser.add_argument('--log_to_file_values', help='Log values during training to a file every n steps, averaged over these steps', type=str, nargs='*')
-parser.add_argument('--log_to_file_act_values', help='Log values during training to a file every n steps, averaged over these steps', type=str, nargs='*')
-parser.add_argument('--log_to_file_steps', help='Log values during training to a file every n steps, averaged over these steps', type=int, default=1000)
-parser.add_argument('--experiment_name', type=str, help='Name of the current experiment', default='')
-parser.add_argument('--save_video_on_kill', action='store_true',
-                    help='True if SIGINT signal should trigger registration of the video')
-parser.add_argument('--record_time_steps', type=int, default=None,
-                    help='Number of time steps between evaluation video recordings')
-parser.add_argument('--use_cpu', action='store_true',
-                    help='True if CPU (instead of GPU) should be used')
-parser.add_argument('--synchronous', action='store_true',
-                    help='True if not use asynchronous envs')
-parser.add_argument('--timesteps_increase', help='Timesteps per second increase. Affects gamma and max time steps', type=int, default=None)
 
-parser.add_argument('--dump', help='Dump memory and models on given timesteps', nargs='*', type=int)
-parser.add_argument('--debug', help='Disable tf functions', action='store_true')
-parser.add_argument('--force_periodic_log', help='Force logging every n timesteps instead of on episode finish etc', type=int, default=0)
-parser.add_argument('--nan_guard', help='Force logging every n timesteps instead of on episode finish etc', action='store_true')
+def prepare_legacy_parser(parser):
+    parser.add_argument('--gamma', type=float, help='discount factor', required=False, default=0.99)
+    parser.add_argument('--lam', type=float, help='lambda parameter', required=False, default=0.9)
+    parser.add_argument('--b', type=float, help='probability density truncation coefficient',
+                        required=False, default=3)
+    parser.add_argument('--actor_adam_epsilon', type=float, help='ADAM optimizer epsilon parameter (BaseActor)',
+                        required=False, default=None)
+    parser.add_argument('--actor_adam_beta1', type=float, help='ADAM optimizer beta1 (BaseActor)',
+                        required=False, default=0.9)
+    parser.add_argument('--actor_adam_beta2', type=float, help='ADAM optimizer beta2 (BaseActor)',
+                        required=False, default=0.999)
+    parser.add_argument('--critic_adam_epsilon', type=float, help='ADAM optimizer epsilon (Critic)',
+                        required=False, default=None)
+    parser.add_argument('--critic_adam_beta1', type=float, help='ADAM optimizer beta1 (Critic)',
+                        required=False, default=0.9)
+    parser.add_argument('--critic_adam_beta2', type=float, help='ADAM optimizer beta2 (Critic)',
+                        required=False, default=0.999)
+    parser.add_argument('--actor_lr', type=float, help='BaseActor learning rate', required=False, default=3e-5)
+    parser.add_argument('--critic_lr', type=float, help='Critic learning rate', required=False, default=1e-4)
+    parser.add_argument('--actor_beta_penalty', type=float, help='BaseActor penalty coefficient', default=0.1)
+    parser.add_argument('--c', type=int, help='experience replay intensity', required=False, default=1)
+    parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=1)
+    parser.add_argument('--kappa', type=float, help='kappa parameter for qacer and time scaling')
+    parser.add_argument('--atoms', type=int, help='number of atoms for qacer')
+    parser.add_argument('--rho', type=float, help='Rho parameter.')
+    parser.add_argument('--std_loss_mult', type=float, help='std loss to actor loss ration')
+    parser.add_argument('--std_diff_fun', type=str, help='Distribution difference function.',
+                        default='KL', choices=list(DIFF_FUNCTIONS))
+    parser.add_argument('--std_loss_delay', type=float, help='Delay of std optimization.')
+    parser.add_argument('--diff_b', type=float, help='diff ratio truncation coefficient',
+                        required=False, default=None)
+    parser.add_argument('--diff_h', type=float, help='H scale for log std loss',
+                        required=False, default=None)
+    parser.add_argument('--entropy_coeff', type=float, help='Entropy coefficient for ExplorACER')
+    parser.add_argument('--tau', type=int, help='Tau parameter for acerac')
+    parser.add_argument('--n', type=int, help='N parameter for fast acerac')
+    parser.add_argument('--keep_n', action='store_true', help='Do not autoadapt n', default=False)
+    parser.add_argument('--noise_type', type=str, help='Type of noise for ACERAC',
+                        choices=list(AUTOCORRELATED_ACTORS))
+    parser.add_argument('--std', type=float, help='value on diagonal of Normal dist. covariance matrix. If not specified,'
+                                                '0.4 * actions_bound is set.',
+                        required=False, default=None)
+    parser.add_argument('--learning_starts', type=int, help='experience replay warm start coefficient', default=10000)
+    parser.add_argument('--memory_size', type=int, help='memory buffer size (sum of all of the buffers from every env',
+                        required=False, default=1e6)
+    parser.add_argument('--actor_layers', nargs='+', type=int, help='List of BaseActor\'s neural network hidden layers sizes',
+                        required=False, default=(256, 256))
+    parser.add_argument('--critic_layers', nargs='+', type=int, help='List of Critic\'s neural network hidden layers sizes',
+                        required=False, default=(256, 256))
+    parser.add_argument('--batches_per_env', type=int, help='Number of batches sampled from one environment buffer in one'
+                                                            'backward pass',
+                        default=5)
+    parser.add_argument('--standardize_obs', help='True, if observations should be standarized online'
+                                                ' (and clipped between -5, 5)',
+                        action='store_true')
+    parser.add_argument('--rescale_rewards', help='-1 to turn rescaling off, 0 to rescale automatically based on'
+                                                'running variance; value greater than 0 rescales the rewards by'
+                                                'dividing them by the value',
+                        type=float, default=-1)
+    parser.add_argument('--limit_reward_tanh', help='limits reward to [-value, value] using tanh function'
+                                                    '0 to disable',
+                        type=float, default=None)
+    parser.add_argument('--td_clip', help='Temporal difference clipping threshold (ACERAC only)',
+                        type=float, default=None)
+    parser.add_argument('--gradient_norm', help='Global gradient clip norm, 0 to use learned median of the gradient',
+                        type=float, default=None)
+    parser.add_argument('--gradient_norm_median_threshold', help='Number of medians used to clip gradients by their norm',
+                        type=float, default=4)
+    parser.add_argument('--use_v', action='store_true',
+                        help='If true then value instead of noise-value will be used (ACERAC only)')
+    parser.add_argument('--alpha', type=float, help='Alpha parameter.')
+    parser.add_argument('--reverse', action='store_true',
+                        help='Reverse param for exploracer')
+    parser.add_argument('--time_coeff', type=str, help='type of time-based coefficient for sigma learning', choices=("none", "linear", "exp", "power"))
+    parser.add_argument('--no_window_adapt', help='don\'t adapt window size of time-based coefficient for sigma learning', action='store_true')
+    parser.add_argument('--above_expected', help='adapt std to samples with positive adv only', action='store_true')
+
+
+def prepare_parser():
+    parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
+    parser.add_argument('--algo', type=str, help='Algorithm to be used', default="fastacer", choices=ALGOS)
+    parser.add_argument('--env_name', type=str, help='OpenAI Gym environment name', default="HalfCheetahBulletEnv-v0")
+
+    parser.add_argument('--evaluate_time_steps_interval', type=int, help='Number of time steps between evaluations. '
+                                                                        '-1 to turn evaluation off',
+                        default=10000)
+    parser.add_argument('--num_evaluation_runs', type=int, help='Number of evaluation runs in a single evaluation',
+                        default=10)
+    parser.add_argument('--max_time_steps', type=int, help='Maximum number of time steps of agent learning. -1 means no '
+                                                        'time steps limit',
+                        default=-1)
+    parser.add_argument('--log_dir', type=str, help='Logging directory', default='logs/')
+    parser.add_argument('--no_checkpoint', help='Disable checkpoint saving', action='store_true')
+    parser.add_argument('--no_tensorboard', help='Disable tensorboard logs', action='store_true')
+    parser.add_argument('--log_to_file_values', help='Log values during training to a file every n steps, averaged over these steps', type=str, nargs='*')
+    parser.add_argument('--log_to_file_act_values', help='Log values during training to a file every n steps, averaged over these steps', type=str, nargs='*')
+    parser.add_argument('--log_to_file_steps', help='Log values during training to a file every n steps, averaged over these steps', type=int, default=1000)
+    parser.add_argument('--experiment_name', type=str, help='Name of the current experiment', default='')
+    parser.add_argument('--save_video_on_kill', action='store_true',
+                        help='True if SIGINT signal should trigger registration of the video')
+    parser.add_argument('--record_time_steps', type=int, default=None,
+                        help='Number of time steps between evaluation video recordings')
+    parser.add_argument('--use_cpu', action='store_true',
+                        help='True if CPU (instead of GPU) should be used')
+    parser.add_argument('--synchronous', action='store_true',
+                        help='True if not use asynchronous envs')
+    parser.add_argument('--timesteps_increase', help='Timesteps per second increase. Affects gamma and max time steps', type=int, default=None)
+
+    parser.add_argument('--dump', help='Dump memory and models on given timesteps', nargs='*', type=int)
+    parser.add_argument('--debug', help='Disable tf functions', action='store_true')
+    parser.add_argument('--force_periodic_log', help='Force logging every n timesteps instead of on episode finish etc', type=int, default=0)
+    parser.add_argument('--n_step', type=int, help='experience replay frequency', required=False, default=1)
+    parser.add_argument('--num_parallel_envs', type=int, help='Number of environments to be run in a parallel', default=1)
+
+    args, unparsed = parser.parse_known_args()
+
+    if args.algo in LEGACY_ALGOS:
+        prepare_legacy_parser(parser)
+    else:
+        sample_env = gym.make(args.env_name)
+        ALGOS[args.algo].prepare_parser(parser, sample_env, unparsed)
+    return parser
+
 
 def main():
+    parser = prepare_parser()
     args = parser.parse_args()
     
     if args.algo not in ('acer', 'acerac', 'qacer', 'exploracer', 'qacerac', 'quantile_acer'):

@@ -5,6 +5,15 @@ import tensorflow as tf
 
 
 class StdClippedBaseActor:
+    @staticmethod
+    def get_args():
+        return {
+            'alpha': (float, 1),
+            'eps': (float, 0),
+            'scale_td': (bool, False, {'action': 'store_true'}),
+            'clip_weighted': (bool, False, {'action': 'store_true'}),
+        }
+
     def __init__(self, *args, alpha=1, eps=0, scale_td=False, clip_weighted=False, **kwargs) -> None:
         self._alpha = alpha
         self._eps = eps
@@ -45,18 +54,37 @@ class StdClippedBaseActor:
 
 
 class StdClippedCategoricalActor(CategoricalActor, StdClippedBaseActor):
+    @staticmethod
+    def get_args():
+        args = CategoricalActor.get_args()
+        args.update(StdClippedBaseActor.get_args())
+        return args
+
     def __init__(self, *args, **kwargs) -> None:
         CategoricalActor.__init__(self, *args, **kwargs)
         StdClippedBaseActor.__init__(self, *args, **kwargs)
 
 
 class StdClippedGaussianActor(GaussianActor, StdClippedBaseActor):
+    @staticmethod
+    def get_args():
+        args = GaussianActor.get_args()
+        args.update(StdClippedBaseActor.get_args())
+        return args
+
     def __init__(self, *args, **kwargs) -> None:
         GaussianActor.__init__(self, *args, **kwargs)
         StdClippedBaseActor.__init__(self, *args, **kwargs)
 
 
 class TD2RegularizedActor:
+    @staticmethod
+    def get_args():
+        return {
+            'eta': (float, 0.1),
+            'kappa': (float, 1)
+        }
+
     def __init__(self, *args, eta=0.1, kappa=1, **kwargs) -> None:
         self._eta = tf.Variable(eta)
         self._kappa = kappa
@@ -94,17 +122,39 @@ class TD2RegularizedActor:
 
 
 class TD2RegularizedCategoricalActor(CategoricalActor, TD2RegularizedActor):
+    @staticmethod
+    def get_args():
+        args = CategoricalActor.get_args()
+        args.update(TD2RegularizedActor.get_args())
+        return args
+
     def __init__(self, *args, **kwargs) -> None:
         CategoricalActor.__init__(self, *args, **kwargs)
         TD2RegularizedActor.__init__(self, *args, **kwargs)
 
 
 class TD2RegularizedGaussianActor(GaussianActor, TD2RegularizedActor):
+    @staticmethod
+    def get_args():
+        args = GaussianActor.get_args()
+        args.update(TD2RegularizedActor.get_args())
+        return args
+
     def __init__(self, *args, **kwargs) -> None:
         GaussianActor.__init__(self, *args, **kwargs)
         TD2RegularizedActor.__init__(self, *args, **kwargs)
 
 class TD2RegStdClippedBaseActor(TD2RegularizedActor):
+    @staticmethod
+    def get_args():
+        args = TD2RegularizedActor.get_args()
+        args['alpha'] = (float, 1)
+        args['eps'] = (float, 0)
+        args['scale2_td2'] = (bool, False, {'action': 'store_true'})
+        args['clip_weighted'] = (bool, False, {'action': 'store_true'})
+        args['no_clip_td2'] = (bool, False, {'action': 'store_true'})
+        return args
+
     def __init__(
             self, *args, alpha=1, eps=0, eta=0.1, kappa=1, scale2_td2=False, 
             clip_weighted=False, no_clip_td2=False, **kwargs) -> None:
@@ -162,12 +212,24 @@ class TD2RegStdClippedBaseActor(TD2RegularizedActor):
 
 
 class TD2RegStdClippedCategoricalActor(CategoricalActor, TD2RegStdClippedBaseActor):
+    @staticmethod
+    def get_args():
+        args = CategoricalActor.get_args()
+        args.update(TD2RegStdClippedBaseActor.get_args())
+        return args
+
     def __init__(self, *args, **kwargs) -> None:
         CategoricalActor.__init__(self, *args, **kwargs)
         TD2RegStdClippedBaseActor.__init__(self, *args, **kwargs)
 
 
 class TD2RegStdClippedGaussianActor(GaussianActor, TD2RegStdClippedBaseActor):
+    @staticmethod
+    def get_args():
+        args = GaussianActor.get_args()
+        args.update(TD2RegStdClippedBaseActor.get_args())
+        return args
+
     def __init__(self, *args, **kwargs) -> None:
         GaussianActor.__init__(self, *args, **kwargs)
         TD2RegStdClippedBaseActor.__init__(self, *args, **kwargs)

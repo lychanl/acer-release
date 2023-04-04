@@ -9,6 +9,12 @@ import tensorflow as tf
 
 
 class AceraxActor(VarSigmaActor):
+    @staticmethod
+    def get_args():
+        args = VarSigmaActor.get_args()
+        args['alpha'] = (float, None)
+        return args
+
     def __init__(self, *args, alpha, **kwargs):
         self.alpha = alpha
 
@@ -57,14 +63,13 @@ class AceraxActor(VarSigmaActor):
         return total_loss
 
 
-ACTORS['acerax'] = {False: AceraxActor}
-
-
 class ACERAX(FastACER):
-    def __init__(self, *args, actions_space, actor_type=None, **kwargs):
+    ACTORS = {'simple': {False: AceraxActor}}
+
+    def __init__(self, *args, actions_space, **kwargs):
         self.DATA_FIELDS = self.DATA_FIELDS + ('means',)
         policy_spec = BufferFieldSpec(shape=(actions_space.shape[0] + 1,), dtype=np.float32)
-        FastACER.__init__(self, *args, actions_space=actions_space, actor_type='acerax', policy_spec=policy_spec, **kwargs)
+        FastACER.__init__(self, *args, actions_space=actions_space, policy_spec=policy_spec, **kwargs)
 
 
     def _prepare_generator_fields(self, size):
