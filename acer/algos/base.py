@@ -104,7 +104,6 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
 
         return tuple(extras)
 
-
     @tf.function(experimental_relax_shapes=True)
     def _arr_forward(self, input) -> tf.Tensor:
         return tf.gather_nd(self._array, tf.expand_dims(input, -1))
@@ -617,7 +616,8 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
                  critic_adam_epsilon: float = 1e-7, standardize_obs: bool = False, rescale_rewards: int = -1,
                  limit_reward_tanh: float = None, time_step: int = 1, gradient_norm: float = None,
                  gradient_norm_median_threshold: float = 4, learning_starts: int = 1000, 
-                 additional_buffer_types: List = (), policy_spec: BufferFieldSpec = None, **kwargs):
+                 additional_buffer_types: List = (), policy_spec: BufferFieldSpec = None,
+                 **kwargs):
 
         super().__init__()
 
@@ -631,8 +631,8 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
         self._c = c
         self._c0 = c0
         self._learning_starts = learning_starts
-        self._actor_layers = tuple(actor_layers)  # legacy
-        self._critic_layers = tuple(critic_layers)  # legacy
+        self._actor_layers = tuple(actor_layers) if actor_layers is not None else None  # legacy
+        self._critic_layers = tuple(critic_layers) if critic_layers is not None else None  # legacy
         self._gamma = gamma
         self._batches_per_env = batches_per_env
         self._time_step = 0

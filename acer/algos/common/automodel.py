@@ -28,6 +28,18 @@ class AutoModelComponent:
     def call_now(self, name: str, args: Dict[str, Any]):
         return self.automodel.automodel_call_now(name, args)
 
+    def __getstate__(self):
+        state = dict(self.__dict__)
+        del state['methods']
+        del state['targets']
+        del state['parameterized_methods']
+        del state['parameterized_method_calls']
+        del state['automodel']
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
 
 class AutoModel:
     def __init__(self, *args, **kwargs):

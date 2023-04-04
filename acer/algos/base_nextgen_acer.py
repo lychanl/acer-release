@@ -52,9 +52,10 @@ class BaseNextGenACERAgent(BaseACERAgent):
         args['critic_type'] = (str, 'simple', {'choices': cls.CRITICS.keys()})
         args['buffer_type'] = (str, 'simple', {'choices': cls.BUFFERS.keys()})
 
-        args.update(cls.get_component_args('actor'), cls.ACTORS, unparsed_args)
-        args.update(cls.get_component_args('critic'), cls.CRITICS, unparsed_args)
-        args.update(cls.get_component_args('buffer'), cls.BUFFERS, unparsed_args)
+        discrete_env = isinstance(sample_env.action_space, gym.spaces.Discrete)
+        args.update(cls.get_component_args('actor', discrete_env, cls.ACTORS, unparsed_args))
+        args.update(cls.get_component_args('critic', None, cls.CRITICS, unparsed_args))
+        args.update(cls.get_component_args('buffer', 0, cls.BUFFERS, unparsed_args))
 
         for name, arg in args.items():
             if len(arg) == 2:
@@ -62,15 +63,26 @@ class BaseNextGenACERAgent(BaseACERAgent):
                 kwargs = {}
             else:
                 type, default, kwargs = arg
-            parser.add_argument(f'--{name}', type=type, default=default, **kwargs)
+            flag = kwargs.get('action', None) == 'store_true'
+            if flag:
+                parser.add_argument(f'--{name}', default=default, **kwargs)
+            else:
+                parser.add_argument(f'--{name}', type=type, default=default, **kwargs)
 
     @classmethod
-    def get_component_args(cls, component, available, args):
+    def get_component_args(cls, component, component_extra_type_param, available, args):
         if f'--{component}_type' in args:
             component_type = args[args.index(f'--{component}_type') + 1]
         else:
             component_type = 'simple'
+        if component_type not in available:
+            raise KeyError(
+                f'{component_type} is not a valid {component} for this algo. Choices: '
+                + ', '.join(available.keys())
+            )
         component_cls = available[component_type]
+        if component_extra_type_param is not None:
+            component_cls = component_cls[component_extra_type_param]
         component_args = component_cls.get_args()
         return {f'{component}.{name}': arg for name, arg in component_args.items()}
 
@@ -81,8 +93,8 @@ class BaseNextGenACERAgent(BaseACERAgent):
     DATA_FIELDS = ('lengths', 'obs', 'obs_next', 'actions', 'policies', 'rewards', 'dones', 'priorities')
     ACT_DATA_FIELDS = ('obs', 'actions')
 
-    def __init__(self, observations_space: gym.Space, actions_space: gym.Space, actor_layers: Optional[Tuple[int]],
-                 critic_layers: Optional[Tuple[int]],
+    def __init__(self, observations_space: gym.Space, actions_space: gym.Space, 
+                 actor_layers: Optional[Tuple[int]] = None, critic_layers: Optional[Tuple[int]] = None,
                  update_blocks=1, buffer_type='simple', log_values=(), log_memory_values=(), log_act_values=(),
                  log_to_file_values=(), log_to_file_act_values=(),
                  actor_type='simple', critic_type='simple', nan_guard=False, 
@@ -201,8 +213,7 @@ class BaseNextGenACERAgent(BaseACERAgent):
 
     def _init_actor(self) -> BaseActor:
         return self.ACTORS[self._actor_type][self._is_discrete](
-            self._observations_space, self._actions_space, self._actor_layers,
-            self._actor_beta_penalty, tf_time_step=self._tf_time_step,
+            self._observations_space, self._actions_space, tf_time_step=self._tf_time_step,
             batch_size=self._batch_size, num_parallel_envs=self._num_parallel_envs, **self._actor_args
         )
 
@@ -235,7 +246,7 @@ class BaseNextGenACERAgent(BaseACERAgent):
         # if self._is_obs_discrete:
         #     return TabularCritic(self._observations_space, None, self._tf_time_step)
         # else:
-        return self.CRITICS[self._critic_type](self._observations_space, self._critic_layers, self._tf_time_step, **self._critic_args)
+        return self.CRITICS[self._critic_type](self._observations_space, tf_time_step=self._tf_time_step, **self._critic_args)
 
     t = None
     __data = []

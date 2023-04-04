@@ -100,3 +100,12 @@ class Parameters(AutoModelComponent):
 
     def __getitem__(self, param):
         return self.params[param].numpy()
+
+    def __getstate__(self):
+        state = super().__getstate__()
+        del state['adaptations']
+        del state['FUNCTIONS']
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)

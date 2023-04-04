@@ -42,7 +42,6 @@ def prepare_legacy_parser(parser):
     parser.add_argument('--actor_lr', type=float, help='BaseActor learning rate', required=False, default=3e-5)
     parser.add_argument('--critic_lr', type=float, help='Critic learning rate', required=False, default=1e-4)
     parser.add_argument('--actor_beta_penalty', type=float, help='BaseActor penalty coefficient', default=0.1)
-    parser.add_argument('--n_step', type=int, help='experience replay frequency', required=False, default=1)
     parser.add_argument('--c', type=int, help='experience replay intensity', required=False, default=1)
     parser.add_argument('--c0', type=float, help='experience replay warm start coefficient', default=1)
     parser.add_argument('--kappa', type=float, help='kappa parameter for qacer and time scaling')
@@ -72,7 +71,6 @@ def prepare_legacy_parser(parser):
                         required=False, default=(256, 256))
     parser.add_argument('--critic_layers', nargs='+', type=int, help='List of Critic\'s neural network hidden layers sizes',
                         required=False, default=(256, 256))
-    parser.add_argument('--num_parallel_envs', type=int, help='Number of environments to be run in a parallel', default=1)
     parser.add_argument('--batches_per_env', type=int, help='Number of batches sampled from one environment buffer in one'
                                                             'backward pass',
                         default=5)
@@ -135,13 +133,15 @@ def prepare_parser():
     parser.add_argument('--dump', help='Dump memory and models on given timesteps', nargs='*', type=int)
     parser.add_argument('--debug', help='Disable tf functions', action='store_true')
     parser.add_argument('--force_periodic_log', help='Force logging every n timesteps instead of on episode finish etc', type=int, default=0)
+    parser.add_argument('--n_step', type=int, help='experience replay frequency', required=False, default=1)
+    parser.add_argument('--num_parallel_envs', type=int, help='Number of environments to be run in a parallel', default=1)
 
     args, unparsed = parser.parse_known_args()
 
     if args.algo in LEGACY_ALGOS:
         prepare_legacy_parser(parser)
     else:
-        sample_env = gym.make(args.env)
+        sample_env = gym.make(args.env_name)
         ALGOS[args.algo].prepare_parser(parser, sample_env, unparsed)
     return parser
 

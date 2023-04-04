@@ -20,7 +20,7 @@ VARIANCE_FUNS = {
 """
 TODO Check if properly handles dones while calculating d2
 """
-class VarianceCritic(AutoModelComponent):
+class VarianceCritic(AutoModelComponent, tf.keras.Model):
     @staticmethod
     def get_args():
         args = Critic.get_args()
