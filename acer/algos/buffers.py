@@ -28,9 +28,13 @@ class ISAdaptiveSizeBuffer(MultiReplayBuffer):
         args['ref_type'] = (str, 'mean')
         args['target_is_dispersion'] = (float, 10)
         args['update_speed'] = (float, 5)
+        args['update_type'] = (str, 'lin', {'choices': ('lin', 'exp')})
         return args
 
-    def __init__(self, *args, is_ref_decay=0.999, initial_limit=100000, min_size_limit=1000, ref_type='mean', target_is_dispersion=10, update_speed=5, **kwargs):
+    def __init__(
+            self, *args, is_ref_decay=0.999, initial_limit=100000,
+            min_size_limit=1000, ref_type='mean', target_is_dispersion=10,
+            update_speed=5, update_type='lin', **kwargs):
         super().__init__(*args, **kwargs, buffer_class=AdaptiveSizeBuffer)
         self.target_is_dispersion = target_is_dispersion
         self.size_limit = tf.Variable(float(initial_limit))
@@ -39,6 +43,7 @@ class ISAdaptiveSizeBuffer(MultiReplayBuffer):
         self.is_ref = tf.Variable(0.)
         self.is_ref_decay = is_ref_decay
         self.update_speed = update_speed
+        self.update_type = update_type
         self.min_size_limit = min_size_limit
 
         self.register_method("log_weights", self.log_weights, {"weights": "actor.density"})
@@ -96,10 +101,9 @@ class ISAdaptiveSizeBuffer(MultiReplayBuffer):
 
     @tf.function
     def update_size_limit(self, is_dispersion):
-        return self.size_limit.assign(
-            tf.clip_by_value(
-                self.size_limit 
-                + tf.reduce_mean(tf.sign(self.target_is_dispersion - is_dispersion)) * self.update_speed,
-                self.min_size_limit, self._max_size
-            )
-        )
+        change = tf.reduce_mean(tf.sign(self.target_is_dispersion - is_dispersion)) * self.update_speed
+        if self.update_type == 'lin':
+            new_limit = self.size_limit + change
+        else:
+            new_limit = tf.exp(tf.math.log(self.size_limit) + change)
+        return self.size_limit.assign(tf.clip_by_value(new_limit, self.min_size_limit, self._max_size))
