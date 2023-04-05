@@ -317,7 +317,8 @@ class MultiReplayBuffer(AutoModelComponent):
     def get_args():
         return {
             'n': (int, 8),
-            'n.adapt': (str, None)
+            'n.adapt': (str, None),
+            'max_size': (int, int(1e6)),
         }
 
     def __init__(self, max_size: int, num_buffers: int, action_spec: BufferFieldSpec, obs_spec: BufferFieldSpec,

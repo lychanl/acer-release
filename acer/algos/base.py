@@ -28,7 +28,8 @@ class BaseModel(AutoModelComponent, tf.keras.Model):
     @staticmethod
     def get_args():
         return {
-            'layers': (int, [256, 256], {'nargs': '*'})
+            'layers': (int, [256, 256], {'nargs': '*'}),
+            'activation': (str, 'tanh')
         }
 
     def __init__(

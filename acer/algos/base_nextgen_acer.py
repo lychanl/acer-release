@@ -221,7 +221,7 @@ class BaseNextGenACERAgent(BaseACERAgent):
         gen, dtypes = self._get_experience_replay_generator(fields=self._call_list_data)
         self._data_loader = tf.data.Dataset.from_generator(gen, dtypes)
 
-    def _init_replay_buffer(self, memory_size: int, policy_spec: BufferFieldSpec = None):
+    def _init_replay_buffer(self, _, policy_spec: BufferFieldSpec = None):
         if type(self._actions_space) == gym.spaces.Discrete:
             self._actions_shape = (1, )
         else:
@@ -232,7 +232,6 @@ class BaseNextGenACERAgent(BaseACERAgent):
         self._memory = buffer_cls(
             action_spec=BufferFieldSpec(shape=self._actions_shape, dtype=self._actor.action_dtype_np),
             obs_spec=BufferFieldSpec(shape=self._observations_space.shape, dtype=self._observations_space.dtype),
-            max_size=memory_size,
             policy_spec=policy_spec,
             num_buffers=self._num_parallel_envs,
             **buffer_base_args,

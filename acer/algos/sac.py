@@ -9,6 +9,7 @@ from algos.base import BaseModel
 from algos.varsigmaactors import VarSigmaActor
 from replay_buffer import MultiReplayBuffer, VecReplayBuffer
 from algos.base_nextgen_acer import BaseNextGenACERAgent
+from algos.buffers import ISAdaptiveSizeBuffer
 
 
 
@@ -242,7 +243,10 @@ class GaussianSoftActor(VarSigmaActor):
 class SAC(BaseNextGenACERAgent):
     ACTORS = {'simple': {False: GaussianSoftActor}}
     CRITICS = {'simple': TwinQDelayedCritic}
-    BUFFERS = {'simple': (MultiReplayBuffer, {'buffer_class': VecReplayBuffer})}
+    BUFFERS = {
+        'simple': (MultiReplayBuffer, {'buffer_class': VecReplayBuffer}),
+        "is_dispersion_limiting": (ISAdaptiveSizeBuffer, {})
+    }
 
     def __init__(self, *args, **kwargs):
         if 'buffer.n' in kwargs:
