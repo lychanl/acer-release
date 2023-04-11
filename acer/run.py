@@ -1,5 +1,4 @@
 import argparse
-from ctypes import ArgumentError
 import signal
 
 import os
