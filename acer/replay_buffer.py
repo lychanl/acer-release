@@ -1,4 +1,3 @@
-from __future__ import annotations
 from algos.common.automodel import AutoModelComponent
 from algos.common.parameters import Parameters, get_adapts_from_kwargs
 import pickle
@@ -7,7 +6,6 @@ import functools
 from typing import Optional, Union, Tuple, List, Dict, Type, Callable
 
 import numpy as np
-from numpy.core.defchararray import array
 
 
 @dataclass
