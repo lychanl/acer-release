@@ -156,7 +156,7 @@ def main():
             ('--b', '--actor.b')
         ]:
             if old in argv:
-                raise ArgumentError(f"Use {new} instead of {old}!")
+                raise ValueError(f"Use {new} instead of {old}!")
 
     cmd_parameters, unknown_args = parser.parse_known_args()
     if len(unknown_args):
