@@ -434,7 +434,7 @@ class MultiReplayBuffer(AutoModelComponent):
         return False
 
     @staticmethod
-    def load(path: str) -> MultiReplayBuffer:
+    def load(path: str) -> 'MultiReplayBuffer':
         """Loads the buffer from the disk
 
         Args:
