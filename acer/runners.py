@@ -85,7 +85,7 @@ class Runner:
                  num_evaluation_runs: int = 5, log_dir: str = 'logs/', max_time_steps: int = -1,
                  record_end: bool = True, experiment_name: str = None, asynchronous: bool = True,
                  log_tensorboard: bool = True, do_checkpoint: bool = True, record_time_steps: int = None,
-                 periodic_log: int = -1, dump=(), log_to_file_values=(), log_to_file_act_values=(), log_to_file_steps=1000,
+                 periodic_log: int = -1, dump=(), log_to_file_values=(), log_to_file_memory_values=(), log_to_file_act_values=(), log_to_file_steps=1000,
                  debug=False):
         """Trains and evaluates the agent.
 
@@ -119,7 +119,7 @@ class Runner:
         self._do_checkpoint = do_checkpoint
         self._env_name = environment_name
 
-        self._log_to_file_values = log_to_file_values
+        self._log_to_file_values = (log_to_file_memory_values or []) + (log_to_file_values or [])
         self._log_to_file_act_values = log_to_file_act_values
         self._log_to_file_steps = log_to_file_steps
 
@@ -386,7 +386,7 @@ class Runner:
 
         means_dict = {}
         if values:
-            means = np.mean(values, 0)
+            means = np.nanmean(values, 0)
             means_dict.update({name: value for name, value in zip(self._log_to_file_values, means)})
         if step_values:
             step_means = np.mean(step_values, 0)

@@ -20,7 +20,7 @@ from algos.actors import (
     TD2RegularizedCategoricalActor, TD2RegularizedGaussianActor,
     TD2RegStdClippedCategoricalActor, TD2RegStdClippedGaussianActor
 )
-from algos.buffers import ISAdaptiveSizeBuffer
+from algos.buffers import ISAdaptiveSizeBuffer, AdaptiveExperienceReplay
 from algos.varsigmaactors import VarSigmaActor
 from algos.evoacers import (
     R15Actor, MedianRuleActor, MedianToValueActor, MedianMinusValueActor, DelayedMedianRuleActor,
@@ -57,6 +57,7 @@ BUFFERS = {
     'simple': (MultiReplayBuffer, {'buffer_class': VecReplayBuffer}),
     'prioritized': (MultiPrioritizedReplayBuffer, {}),
     'is_dispersion_limiting': (ISAdaptiveSizeBuffer, {}),
+    "aer": (AdaptiveExperienceReplay, {})
 }
 
 

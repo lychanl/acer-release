@@ -96,7 +96,7 @@ class BaseNextGenACERAgent(BaseACERAgent):
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, 
                  actor_layers: Optional[Tuple[int]] = None, critic_layers: Optional[Tuple[int]] = None,
                  update_blocks=1, buffer_type='simple', log_values=(), log_memory_values=(), log_act_values=(),
-                 log_to_file_values=(), log_to_file_act_values=(),
+                 log_to_file_values=(), log_to_file_memory_values=(), log_to_file_act_values=(),
                  actor_type='simple', critic_type='simple', nan_guard=False, 
                  *args, **kwargs):
         """BaseActor-Critic with Experience Replay
@@ -162,8 +162,9 @@ class BaseNextGenACERAgent(BaseACERAgent):
 
 
         self._log_values = prepare_log_values(log_values)
-        self._log_memory_values = prepare_log_values(log_memory_values)
         self._log_to_file_values = prepare_log_values(log_to_file_values)
+        self._log_memory_values = prepare_log_values(log_memory_values)
+        self._log_to_file_memory_values = prepare_log_values(log_to_file_memory_values)
         self._log_act_values = prepare_log_values(log_act_values)
         self._log_to_file_act_values = prepare_log_values(log_to_file_act_values)
         self._nan_guard = nan_guard
@@ -174,6 +175,7 @@ class BaseNextGenACERAgent(BaseACERAgent):
         check_log_values(self._log_values, self._call_list_data, self._call_list)
         check_log_values(self._log_to_file_values, self._call_list_data, self._call_list)
         check_log_values(self._log_memory_values, self._memory_call_list_data, self._memory_call_list, "in memory updates")
+        check_log_values(self._log_to_file_memory_values, self._memory_call_list_data, self._memory_call_list, "in memory updates")
 
     def _init_automodel(self, skip=()):
         self.register_method("mask", self._calculate_mask, {"lengths": "lengths", "n": "memory_params.n"})
@@ -261,11 +263,12 @@ class BaseNextGenACERAgent(BaseACERAgent):
         That means at the beginning experience replay intensity increases linearly with number of samples
         collected till c value is reached.
         """
+        logged = [np.nan for _ in self._log_to_file_memory_values]
         if self._time_step > self._learning_starts:
-            if self._memory.should_update_block():
+            if self._memory.should_update_block(self._time_step):
                 for batch in self._buffer_update_loader.take(self._update_blocks):
                     data = {f: d for f, d in zip(self._memory_call_list_data, batch)}
-                    priorities = self._calculate_memory_update(data)
+                    priorities, logged = self._calculate_memory_update(data)
                     self._memory.update_block(priorities.numpy())
                     if self._nan_guard:
                         if not np.isfinite(priorities.numpy()).all():
@@ -295,7 +298,7 @@ class BaseNextGenACERAgent(BaseACERAgent):
                 # self.__learn.append((datetime.now() - self.t).total_seconds())
                 # self.t = datetime.now()
 
-                outs.append(out)
+                outs.append(np.concatenate([logged, out]))
                 if self._nan_guard:
                     if (
                         not np.isfinite(self._actor.act_deterministic(data['obs']).numpy()).all()
@@ -333,7 +336,7 @@ class BaseNextGenACERAgent(BaseACERAgent):
             #         'tf:', sum(v for k, v in mbt.items() if 'tensorflow' in str(k)),
             #         'np:', sum(v for k, v in mbt.items() if 'numpy' in str(k))
             #     )
-            return np.mean(outs, 0)
+            return np.concatenate([logged, np.mean(outs, 0)])
     
     @tf.function(experimental_relax_shapes=True)
     def _calculate_memory_update(self, data):
@@ -343,7 +346,8 @@ class BaseNextGenACERAgent(BaseACERAgent):
             for name, value, gather in self._log_memory_values:
                 tf.summary.scalar(name + " (mem)", gather(data[value]), self._tf_time_step)
 
-        return data['base.memory_priority']
+        logged = [gather(data[value]) for _, value, gather in self._log_to_file_memory_values]
+        return data['base.memory_priority'], logged
 
     @tf.function(experimental_relax_shapes=True)
     def _learn_from_experience_batch(self, data):

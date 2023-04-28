@@ -79,7 +79,7 @@ class PrioritizedReplayBuffer(VecReplayBuffer):
 
         return ids
     
-    def should_update_block(self):
+    def should_update_block(self, time_step):
         return self._current_size >= self._block
 
     def get_next_block_to_update(self, n):
@@ -129,7 +129,29 @@ class PrioritizedReplayBuffer(VecReplayBuffer):
         }, np.repeat(-1, length))
 
 
-class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
+class BaseMultiPrioritizedReplayBuffer(MultiReplayBuffer):
+    def should_update_block(self, time_step):
+        raise NotImplementedError
+    
+    def get_next_block_to_update(self):
+        ret = dict()
+        lens = []
+        for buf in self._buffers:
+            batch, ls = buf.get_next_block_to_update(self.n)
+            lens.append(ls)
+            for k, v in batch.items():
+                ret[k] = ret.get(k, []) + [v]
+
+        for k, v in ret.items():
+            ret[k] = np.concatenate(ret[k])
+
+        return ret, np.concatenate(lens)
+    
+    def update_block(self, priorities):
+        raise NotImplementedError
+
+
+class MultiPrioritizedReplayBuffer(BaseMultiPrioritizedReplayBuffer):
     @staticmethod
     def get_args():
         args = MultiReplayBuffer.get_args()
@@ -222,22 +244,8 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
     def std_reward(self):
         return self._std_reward
 
-    def should_update_block(self):
-        return self.updatable and all(buf.should_update_block() for buf in self._buffers)
-
-    def get_next_block_to_update(self):
-        ret = dict()
-        lens = []
-        for buf in self._buffers:
-            batch, ls = buf.get_next_block_to_update(self.n)
-            lens.append(ls)
-            for k, v in batch.items():
-                ret[k] = ret.get(k, []) + [v]
-
-        for k, v in ret.items():
-            ret[k] = np.concatenate(ret[k])
-
-        return ret, np.concatenate(lens)
+    def should_update_block(self, time_step):
+        return self.updatable and all(buf.should_update_block(time_step) for buf in self._buffers)
 
     def update_block(self, priorities):
         for p, buf in zip(priorities.reshape((self._n_buffers, -1)), self._buffers):

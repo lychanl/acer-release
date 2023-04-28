@@ -130,7 +130,7 @@ class PrioritizedReplayBuffer(VecReplayBuffer):
             "time": np.zeros(length)
         }, np.repeat(-1, length))
 
-    def should_update_block(self):
+    def should_update_block(self, time_step):
         return self._current_size >= self._block
 
     def get_next_block_to_update(self, n):
@@ -223,8 +223,8 @@ class MultiPrioritizedReplayBuffer(MultiReplayBuffer):
     def std_reward(self):
         return self._std_reward
 
-    def should_update_block(self):
-        return self.updatable and all(buf.should_update_block() for buf in self._buffers)
+    def should_update_block(self, time_step):
+        return self.updatable and all(buf.should_update_block(time_step) for buf in self._buffers)
 
     def get_next_block_to_update(self):
         ret = dict()
