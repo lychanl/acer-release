@@ -174,8 +174,9 @@ class BaseNextGenACERAgent(BaseACERAgent):
         self._init_log_act_automodel()
         check_log_values(self._log_values, self._call_list_data, self._call_list)
         check_log_values(self._log_to_file_values, self._call_list_data, self._call_list)
-        check_log_values(self._log_memory_values, self._memory_call_list_data, self._memory_call_list, "in memory updates")
-        check_log_values(self._log_to_file_memory_values, self._memory_call_list_data, self._memory_call_list, "in memory updates")
+        if self._memory_call_list:
+            check_log_values(self._log_memory_values, self._memory_call_list_data, self._memory_call_list, "in memory updates")
+            check_log_values(self._log_to_file_memory_values, self._memory_call_list_data, self._memory_call_list, "in memory updates")
 
     def _init_automodel(self, skip=()):
         self.register_method("mask", self._calculate_mask, {"lengths": "lengths", "n": "memory_params.n"})
