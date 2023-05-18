@@ -59,16 +59,26 @@ class SquashedMultivariateNormalDiag(MultivariateNormalDiag):
     @tf.function
     def prob(self, val):
         gaussian = tf.math.atanh(val)
-        return super().prob(gaussian) / tf.reduce_prod(1 - val ** 2 + self.epsilon, axis=-1)
+        return super().prob(gaussian) / tf.reduce_prod(1 - val ** 2, axis=-1)
 
     @tf.function
     def log_prob(self, val):
         gaussian = tf.math.atanh(val)
-        return super().log_prob(gaussian) - tf.reduce_sum(tf.math.log(1 - val ** 2 + self.epsilon), axis=-1)
+        return self._log_prob(val, gaussian)
+
+    @tf.function
+    def _log_prob(self, val, gaussian):
+        return super().log_prob(gaussian) - tf.reduce_sum(tf.math.log(1 - val ** 2), axis=-1)
+
+    @tf.function
+    def _sample(self):
+        gaussian = self._distr.sample()
+        sample = tf.clip_by_value(tf.tanh(gaussian), -1 + self.epsilon, 1 - self.epsilon)
+        return gaussian, sample
 
     @tf.function
     def sample(self):
-        return tf.tanh(self._distr.sample())
+        return self._sample()[1]
 
     @tf.function
     def mode(self):
@@ -76,13 +86,32 @@ class SquashedMultivariateNormalDiag(MultivariateNormalDiag):
 
     @tf.function
     def sample_with_log_prob(self):
+        gaussian, sample = self._sample()
+        log_prob = self._log_prob(sample, gaussian)
+        return sample, log_prob
+
+
+class SquashedMultivariateNormalDiagV2(SquashedMultivariateNormalDiag):
+    epsilon = 1e-6
+
+    @tf.function
+    def prob(self, val):
+        gaussian = tf.math.atanh(val)
+        return super().prob(gaussian) / tf.reduce_prod(1 - val ** 2 + self.epsilon, axis=-1)
+
+    @tf.function
+    def _log_prob(self, val, gaussian):
+        return super().log_prob(gaussian) - tf.reduce_sum(tf.math.log(1 - val ** 2 + self.epsilon), axis=-1)
+
+    @tf.function
+    def _sample(self):
         gaussian = self._distr.sample()
         sample = tf.tanh(gaussian)
-        log_prob = super().log_prob(gaussian) - tf.reduce_sum(tf.math.log(1 - sample ** 2 + self.epsilon), axis=-1)
-        return sample, log_prob
+        return gaussian, sample
 
 
 DISTRIBUTIONS = {
     'normal': MultivariateNormalDiag,
-    'squashed': SquashedMultivariateNormalDiag
+    'squashed': SquashedMultivariateNormalDiag,
+    'squashed-v2': SquashedMultivariateNormalDiagV2
 }

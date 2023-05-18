@@ -1,11 +1,9 @@
 import argparse
 import signal
 
-import os
 from sys import argv
 import gym
 from numpy import float32
-# os.environ["CUDA_VISIBLE_DEVICES"]="-1"
 
 import tensorflow as tf
 
@@ -15,10 +13,8 @@ if '--debug' in argv:
 from runners import Runner, ALGOS, LEGACY_ALGOS
 from utils import calculate_gamma, getDTChangedEnvName
 
-from distributions import DISTRIBUTIONS
 from algos.legacy.acerac import AUTOCORRELATED_ACTORS
 from algos.legacy.exploracer import DIFF_FUNCTIONS
-from algos.critics import VARIANCE_FUNS
 
 
 def prepare_legacy_parser(parser):
@@ -101,8 +97,16 @@ def prepare_legacy_parser(parser):
 
 def prepare_parser():
     parser = argparse.ArgumentParser(description='BaseActor-Critic with experience replay.')
+    parser.add_argument('--defaults', type=str, default=None)
+    args, _ = parser.parse_known_args()
+
+    defaults = []
+    if args.defaults:
+        with open(args.defaults) as defaults_file:
+            defaults = defaults_file.read().split()
+
     parser.add_argument('--algo', type=str, help='Algorithm to be used', default="fastacer", choices=ALGOS)
-    parser.add_argument('--env_name', type=str, help='OpenAI Gym environment name', default="HalfCheetahBulletEnv-v0")
+    parser.add_argument('--env', type=str, help='OpenAI Gym environment name', default="HalfCheetahBulletEnv-v0")
 
     parser.add_argument('--evaluate_time_steps_interval', type=int, help='Number of time steps between evaluations. '
                                                                         '-1 to turn evaluation off',
@@ -137,14 +141,21 @@ def prepare_parser():
     parser.add_argument('--force_periodic_log', help='Force logging every n timesteps instead of on episode finish etc', type=int, default=0)
     parser.add_argument('--n_step', type=int, help='experience replay frequency', required=False, default=1)
     parser.add_argument('--num_parallel_envs', type=int, help='Number of environments to be run in a parallel', default=1)
+    default_args_partial, _ = parser.parse_known_args(defaults)
+    parser.set_defaults(**default_args_partial.__dict__)
+    partial_args, unparsed = parser.parse_known_args()
 
-    args, unparsed = parser.parse_known_args()
-
-    if args.algo in LEGACY_ALGOS:
+    if partial_args.algo in LEGACY_ALGOS:
         prepare_legacy_parser(parser)
     else:
-        sample_env = gym.make(args.env_name)
-        ALGOS[args.algo].prepare_parser(parser, sample_env, unparsed)
+        sample_env = gym.make(partial_args.env)
+        ALGOS[partial_args.algo].prepare_parser(parser, sample_env, unparsed)
+    try:
+        default_args = parser.parse_args(defaults)
+    except Exception as e:
+        raise Exception("An exception occured while parsing defaults file") from e
+
+    parser.set_defaults(**default_args.__dict__)
     return parser
 
 
@@ -161,13 +172,8 @@ def main():
             if old in argv:
                 raise ValueError(f"Use {new} instead of {old}!")
 
-    cmd_parameters, unknown_args = parser.parse_known_args()
-    if len(unknown_args):
-        print("Not recognized arguments: ", str(vars(unknown_args)))
-        return
-
-    parameters = {k: v for k, v in vars(cmd_parameters).items() if v is not None}
-    parameters.pop('env_name')
+    parameters = {k: v for k, v in args.__dict__.items() if v is not None}
+    parameters.pop('env')
     evaluate_time_steps_interval = parameters.pop('evaluate_time_steps_interval')
     n_step = parameters.pop('n_step')
     num_evaluation_runs = parameters.pop('num_evaluation_runs')
@@ -181,10 +187,10 @@ def main():
     log_dir = parameters.pop('log_dir')
     use_cpu = parameters.pop('use_cpu')
     synchronous = parameters.pop('synchronous')
-    env_name = cmd_parameters.env_name
-    log_to_file_values = cmd_parameters.log_to_file_values
-    log_to_file_memory_values = cmd_parameters.log_to_file_memory_values
-    log_to_file_act_values = cmd_parameters.log_to_file_act_values
+    env_name = args.env
+    log_to_file_values = args.log_to_file_values
+    log_to_file_memory_values = args.log_to_file_memory_values
+    log_to_file_act_values = args.log_to_file_act_values
     log_to_file_steps = parameters.pop('log_to_file_steps')
     debug = parameters.pop('debug')
     dump = args.dump or ()
@@ -224,7 +230,7 @@ def main():
         environment_name=env_name,
         algorithm=algorithm,
         algorithm_parameters=parameters,
-        num_parallel_envs=cmd_parameters.num_parallel_envs,
+        num_parallel_envs=args.num_parallel_envs,
         log_dir=log_dir,
         max_time_steps=max_time_steps,
         num_evaluation_runs=num_evaluation_runs,
