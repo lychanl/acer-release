@@ -430,7 +430,7 @@ class MultiReplayBuffer(AutoModelComponent):
         with open(path, 'wb') as f:
             pickle.dump(self, f)
 
-    def should_update_block(self):
+    def should_update_block(self, time_step):
         return False
 
     @staticmethod
@@ -621,4 +621,5 @@ class VecReplayBuffer(ReplayBuffer):
         batch['time'] = np.asarray(time).astype(np.int32)
 
         return (batch, lens, prev_lens) if self._prev_n is not None else (batch, lens)
+    
 

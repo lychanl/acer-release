@@ -196,6 +196,16 @@ class GaussianSoftActor(VarSigmaActor):
             'act_with_log_prob': 'self.next_actions_with_log_prob'
         })
 
+        self.register_method(
+            'sample_weights', self._calculate_truncated_weights, {
+                'priorities': 'priorities'
+            }
+        )
+
+    @tf.function
+    def _calculate_truncated_weights(self, priorities):
+        return tf.reshape(priorities, (-1, 1))
+
     @tf.function
     def sample_inplace_with_log_prob(self, obs):
         dist = self._dist(obs)
@@ -256,8 +266,14 @@ class SAC(BaseNextGenACERAgent):
 
         super().__init__(*args, **kwargs)
 
-    def _init_automodel(self, skip=()):
+        self.register_method('weighted_td', self._calculate_weighted_td, {
+            "td_q_est": "critic.td_q_est",
+            "qs": "critic.qs",
+            "weights": "actor.sample_weights",
+        })
 
+
+    def _init_automodel(self, skip=()):
         super()._init_automodel(skip=skip)
 
     def _init_critic(self):
@@ -269,3 +285,5 @@ class SAC(BaseNextGenACERAgent):
             tf_time_step=self._tf_time_step, **self._critic_args
         )
 
+    def _calculate_weighted_td(self, td_q_est, qs, weights):
+        return (tf.reduce_mean(qs, axis=-1, keepdims=True) - td_q_est) * weights

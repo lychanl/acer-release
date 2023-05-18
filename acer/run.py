@@ -115,7 +115,10 @@ def prepare_parser():
     parser.add_argument('--log_dir', type=str, help='Logging directory', default='logs/')
     parser.add_argument('--no_checkpoint', help='Disable checkpoint saving', action='store_true')
     parser.add_argument('--no_tensorboard', help='Disable tensorboard logs', action='store_true')
+    parser.add_argument('--log_values', help='Log values during training', type=str, nargs='*')
+    parser.add_argument('--log_memory_values', help='Log values during training during memory update step (if any)', type=str, nargs='*')
     parser.add_argument('--log_to_file_values', help='Log values during training to a file every n steps, averaged over these steps', type=str, nargs='*')
+    parser.add_argument('--log_to_file_memory_values', help='Log values during training to a file every n steps, averaged over these steps', type=str, nargs='*')
     parser.add_argument('--log_to_file_act_values', help='Log values during training to a file every n steps, averaged over these steps', type=str, nargs='*')
     parser.add_argument('--log_to_file_steps', help='Log values during training to a file every n steps, averaged over these steps', type=int, default=1000)
     parser.add_argument('--experiment_name', type=str, help='Name of the current experiment', default='')
@@ -180,6 +183,7 @@ def main():
     synchronous = parameters.pop('synchronous')
     env_name = cmd_parameters.env_name
     log_to_file_values = cmd_parameters.log_to_file_values
+    log_to_file_memory_values = cmd_parameters.log_to_file_memory_values
     log_to_file_act_values = cmd_parameters.log_to_file_act_values
     log_to_file_steps = parameters.pop('log_to_file_steps')
     debug = parameters.pop('debug')
@@ -236,6 +240,7 @@ def main():
         log_to_file_values=log_to_file_values,
         log_to_file_act_values=log_to_file_act_values,
         log_to_file_steps=log_to_file_steps,
+        log_to_file_memory_values=log_to_file_memory_values,
         debug=debug
     )
 

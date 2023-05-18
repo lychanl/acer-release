@@ -275,9 +275,9 @@ def visualise(
     data = {
         k: {
             kk: to_arrays(functools.reduce(
-                lambda x, y: pd.merge(x, y, on=TS_COL, how='outer').sort_values(TS_COL),
-                vv[:limit_n_runs]
-            ), stderr=stderr)
+                lambda x, y: (None, pd.merge(x[1], y[1], on=TS_COL, how='outer', suffixes=(None, f'_{y[0]}')).sort_values(TS_COL)),
+                enumerate(vv[:limit_n_runs])  # enumerate to avoid repeating column names
+            )[1], stderr=stderr)
             for kk, vv in v.items()
         } for k, v in data.items()
     }
