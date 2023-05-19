@@ -64,10 +64,10 @@ class SquashedMultivariateNormalDiag(MultivariateNormalDiag):
     @tf.function
     def log_prob(self, val):
         gaussian = tf.math.atanh(val)
-        return self._log_prob(val, gaussian)
+        return self._calc_log_prob(val, gaussian)
 
     @tf.function
-    def _log_prob(self, val, gaussian):
+    def _calc_log_prob(self, val, gaussian):
         return MultivariateNormalDiag.log_prob(self, gaussian) - tf.reduce_sum(tf.math.log(1 - val ** 2), axis=-1)
 
     @tf.function
@@ -87,7 +87,7 @@ class SquashedMultivariateNormalDiag(MultivariateNormalDiag):
     @tf.function
     def sample_with_log_prob(self):
         gaussian, sample = self._sample()
-        log_prob = self._log_prob(sample, gaussian)
+        log_prob = self._calc_log_prob(sample, gaussian)
         return sample, log_prob
 
 
