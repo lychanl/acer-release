@@ -68,7 +68,7 @@ class SquashedMultivariateNormalDiag(MultivariateNormalDiag):
 
     @tf.function
     def _log_prob(self, val, gaussian):
-        return super().log_prob(gaussian) - tf.reduce_sum(tf.math.log(1 - val ** 2), axis=-1)
+        return MultivariateNormalDiag.log_prob(self, gaussian) - tf.reduce_sum(tf.math.log(1 - val ** 2), axis=-1)
 
     @tf.function
     def _sample(self):
