@@ -170,8 +170,6 @@ class ISAdaptiveSizeBuffer(MultiReplayBuffer):
             new_limit = self.size_limit + change
         else:
             new_limit = tf.exp(tf.math.log(self.size_limit) + change)
-        if np.isnan(new_limit.numpy()):
-            print('NA')
         return self.size_limit.assign(tf.clip_by_value(new_limit, self.min_size_limit, self._max_size))
 
 
