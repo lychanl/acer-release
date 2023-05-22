@@ -89,6 +89,7 @@ class SquashedMultivariateNormalDiag(MultivariateNormalDiag):
     def sample_with_log_prob(self):
         gaussian, sample = self._sample()
         log_prob = self._calc_log_prob(sample, gaussian)
+        tf.cond(tf.reduce_any(~tf.math.is_finite(log_prob)), lambda: tf.print("NA", sample, gaussian, log_prob), lambda: True)
         return sample, log_prob
 
 

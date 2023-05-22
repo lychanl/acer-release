@@ -147,7 +147,9 @@ class ISAdaptiveSizeBuffer(MultiReplayBuffer):
     # is-based adaptation
     @tf.function
     def log_weights(self, weights):
-        return tf.math.log(tf.maximum(weights[:, 0], 1e-8))
+        log_weights = tf.math.log(tf.maximum(weights[:, 0], 1e-8))
+        fmask = tf.math.is_finite(log_weights)  # to prevent nans
+        return tf.where(fmask, log_weights, 0)
 
     @tf.function
     def update_is_ref(self, log_weights):
