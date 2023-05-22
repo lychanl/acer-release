@@ -464,12 +464,13 @@ class GaussianActor(BaseActor):
         args['beta_penalty'] = (float, 0.1)
         args['clip_mean'] = (float, None)
         args['distribution'] = (str, 'normal', {'choices': DISTRIBUTIONS.keys()})
+        args['act_policy_epsilon'] = (float, None)
 
         return args
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 beta_penalty: float, actions_bound: float = None, std: float = None, *args, 
-                 distribution: str = 'normal', clip_mean: float = None, **kwargs):
+                 beta_penalty: float, actions_bound: float = None, std: float = None,
+                 *args, distribution: str = 'normal', clip_mean: float = None, act_policy_epsilon: float = None, **kwargs):
         """BaseActor for continuous actions space. Uses MultiVariate Gaussian Distribution as policy distribution.
 
         TODO: introduce [a, b] intervals as allowed actions bounds
@@ -485,6 +486,7 @@ class GaussianActor(BaseActor):
 
         self._actions_bound = actions_space.high
         self._clip_mean = clip_mean
+        self._act_policy_epsilon = act_policy_epsilon
         self._k = actions_space.shape[0]
 
         self.distribution = DISTRIBUTIONS[distribution]
@@ -563,7 +565,10 @@ class GaussianActor(BaseActor):
     @tf.function
     def act(self, observations: tf.Tensor, **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
         dist = self._dist(observations)
-        return self._act(dist)
+        actions, probs = self._act(dist)
+        if self._act_policy_epsilon is not None:
+            probs = tf.maximum(probs, self._act_policy_epsilon)
+        return actions, probs
 
     @tf.function
     def _act(self, dist: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
@@ -604,7 +609,7 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
             'c': (int, 1),
             'c0': (float, 1),
             'batches_per_env': (int, 256),
-            'learning_starts': (int, 10000)
+            'learning_starts': (int, 10000),
         }
 
     """Base ACER abstract class"""
@@ -616,7 +621,7 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
                  critic_lr: float = 0.001, critic_adam_beta1: float = 0.9, critic_adam_beta2: float = 0.999,
                  critic_adam_epsilon: float = 1e-7, standardize_obs: bool = False, rescale_rewards: int = -1,
                  limit_reward_tanh: float = None, time_step: int = 1, gradient_norm: float = None,
-                 gradient_norm_median_threshold: float = 4, learning_starts: int = 1000, 
+                 gradient_norm_median_threshold: float = 4, learning_starts: int = 1000,
                  additional_buffer_types: List = (), policy_spec: BufferFieldSpec = None,
                  **kwargs):
 

@@ -12,8 +12,10 @@ Wawrzyński, Paweł. "Real-time reinforcement learning by sequential actor–cri
 and experience replay." Neural Networks 22.10 (2009): 1484-1497.
 """
 from typing import Optional, List, Union, Dict, Tuple
+import functools
 import gym
 import tensorflow as tf
+import tensorflow_probability as tfp
 import numpy as np
 
 from algos.base import BaseACERAgent, BaseActor, Critic
@@ -143,6 +145,7 @@ class BaseNextGenACERAgent(BaseACERAgent):
             'std': tf.math.reduce_std,
             'min': tf.reduce_min,
             'max': tf.reduce_max,
+            'median': functools.partial(tfp.stats.percentile, q=50, interpolation='midpoint')
         }
 
         def prepare_log_values(spec):
