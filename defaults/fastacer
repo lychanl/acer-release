@@ -11,3 +11,5 @@
 --actor.layers 256 256 
 --critic.layers 256 256
 --buffer.n 8
+--actor.b 3
+--actor.std 0.4

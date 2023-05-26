@@ -137,11 +137,11 @@ class BaseActor(BaseModel):
     @staticmethod
     def get_args():
         args = BaseModel.get_args()
-        args['b'] = (float, 2)
+        args['b'] = (float, 3)
         return args
 
     def __init__(self, observations_space: gym.Space, actions_space: gym.Space, layers: Optional[Tuple[int]],
-                 beta_penalty: float, tf_time_step: tf.Variable, *args, truncate: bool = True, b: float = 2, additional_outputs=0,
+                 beta_penalty: float, tf_time_step: tf.Variable, *args, truncate: bool = True, b: float = 3, additional_outputs=0,
                  **kwargs):
         """Base abstract Actor class
 
@@ -465,6 +465,7 @@ class GaussianActor(BaseActor):
         args['clip_mean'] = (float, None)
         args['distribution'] = (str, 'normal', {'choices': DISTRIBUTIONS.keys()})
         args['act_policy_epsilon'] = (float, None)
+        args['std'] = (float, None)
 
         return args
 
