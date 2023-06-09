@@ -675,14 +675,14 @@ class BaseACERAgent(AutoModelComponent, AutoModel):
         self._init_data_loader(additional_buffer_types)
 
         self._actor_optimizer = self._actor.init_optimizer(
-            lr=actor_lr,
+            learning_rate=actor_lr,
             beta_1=actor_adam_beta1,
             beta_2=actor_adam_beta2,
             epsilon=actor_adam_epsilon
         )
 
         self._critic_optimizer = self._critic.init_optimizer(
-            lr=critic_lr,
+            learning_rate=critic_lr,
             beta_1=critic_adam_beta1,
             beta_2=critic_adam_beta2,
             epsilon=critic_adam_epsilon

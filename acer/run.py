@@ -120,6 +120,7 @@ def prepare_parser():
     parser.add_argument('--no_checkpoint', help='Disable checkpoint saving', action='store_true')
     parser.add_argument('--no_tensorboard', help='Disable tensorboard logs', action='store_true')
     parser.add_argument('--log_values', help='Log values during training', type=str, nargs='*')
+    parser.add_argument('--log_act_values', help='Log values during action prediction', type=str, nargs='*')
     parser.add_argument('--log_memory_values', help='Log values during training during memory update step (if any)', type=str, nargs='*')
     parser.add_argument('--log_to_file_values', help='Log values during training to a file every n steps, averaged over these steps', type=str, nargs='*')
     parser.add_argument('--log_to_file_memory_values', help='Log values during training to a file every n steps, averaged over these steps', type=str, nargs='*')

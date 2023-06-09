@@ -13,3 +13,5 @@
 --buffer.n 8
 --actor.b 3
 --actor.std 0.4
+--actor.beta_penalty 0.1
+--buffer.max_size 1000000
