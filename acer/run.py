@@ -14,7 +14,6 @@ from runners import Runner, ALGOS, LEGACY_ALGOS
 from utils import calculate_gamma, getDTChangedEnvName
 
 from algos.legacy.acerac import AUTOCORRELATED_ACTORS
-from algos.legacy.exploracer import DIFF_FUNCTIONS
 
 
 def prepare_legacy_parser(parser):
@@ -43,8 +42,6 @@ def prepare_legacy_parser(parser):
     parser.add_argument('--atoms', type=int, help='number of atoms for qacer')
     parser.add_argument('--rho', type=float, help='Rho parameter.')
     parser.add_argument('--std_loss_mult', type=float, help='std loss to actor loss ration')
-    parser.add_argument('--std_diff_fun', type=str, help='Distribution difference function.',
-                        default='KL', choices=list(DIFF_FUNCTIONS))
     parser.add_argument('--std_loss_delay', type=float, help='Delay of std optimization.')
     parser.add_argument('--diff_b', type=float, help='diff ratio truncation coefficient',
                         required=False, default=None)

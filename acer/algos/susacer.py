@@ -23,10 +23,11 @@ class SusActor:
         args = {}
         args['sustain'] = (float, None)
         args['esteps'] = (float, None)
-        args['sustain.adapt'] = (float, None)
-        args['esteps.adapt'] = (float, None)
+        args['sustain.adapt'] = (str, None)
+        args['esteps.adapt'] = (str, None)
         args['single_step_mask'] = (bool, False, {'action': 'store_true'})
         args['modify_std'] = (bool, False, {'action': 'store_true'})
+        args['limit_sustain_length'] = (int, None)
         return args
 
     def __init__(
@@ -272,7 +273,6 @@ class SusACER(FastACER):
     }
 
     def __init__(self, *args, actor_type='sustain', **kwargs) -> None:
-        assert actor_type in ('sustain', 'approx_sustain')
         kwargs['buffer_type'] = 'prioritized'
         kwargs['buffer.updatable'] = False
         kwargs['buffer.probability_as_actor_out'] = True

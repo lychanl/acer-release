@@ -15,49 +15,22 @@ import tensorflow as tf
 
 from algos.base import CategoricalActor, GaussianActor, Critic
 from algos.base_nextgen_acer import BaseNextGenACERAgent
-from algos.actors import (
-    StdClippedCategoricalActor, StdClippedGaussianActor,
-    TD2RegularizedCategoricalActor, TD2RegularizedGaussianActor,
-    TD2RegStdClippedCategoricalActor, TD2RegStdClippedGaussianActor
-)
-from algos.buffers import ISAdaptiveSizeBuffer, AdaptiveExperienceReplay
-from algos.varsigmaactors import VarSigmaActor
-from algos.evoacers import (
-    R15Actor, MedianRuleActor, MedianToValueActor, MedianMinusValueActor, DelayedMedianRuleActor,
-    LeewayDelayedMedianRuleActor, FitBetterActor
-)
-from algos.critics import VarianceCritic, QuantileCritic
 from replay_buffer import VecReplayBuffer, MultiReplayBuffer
 from prioritized_buffer import MultiPrioritizedReplayBuffer
 
 
 ACTORS = {
     'simple': {True: CategoricalActor, False: GaussianActor},
-    'std_clipped': {True: StdClippedCategoricalActor, False: StdClippedGaussianActor},
-    'td2_regularized': {True: TD2RegularizedCategoricalActor, False: TD2RegularizedGaussianActor},
-    'td2_reg_std_clipped': {True: TD2RegStdClippedCategoricalActor, False: TD2RegStdClippedGaussianActor},
-    'varsigma': {False: VarSigmaActor},
-    'r15': {False: R15Actor},
-    'median_rule': {False: MedianRuleActor},
-    'delayed_median_rule': {False: DelayedMedianRuleActor},
-    'leeway_delayed_median_rule': {False: LeewayDelayedMedianRuleActor},
-    'median_to_value': {False: MedianToValueActor},
-    'median_minus_value': {False: MedianMinusValueActor},
-    'fit_better': {False: FitBetterActor}
 }
 
 
 CRITICS = {
     'simple': Critic,
-    'variance': VarianceCritic,
-    'quantile': QuantileCritic
 }
 
 BUFFERS = {
     'simple': (MultiReplayBuffer, {'buffer_class': VecReplayBuffer}),
     'prioritized': (MultiPrioritizedReplayBuffer, {}),
-    'is_dispersion_limiting': (ISAdaptiveSizeBuffer, {}),
-    "aer": (AdaptiveExperienceReplay, {})
 }
 
 

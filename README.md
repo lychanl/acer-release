@@ -1,7 +1,9 @@
-# Actor-Critic with Experience Replay and autocorrelated actions
+# Actor-Critic with Experience Replay
 This repository contains original implementation of **Actor-Critic with
  Experience Replay and autocorrelated actions** algorithm.
- Implementation of original **Actor-Critic with Experience Replay** is also present.
+This repository contains original implementation of **Actor-Critic with
+ Experience Replay and Sustained Actions** algorithm
+ Implementation of the base **Actor-Critic with Experience Replay** is also present.
 ## Installation
 
 ### Prerequisites
@@ -13,7 +15,7 @@ all of the OpenAI Gym environments. Visit
 ### Installation steps
 1. Create new virtual environment:
 ```shell script
-python3.7 -m venv {name}
+python3 -m venv {name}
 ```
 Note: it will create the environment folder in your current directory.
 
@@ -33,28 +35,35 @@ pip install -r requirements.txt
 
 5. Run the agent:
 ```shell script
-python run.py {args...}
+python3 run.py {args...}
 ``` 
 
 ## Example runs
 
 ```shell script
-python acer/run.py --algo acer --env_name Pendulum-v0 --gamma 0.95 \
+python3 acer/run.py --algo acer --env_name Pendulum-v0 --gamma 0.95 \
     --lam 0.9 --b 3 --c0 0.3 --c 10 --actor_lr 0.001 --critic_lr 0.002  \
     --actor_layers 20 --critic_layers 50 --memory_size 1000000 \
     --num_parallel_envs 10  --actor_beta_penalty 0.1 --batches_per_env 10
 ```
 
 ```shell script
-python3.7 acer/run.py --algo acerac --env_name HalfCheetahBulletEnv-v0 \
+python3 acer/run.py --algo acerac --env_name HalfCheetahBulletEnv-v0 \
     --gamma 0.99 --lam 0.9 --b 2 --c0 0.1 --c 10 --actor_lr 0.00003 --critic_lr 0.00006 \
     --actor_layers 256 256  --critic_layers 256 256 --memory_size 1000000 \
     --num_parallel_envs 10 --actor_beta_penalty 0.001 --batches_per_env 10 \
     --num_evaluation_runs 5  --std 0.4  --max_time_steps 3000000 --tau 4 --alpha 0.5
 ```
 
-## Parameters
-TBA
+## SusACER
+
+To run SusACER following the experimental setting use
+```shell script
+python3 acer/run.py --defaults defaults/susacer --actor.esteps ESTEPS \
+    --actor.esteps.adapt "linear(1,TIME)"
+```
+Where `ESTEPS` is the initial expected sustain duration and 
+`TIME` is the time over which expected sustain decreases to 1.
 
 ## TensorBoard
 During the training some statistics like 'loss', mean penalty value and return are being

@@ -14,8 +14,6 @@ from gym import wrappers
 
 from algos.fast_acer import FastACER
 from algos.susacer import SusACER
-from algos.acerax import ACERAX
-from algos.std_clipped_acer import StdClippedACER
 from algos.base import BaseACERAgent
 from algos.sac import SAC
 from logger import CSVLogger, DefaultConsoleLogger, PeriodicConsoleLogger
@@ -25,28 +23,20 @@ from algos.legacy.acer import ACER
 from algos.legacy.acerac import ACERAC
 from algos.legacy.quantile_acer import QACER
 from algos.legacy.qacerac import QACERAC
-from algos.legacy.exploracer import DistExplorACER, StdExplorACER, SingleSigmaExplorACER, MultiSigmaExplorACER
 
 ALGOS = {
     'acer': ACER,
     'fastacer': FastACER,
     'susacer': SusACER,
-    'acerax': ACERAX,
-    'stdclippedacer': StdClippedACER,
     'acerac': ACERAC,
     'qacer': QACER,
     'qacerac': QACERAC,
-    'exploracer': DistExplorACER,
-    'stdexploracer': StdExplorACER,
-    'singlesigma': SingleSigmaExplorACER,
-    'multisigma': MultiSigmaExplorACER,
 
     'sac': SAC,
 }
 
 LEGACY_ALGOS = {
     ACER, ACERAC, QACER, QACERAC,
-    DistExplorACER, StdExplorACER, SingleSigmaExplorACER, MultiSigmaExplorACER
 }
 
 
